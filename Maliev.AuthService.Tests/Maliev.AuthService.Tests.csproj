@@ -3,25 +3,6 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
 	  <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
-    <IsPackable>false</IsPackable>
-    <Configurations>Debug;Release;Production - Debug;Production - Release;Blazor - Debug</Configurations>
-    <GenerateDocumentationFile>false</GenerateDocumentationFile>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-    <DocumentationFile>Maliev.AuthService.Tests.xml</DocumentationFile>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Production - Debug|AnyCPU'">
-    <DocumentationFile>Maliev.AuthService.Tests.xml</DocumentationFile>
-  </PropertyGroup>
-  
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <DocumentationFile>Maliev.AuthService.Tests.xml</DocumentationFile>
-  </PropertyGroup>
-  
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Production - Release|AnyCPU'">
-    <DocumentationFile>Maliev.AuthService.Tests.xml</DocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -37,13 +18,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
   </ItemGroup>
-  
-  <ItemGroup>
-    <None Update="Maliev.AuthService.Tests.xml">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-  
+    
   <ItemGroup>
     <ProjectReference Include="..\Maliev.AuthService.Api\Maliev.AuthService.Api.csproj" />
   </ItemGroup>

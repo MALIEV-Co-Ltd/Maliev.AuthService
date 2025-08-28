@@ -1,6 +1,6 @@
 # Maliev.AuthService
 
-This project is an authentication service built with ASP.NET Core. It provides endpoints for user authentication and for generating JWT tokens.
+This project is an authentication service built with ASP.NET Core. It provides endpoints for user and employee authentication, and for generating JWT tokens. The service uses ASP.NET Core Identity for user management and JWT for token-based authentication.
 
 ## Main Technologies Used
 - ASP.NET Core
@@ -36,6 +36,8 @@ dotnet test
 ## Key Features
 
 - **Authentication:** Provides endpoints for validating user credentials and generating JWT tokens.
-- **User Management:** Uses ASP.NET Core Identity.
+- **User Management:** Uses ASP.NET Core Identity. The `ApplicationUser` and `ApplicationEmployee` models have been removed as they were not actively used.
+- **Configuration:** The application uses `appsettings.json` for general settings and `secrets.yaml` for sensitive data like connection strings and JWT keys.
+- **CORS:** The service is configured to allow requests from `*.maliev.com` subdomains.
 - **API Documentation:** Swagger UI is available at `/auth/swagger` and is secured with JWT.
 - **Health Checks:** Exposes liveness (`/auth/liveness`) and readiness (`/auth/readiness`) probe endpoints for Kubernetes.
