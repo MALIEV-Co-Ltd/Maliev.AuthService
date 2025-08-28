@@ -37,6 +37,10 @@ ScaffoldingReadMe.txt
 *.snupkg
 
 # Others
+.vs/
+*.suo
+*.csproj.user
+*.xml
 ~$*
 *~
 CodeCoverage/
@@ -52,3 +56,8 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Custom
+migration_source
+.gemini/
+gha-creds-*.json
