@@ -2,6 +2,7 @@ using Maliev.AuthService.Api.Data;
 using Maliev.AuthService.Api.Models;
 using Maliev.AuthService.Api.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Maliev.AuthService.Api;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
