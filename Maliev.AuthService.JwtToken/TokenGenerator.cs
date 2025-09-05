@@ -9,7 +9,6 @@ using System.Linq;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
 
 // Assuming RefreshToken model is defined in Maliev.AuthService.Api.Models
 // We will pass it as a parameter to avoid direct dependency

@@ -1,10 +1,7 @@
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Logging;
 using Maliev.AuthService.Api.Data;
 using Maliev.AuthService.Api.Models;
 using Maliev.AuthService.Api.Services;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Maliev.AuthService.Api;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,7 +10,6 @@ using Moq.Protected;
 using Maliev.AuthService.JwtToken;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -21,18 +17,17 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
-using Maliev.AuthService.JwtToken.Models;
 
 namespace Maliev.AuthService.Tests.Auth
 {
-    public class AuthEndpoints_IntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+    public class AuthEndpoints_IntegrationTests : IClassFixture<WebApplicationFactory<Maliev.AuthService.Api.Controllers.AuthenticationController>>, IDisposable
     {
-        private readonly WebApplicationFactory<Program> _factory;
+        private readonly WebApplicationFactory<Maliev.AuthService.Api.Controllers.AuthenticationController> _factory;
         private readonly Mock<HttpMessageHandler> _mockHttpMessageHandler;
         
         private static string _inMemoryDatabaseName;
 
-        public AuthEndpoints_IntegrationTests(WebApplicationFactory<Program> factory)
+        public AuthEndpoints_IntegrationTests(WebApplicationFactory<Maliev.AuthService.Api.Controllers.AuthenticationController> factory)
         {
             _mockHttpMessageHandler = new Mock<HttpMessageHandler>();
 

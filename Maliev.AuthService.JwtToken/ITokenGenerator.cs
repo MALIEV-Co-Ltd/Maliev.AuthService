@@ -1,10 +1,8 @@
-using System;
 // <copyright file="ITokenGenerator.cs" company="PlaceholderCompany">
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
 
 using System.Collections.Generic;
-using System.Threading.Tasks;
 
 namespace Maliev.AuthService.JwtToken
 {

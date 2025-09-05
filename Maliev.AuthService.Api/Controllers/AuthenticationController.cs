@@ -4,7 +4,6 @@ using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.JwtToken;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
