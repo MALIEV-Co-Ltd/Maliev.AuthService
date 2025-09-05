@@ -73,7 +73,7 @@ namespace Maliev.AuthService.JwtToken
                 signingCredentials: credential);
 
             var tokenString = tokenHandler.WriteToken(token);
-            _logger.LogInformation("Generated JWT token: {Token}", tokenString);
+            _logger.LogInformation("Generated JWT token: {Token}", TruncateToken(tokenString));
             return tokenString;
         }
 
@@ -85,7 +85,7 @@ namespace Maliev.AuthService.JwtToken
         /// <returns>A new JWT token and refresh token.</returns>
         public (string accessToken, string refreshToken) RefreshToken(string token, string refreshToken)
         {
-            _logger.LogInformation("Refreshing token. Expired Token: {ExpiredToken}, Refresh Token: {RefreshToken}", token, refreshToken);
+            _logger.LogInformation("Refreshing token. Expired Token: {ExpiredToken}, Refresh Token: {RefreshToken}", TruncateToken(token), TruncateToken(refreshToken));
 
             var tokenHandler = new JwtSecurityTokenHandler();
             var jwtSecurityToken = tokenHandler.ReadToken(token) as JwtSecurityToken;
@@ -111,7 +111,7 @@ namespace Maliev.AuthService.JwtToken
 
         public ClaimsPrincipal GetPrincipalFromExpiredToken(string token)
         {
-            _logger.LogInformation("Getting principal from expired token: {Token}", token);
+            _logger.LogInformation("Getting principal from expired token: {Token}", TruncateToken(token));
 
             var tokenValidationParameters = new TokenValidationParameters
             {
@@ -148,6 +148,15 @@ namespace Maliev.AuthService.JwtToken
             var randomBytes = new byte[64];
             RandomNumberGenerator.Fill(randomBytes);
             return Convert.ToBase64String(randomBytes);
+        }
+
+        private string TruncateToken(string token)
+        {
+            if (string.IsNullOrEmpty(token) || token.Length <= 8)
+            {
+                return token;
+            }
+            return token.Substring(0, 8) + "...";
         }
     }
 }
