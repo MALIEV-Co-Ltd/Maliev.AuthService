@@ -140,8 +140,8 @@ namespace Maliev.AuthService.Api.Controllers
         public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
         {
             _logger.LogInformation("RefreshToken endpoint called.");
-            _logger.LogInformation("Request - AccessToken: {AccessToken}", request.AccessToken);
-            _logger.LogInformation("Request - RefreshToken: {RefreshToken}", request.RefreshToken);
+            _logger.LogInformation("Request - AccessToken: {AccessToken}", request.AccessToken.Length > 8 ? request.AccessToken.Substring(0, 8) + "..." : request.AccessToken);
+            _logger.LogInformation("Request - RefreshToken: {RefreshToken}", request.RefreshToken.Length > 8 ? request.RefreshToken.Substring(0, 8) + "..." : request.RefreshToken);
 
             if (request == null || string.IsNullOrEmpty(request.AccessToken) || string.IsNullOrEmpty(request.RefreshToken))
             {
@@ -152,7 +152,7 @@ namespace Maliev.AuthService.Api.Controllers
             try
             {
                 var savedRefreshToken = await _dbContext.RefreshTokens.SingleOrDefaultAsync(rt => rt.Token == request.RefreshToken);
-                _logger.LogInformation("Saved RefreshToken from DB - Token: {Token}", savedRefreshToken?.Token);
+                _logger.LogInformation("Saved RefreshToken from DB - Token: {Token}", savedRefreshToken?.Token != null && savedRefreshToken.Token.Length > 8 ? savedRefreshToken.Token.Substring(0, 8) + "..." : savedRefreshToken?.Token);
                 _logger.LogInformation("Saved RefreshToken from DB - Username: {Username}", savedRefreshToken?.Username);
                 _logger.LogInformation("Saved RefreshToken from DB - IsActive: {IsActive}", savedRefreshToken?.IsActive);
 
