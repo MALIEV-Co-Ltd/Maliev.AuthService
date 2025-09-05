@@ -142,6 +142,9 @@ namespace Maliev.AuthService.Api.Controllers
             _logger.LogInformation("Request - AccessToken: {AccessToken}", request.AccessToken.Length > 8 ? request.AccessToken.Substring(0, 8) + "..." : request.AccessToken);
             _logger.LogInformation("Request - RefreshToken: {RefreshToken}", request.RefreshToken.Length > 8 ? request.RefreshToken.Substring(0, 8) + "..." : request.RefreshToken);
 
+            // Clean up expired and revoked refresh tokens
+            await _dbContext.CleanExpiredAndRevokedTokensAsync();
+
             if (request == null || string.IsNullOrEmpty(request.AccessToken) || string.IsNullOrEmpty(request.RefreshToken))
             {
                 _logger.LogWarning("Invalid client request: AccessToken or RefreshToken is null or empty.");

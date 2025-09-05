@@ -13,6 +13,10 @@ using Asp.Versioning.ApiExplorer;
 using Microsoft.Extensions.Options;
 using Swashbuckle.AspNetCore.SwaggerGen;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Maliev.AuthService.Api.HealthChecks;
+using HealthChecks.UI.Client;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -120,6 +124,10 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownProxies.Clear();
 });
 
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<RefreshTokenDbContext>("RefreshTokenDbContext", tags: new[] { "readiness" })
+    .AddCheck<ExternalServiceHealthCheck>("External Services Check", tags: new[] { "readiness" });
+
 var app = builder.Build();
 
 app.UseForwardedHeaders();
@@ -153,11 +161,18 @@ app.UseAuthentication();
 
 app.UseAuthorization();
 
-// Liveness probe endpoint
-app.MapGet("/auth/liveness", () => "Healthy");
 
-// Readiness probe endpoint
-app.MapGet("/auth/readiness", () => "Healthy");
+
+app.MapHealthChecks("/auth/liveness", new HealthCheckOptions
+{
+    Predicate = healthCheck => healthCheck.Tags.Contains("liveness")
+});
+
+app.MapHealthChecks("/auth/readiness", new HealthCheckOptions
+{
+    Predicate = healthCheck => healthCheck.Tags.Contains("readiness"),
+    ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
+});
 
 app.MapControllers();
 
