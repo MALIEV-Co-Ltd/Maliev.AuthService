@@ -1,5 +1,6 @@
-using Microsoft.Extensions.Configuration;
+using Maliev.AuthService.JwtToken.Models;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System;
 using System.Collections.Generic;
@@ -21,15 +22,15 @@ namespace Maliev.AuthService.JwtToken
     /// </summary>
     public class TokenGenerator : ITokenGenerator
     {
-        private readonly IConfiguration _configuration;
+        private readonly JwtOptions _jwtOptions;
         private readonly ILogger<TokenGenerator> _logger;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="TokenGenerator"/> class.
         /// </summary>
-        public TokenGenerator(IConfiguration configuration, ILogger<TokenGenerator> logger)
+        public TokenGenerator(IOptions<JwtOptions> jwtOptions, ILogger<TokenGenerator> logger)
         {
-            _configuration = configuration;
+            _jwtOptions = jwtOptions.Value;
             _logger = logger;
         }
 
@@ -59,14 +60,14 @@ namespace Maliev.AuthService.JwtToken
             }
 
             JwtSecurityTokenHandler tokenHandler = new JwtSecurityTokenHandler();
-            SymmetricSecurityKey key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["JwtSecurityKey"]));
+            SymmetricSecurityKey key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtOptions.SecurityKey));
             SigningCredentials credential = new SigningCredentials(key, SecurityAlgorithms.HmacSha256Signature);
 
             var expires = expiresInMinutes.HasValue ? DateTime.UtcNow.AddMinutes(expiresInMinutes.Value) : DateTime.UtcNow.AddMinutes(30);
 
             JwtSecurityToken token = new JwtSecurityToken(
-                issuer: _configuration["Jwt:Issuer"],
-                audience: _configuration["Jwt:Audience"],
+                issuer: _jwtOptions.Issuer,
+                audience: _jwtOptions.Audience,
                 expires: expires,
                 claims: claimData,
                 signingCredentials: credential);
@@ -86,9 +87,11 @@ namespace Maliev.AuthService.JwtToken
         {
             _logger.LogInformation("Refreshing token. Expired Token: {ExpiredToken}, Refresh Token: {RefreshToken}", token, refreshToken);
 
-            var principal = GetPrincipalFromExpiredToken(token);
-            var username = principal.Identity.Name;
-            var roles = principal.Claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).ToList();
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var jwtSecurityToken = tokenHandler.ReadToken(token) as JwtSecurityToken;
+            var username = jwtSecurityToken.Claims.First(claim => claim.Type == ClaimTypes.Name).Value;
+            var roles = jwtSecurityToken.Claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).ToList();
+
 
             _logger.LogInformation("Extracted username: {Username}, roles: {Roles} from expired token.", username, string.Join(", ", roles));
 
@@ -106,22 +109,34 @@ namespace Maliev.AuthService.JwtToken
             return (newAccessToken, newRefreshToken);
         }
 
-        private ClaimsPrincipal GetPrincipalFromExpiredToken(string token)
+        public ClaimsPrincipal GetPrincipalFromExpiredToken(string token)
         {
             _logger.LogInformation("Getting principal from expired token: {Token}", token);
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var jwtSecurityToken = tokenHandler.ReadToken(token) as JwtSecurityToken;
 
-            if (jwtSecurityToken == null)
+            var tokenValidationParameters = new TokenValidationParameters
             {
-                _logger.LogWarning("Failed to read JWT token. Token is null after ReadToken.");
+                ValidateAudience = true,
+                ValidAudience = _jwtOptions.Audience,
+                ValidateIssuer = true,
+                ValidIssuer = _jwtOptions.Issuer,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtOptions.SecurityKey)),
+                ValidateLifetime = false, // We don't care if the token is expired
+                ClockSkew = TimeSpan.FromMinutes(5)
+            };
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out var securityToken);
+            var jwtSecurityToken = securityToken as JwtSecurityToken;
+
+            if (jwtSecurityToken == null || !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256Signature, StringComparison.InvariantCultureIgnoreCase))
+            {
+                _logger.LogWarning("Invalid token. Token is null or algorithm is not HmacSha256.");
                 throw new SecurityTokenException("Invalid token");
             }
-            _logger.LogInformation("Successfully read JWT token.");
+            _logger.LogInformation("Successfully validated JWT token.");
 
-            var claims = jwtSecurityToken.Claims;
-            var identity = new ClaimsIdentity(claims, "jwt");
-            return new ClaimsPrincipal(identity);
+            return principal;
         }
 
         /// <summary>
