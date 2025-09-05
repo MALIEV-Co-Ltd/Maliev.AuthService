@@ -11,11 +11,13 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Asp.Versioning;
 
 namespace Maliev.AuthService.Api.Controllers
 {
     [ApiController]
-    [Route("auth")]
+    [Route("auth/v{version:apiVersion}")]
+    [ApiVersion("1.0")]
     public class AuthenticationController : ControllerBase
     {
         private readonly ITokenGenerator _tokenGenerator;
@@ -166,12 +168,12 @@ namespace Maliev.AuthService.Api.Controllers
                     return Unauthorized("Invalid refresh token");
                 }
 
-                var usernameFromToken = GetUsernameFromToken(request.AccessToken);
-                _logger.LogInformation("Username from Token/Request: {UsernameFromToken}", usernameFromToken);
+                var principal = _tokenGenerator.GetPrincipalFromExpiredToken(request.AccessToken);
+                var username = principal.Identity?.Name;
 
-                if (savedRefreshToken.Username != usernameFromToken)
+                if (savedRefreshToken.Username != username)
                 {
-                    _logger.LogWarning("Invalid refresh token: Username mismatch. Saved: {SavedUsername}, From Token/Request: {UsernameFromToken}", savedRefreshToken.Username, usernameFromToken);
+                    _logger.LogWarning("Invalid refresh token: Username mismatch. Saved: {SavedUsername}, From Token/Request: {UsernameFromToken}", savedRefreshToken.Username, username);
                     return Unauthorized("Invalid refresh token");
                 }
 
@@ -191,7 +193,7 @@ namespace Maliev.AuthService.Api.Controllers
                     Token = newRefreshTokenString,
                     Expires = DateTime.UtcNow.AddDays(7),
                     Created = DateTime.UtcNow,
-                    Username = usernameFromToken,
+                    Username = username,
                     CreatedByIp = HttpContext.Connection.RemoteIpAddress?.ToString(),
                     ReplacedByToken = request.RefreshToken
                 };
@@ -246,7 +248,8 @@ namespace Maliev.AuthService.Api.Controllers
             return (false, string.Empty, new List<string>());
         }
 
-        private string? GetUsernameFromToken(string token)
+        
+    private string? GetUsernameFromToken(string token)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
             var jwtToken = tokenHandler.ReadToken(token) as JwtSecurityToken;

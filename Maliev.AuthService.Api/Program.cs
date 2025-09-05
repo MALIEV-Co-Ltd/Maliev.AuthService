@@ -1,3 +1,4 @@
+using Maliev.AuthService.JwtToken.Models;
 using Maliev.AuthService.Api.Models;
 using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.JwtToken;
@@ -8,6 +9,9 @@ using Maliev.AuthService.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Microsoft.AspNetCore.Authorization;
+using Asp.Versioning;
+using Asp.Versioning.ApiExplorer;
+using Microsoft.Extensions.Options;
 
 namespace Maliev.AuthService.Api
 {
@@ -30,9 +34,26 @@ namespace Maliev.AuthService.Api
             // Add services to the container.
             builder.Services.AddControllers();
             builder.Services.AddEndpointsApiExplorer();
+            builder.Services.AddApiVersioning(options =>
+            {
+                options.DefaultApiVersion = new ApiVersion(1, 0);
+                options.AssumeDefaultVersionWhenUnspecified = true;
+                options.ReportApiVersions = true;
+                options.ApiVersionReader = new UrlSegmentApiVersionReader();
+            }).AddApiExplorer(options =>
+            {
+                options.GroupNameFormat = "'v'VVV";
+                options.SubstituteApiVersionInUrl = true;
+            });
+
             builder.Services.AddSwaggerGen(option =>
             {
-                option.SwaggerDoc("v1", new OpenApiInfo { Title = "AuthService API", Version = "v1" });
+                var provider = builder.Services.BuildServiceProvider().GetRequiredService<IApiVersionDescriptionProvider>();
+                foreach (var description in provider.ApiVersionDescriptions)
+                {
+                    option.SwaggerDoc(description.GroupName, new OpenApiInfo { Title = "AuthService API", Version = description.ApiVersion.ToString() });
+                }
+
                 option.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
                 {
                     In = ParameterLocation.Header,
@@ -64,9 +85,15 @@ namespace Maliev.AuthService.Api
             // Configure strongly-typed configuration options
             builder.Services.Configure<CustomerServiceOptions>(builder.Configuration.GetSection("CustomerService"));
             builder.Services.Configure<EmployeeServiceOptions>(builder.Configuration.GetSection("EmployeeService"));
+            builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 
             // Configure RefreshToken DbContext
-            if (Environment.GetEnvironmentVariable("TESTING") != "true")
+            if (builder.Environment.IsEnvironment("Testing"))
+            {
+                builder.Services.AddDbContext<RefreshTokenDbContext>(options =>
+                    options.UseInMemoryDatabase("TestDb"));
+            }
+            else
             {
                 builder.Services.AddDbContext<RefreshTokenDbContext>(options =>
                 {
@@ -86,9 +113,9 @@ namespace Maliev.AuthService.Api
                     policy =>
                     {
                         policy.WithOrigins(
-                            "http://*.maliev.com",
-                            "https://*.maliev.com")
-                        .SetIsOriginAllowedToAllowWildcardSubdomains()
+                            "https://api.maliev.com",
+                            "http://test.maliev.com",
+                            "https://test.maliev.com")
                         .AllowAnyHeader()
                         .AllowAnyMethod();
                     });
@@ -101,15 +128,17 @@ namespace Maliev.AuthService.Api
                 options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
             }).AddJwtBearer(options =>
             {
+                var serviceProvider = builder.Services.BuildServiceProvider();
+                var jwtOptions = serviceProvider.GetRequiredService<IOptions<JwtOptions>>().Value;
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,
                     ValidateAudience = true,
                     ValidateLifetime = true,
                     ValidateIssuerSigningKey = true,
-                    ValidIssuer = builder.Configuration["Jwt:Issuer"],
-                    ValidAudience = builder.Configuration["Jwt:Audience"],
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["JwtSecurityKey"]!))
+                    ValidIssuer = jwtOptions.Issuer,
+                    ValidAudience = jwtOptions.Audience,
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SecurityKey))
                 };
             });
 
@@ -121,7 +150,11 @@ namespace Maliev.AuthService.Api
             app.UseSwagger();
             app.UseSwaggerUI(c =>
             {
-                c.SwaggerEndpoint("/swagger/v1/swagger.json", "AuthService API V1");
+                var provider = app.Services.GetRequiredService<IApiVersionDescriptionProvider>();
+                foreach (var description in provider.ApiVersionDescriptions)
+                {
+                    c.SwaggerEndpoint($"/swagger/{description.GroupName}/swagger.json", description.GroupName.ToUpperInvariant());
+                }
                 c.RoutePrefix = "auth/swagger";
             });
 

@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Logging;
 using Maliev.AuthService.Api.Data;
 using Maliev.AuthService.Api.Models;
 using Maliev.AuthService.Api.Services;
@@ -19,6 +21,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
+using Maliev.AuthService.JwtToken.Models;
 
 namespace Maliev.AuthService.Tests.Auth
 {
@@ -51,7 +54,18 @@ namespace Maliev.AuthService.Tests.Auth
 
             _factory = factory.WithWebHostBuilder(builder =>
             {
-                Environment.SetEnvironmentVariable("TESTING", "true");
+                builder.ConfigureAppConfiguration((context, config) =>
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string>
+                    {
+                        {"Jwt:SecurityKey", "thisisalongtestkeyforjwtsecurity"},
+                        {"Jwt:Issuer", "test.maliev.com"},
+                        {"Jwt:Audience", "test.maliev.com"},
+                        {"CustomerService:ValidationEndpoint", "http://api.maliev.com/customers/validate"},
+                        {"EmployeeService:ValidationEndpoint", "http://api.maliev.com/employees/validate"}
+                    });
+                });
+
                 builder.ConfigureServices(services =>
                 {
                     // Configure the HttpClient for ExternalAuthServiceHttpClient to use the mocked HttpMessageHandler
@@ -60,30 +74,9 @@ namespace Maliev.AuthService.Tests.Auth
                         var httpClient = new HttpClient(_mockHttpMessageHandler.Object);
                         return new ExternalAuthServiceHttpClient(httpClient);
                     });
-
-                    var configuration = new ConfigurationBuilder()
-                        .AddInMemoryCollection(new Dictionary<string, string>
-                        {
-                            {"JwtSecurityKey", "thisisalongtestkeyforjwtsecurity"},
-                            {"Jwt:Issuer", "test.maliev.com"},
-                            {"Jwt:Audience", "test.maliev.com"},
-                            {"CustomerService:ValidationEndpoint", "http://api.maliev.com/customers/validate"},
-                            {"EmployeeService:ValidationEndpoint", "http://api.maliev.com/employees/validate"}
-                        })
-                        .Build();
-                    services.AddSingleton<IConfiguration>(configuration);
-
-                    // Explicitly configure options after IConfiguration is set
-                    services.Configure<CustomerServiceOptions>(configuration.GetSection("CustomerService"));
-                    services.Configure<EmployeeServiceOptions>(configuration.GetSection("EmployeeService"));    
-
-                    // Configure RefreshToken DbContext for in-memory database
-                    services.AddDbContext<RefreshTokenDbContext>(options =>
-                    {
-                        options.UseInMemoryDatabase(_inMemoryDatabaseName);
-                    });
                 });
             });
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Testing");
         }
 
         public void Dispose()
@@ -104,7 +97,7 @@ namespace Maliev.AuthService.Tests.Auth
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
 
             // Act
-            var response = await client.PostAsync("/auth/token", null);
+            var response = await client.PostAsync("/auth/v1/token", null);
 
             // Assert
             response.EnsureSuccessStatusCode(); // Status Code 200-299
@@ -124,7 +117,7 @@ namespace Maliev.AuthService.Tests.Auth
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
 
             // Act
-            var response = await client.PostAsync("/auth/token", null);
+            var response = await client.PostAsync("/auth/v1/token", null);
 
             // Assert
             response.EnsureSuccessStatusCode(); // Status Code 200-299
@@ -153,7 +146,7 @@ namespace Maliev.AuthService.Tests.Auth
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
 
             // Act
-            var response = await client.PostAsync("/auth/token", null);
+            var response = await client.PostAsync("/auth/v1/token", null);
 
             // Assert
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -166,7 +159,7 @@ namespace Maliev.AuthService.Tests.Auth
             var client = _factory.CreateClient();
 
             // Act
-            var response = await client.PostAsync("/auth/token", null);
+            var response = await client.PostAsync("/auth/v1/token", null);
 
             // Assert
             if (response.StatusCode != HttpStatusCode.BadRequest)
@@ -187,7 +180,7 @@ namespace Maliev.AuthService.Tests.Auth
 
             // Generate an initial token with a short expiry to ensure it's expired for the refresh test
             ITokenGenerator tokenGenerator = _factory.Services.GetRequiredService<ITokenGenerator>();
-            var initialAccessToken = tokenGenerator.GenerateJwtToken("TestUser", new List<string> { "Customer" }, 1); // 1 minute expiry
+            var initialAccessToken = tokenGenerator.GenerateJwtToken("TestUser", new List<string> { "Customer" }, -1); // expired token
             var initialRefreshTokenString = tokenGenerator.GenerateRefreshTokenString();
 
             var initialTokenResponse = new TokenResponse
@@ -203,10 +196,10 @@ namespace Maliev.AuthService.Tests.Auth
                 dbContext.RefreshTokens.Add(new RefreshToken
                 {
                     Token = initialTokenResponse.RefreshToken,
-                                                            Expires = DateTime.UtcNow.AddDays(7), // Refresh token valid for 7 days
+                    Expires = DateTime.UtcNow.AddDays(7), // Refresh token valid for 7 days
                     Created = DateTime.UtcNow,
                     Username = "TestUser",
-                    CreatedByIp = "127.0.0.1"
+                    CreatedByIp = "127.0.0.1",
                 });
                 await dbContext.SaveChangesAsync();
 
@@ -223,8 +216,7 @@ namespace Maliev.AuthService.Tests.Auth
             var jsonContent = new StringContent(JsonSerializer.Serialize(refreshRequest), Encoding.UTF8, "application/json");
 
             // Act
-            await Task.Delay(TimeSpan.FromSeconds(2)); // Ensure token expires
-            var response = await client.PostAsync("/auth/token/refresh", jsonContent);
+            var response = await client.PostAsync("/auth/v1/token/refresh", jsonContent);
 
             // Assert
             response.EnsureSuccessStatusCode();
@@ -248,7 +240,63 @@ namespace Maliev.AuthService.Tests.Auth
             var jsonContent = new StringContent(JsonSerializer.Serialize(refreshRequest), Encoding.UTF8, "application/json");
 
             // Act
-            var response = await client.PostAsync("/auth/token/refresh", jsonContent);
+            var response = await client.PostAsync("/auth/v1/token/refresh", jsonContent);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+    [Fact]
+        public async Task PostRefreshToken_WithInvalidSignature_ReturnsUnauthorized()
+        {
+            // Arrange
+            var client = _factory.CreateClient();
+            var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes("TestUser:TestPassword"));
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
+
+            // Generate an initial token with a short expiry to ensure it's expired for the refresh test
+            ITokenGenerator tokenGenerator = _factory.Services.GetRequiredService<ITokenGenerator>();
+            var initialAccessToken = tokenGenerator.GenerateJwtToken("TestUser", new List<string> { "Customer" }, 1);
+            var initialRefreshTokenString = tokenGenerator.GenerateRefreshTokenString();
+
+            var initialTokenResponse = new TokenResponse
+            {
+                AccessToken = initialAccessToken,
+                RefreshToken = initialRefreshTokenString
+            };
+
+            // Save the refresh token to the in-memory database
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<RefreshTokenDbContext>();
+                dbContext.RefreshTokens.Add(new RefreshToken
+                {
+                    Token = initialTokenResponse.RefreshToken,
+                    Expires = DateTime.UtcNow.AddDays(7),
+                    Created = DateTime.UtcNow,
+                    Username = "TestUser",
+                    CreatedByIp = "127.0.0.1"
+                });
+                await dbContext.SaveChangesAsync();
+
+                // Verify the refresh token is saved
+                var savedToken = await dbContext.RefreshTokens.SingleOrDefaultAsync(rt => rt.Token == initialTokenResponse.RefreshToken);
+                Assert.NotNull(savedToken);
+            }
+
+            // Tamper with the token signature
+            var tokenParts = initialTokenResponse.AccessToken.Split('.');
+            tokenParts[2] = "invalid_signature";
+            var tamperedToken = string.Join(".", tokenParts);
+
+            var refreshRequest = new RefreshTokenRequest
+            {
+                AccessToken = tamperedToken,
+                RefreshToken = initialTokenResponse.RefreshToken
+            };
+            var jsonContent = new StringContent(JsonSerializer.Serialize(refreshRequest), Encoding.UTF8, "application/json");
+
+            // Act
+            var response = await client.PostAsync("/auth/v1/token/refresh", jsonContent);
 
             // Assert
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);

@@ -1,3 +1,4 @@
+using System;
 // <copyright file="ITokenGenerator.cs" company="PlaceholderCompany">
 // Copyright (c) PlaceholderCompany. All rights reserved.
 // </copyright>
@@ -36,5 +37,12 @@ namespace Maliev.AuthService.JwtToken
         /// </summary>
         /// <returns>A new refresh token string.</returns>
         string GenerateRefreshTokenString();
+
+        /// <summary>
+        /// Gets the principal from an expired token.
+        /// </summary>
+        /// <param name="token">The expired token.</param>
+        /// <returns>The claims principal.</returns>
+        System.Security.Claims.ClaimsPrincipal GetPrincipalFromExpiredToken(string token);
     }
 }
