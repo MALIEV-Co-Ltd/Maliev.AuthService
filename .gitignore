@@ -62,3 +62,4 @@ nunit-*.xml
 migration_source
 .gemini/
 gha-creds-*.json
+secrets.yaml
