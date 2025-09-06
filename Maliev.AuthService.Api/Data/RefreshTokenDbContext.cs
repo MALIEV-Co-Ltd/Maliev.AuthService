@@ -13,12 +13,21 @@ namespace Maliev.AuthService.Api.Data
 
         public async Task CleanExpiredAndRevokedTokensAsync()
         {
+#if DEBUG
             var tokensToClean = await RefreshTokens
                 .Where(rt => rt.Expires < DateTime.UtcNow && rt.Revoked != null)
                 .ToListAsync();
 
-            RefreshTokens.RemoveRange(tokensToClean);
-            await SaveChangesAsync();
+            if (tokensToClean.Any())
+            {
+                RefreshTokens.RemoveRange(tokensToClean);
+                await SaveChangesAsync();
+            }
+#else
+            await RefreshTokens
+                .Where(rt => rt.Expires < DateTime.UtcNow && rt.Revoked != null)
+                .ExecuteDeleteAsync();
+#endif
         }
     }
 }

@@ -11,6 +11,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Asp.Versioning;
+using System.Net.Http.Headers;
 
 namespace Maliev.AuthService.Api.Controllers
 {
@@ -47,56 +48,43 @@ namespace Maliev.AuthService.Api.Controllers
         {
             _logger.LogInformation("Token endpoint called.");
             var header = Request.Headers["Authorization"].ToString();
-                        _logger.LogDebug("Authorization Header: {Header}", header);
+            _logger.LogDebug("Authorization Header: {Header}", header);
 
-            if (header != null && header.StartsWith("Basic "))
+            if (System.Net.Http.Headers.AuthenticationHeaderValue.TryParse(header, out var authHeader) && authHeader.Scheme.Equals("Basic", StringComparison.OrdinalIgnoreCase))
             {
-                var rawCredentialBase64 = header.Substring("Basic ".Length).Trim();
-                var rawCredentialString = Encoding.UTF8.GetString(Convert.FromBase64String(rawCredentialBase64));
-                var credential = rawCredentialString.Split(":", 2);
-
-                var username = credential[0];
-                var password = credential[1];
+                var parameter = Encoding.UTF8.GetString(Convert.FromBase64String(authHeader.Parameter)).Split(':', 2);
+                var username = parameter[0];
+                var password = parameter[1];
                 _logger.LogDebug("Extracted Username: {Username}", username);
                 // Do not log password for security reasons
 
-                var credentials = new { username = username, password = password };
+                var credentials = new { username, password };
+                var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
 
-                ValidationResult customerValidationResult = new ValidationResult { Exists = false };
-                ValidationResult employeeValidationResult = new ValidationResult { Exists = false };
+                ValidationResult validationResult = new ValidationResult { Exists = false };
 
                 // Try validating with CustomerService
                 if (!string.IsNullOrEmpty(_customerServiceOptions.ValidationEndpoint))
                 {
                     _logger.LogDebug("Attempting to validate with CustomerService at {Endpoint}", _customerServiceOptions.ValidationEndpoint);
-                    customerValidationResult = await ValidateCredentials(
-                        _customerServiceOptions.ValidationEndpoint,
-                        credentials,
-                        "Customer");
-                    _logger.LogDebug("CustomerService validation result: Exists={Exists}, Type={Type}, Error={Error}", customerValidationResult.Exists, customerValidationResult.UserType, customerValidationResult.Error);
+                    validationResult = await ValidateCredentials(_customerServiceOptions.ValidationEndpoint, jsonContent, "Customer");
+                    _logger.LogDebug("CustomerService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
                 }
 
                 // If not found in CustomerService, try EmployeeService
-                if (!customerValidationResult.Exists && !string.IsNullOrEmpty(_employeeServiceOptions.ValidationEndpoint))
+                if (!validationResult.Exists && !string.IsNullOrEmpty(_employeeServiceOptions.ValidationEndpoint))
                 {
                     _logger.LogDebug("Attempting to validate with EmployeeService at {Endpoint}", _employeeServiceOptions.ValidationEndpoint);
-                    employeeValidationResult = await ValidateCredentials(
-                        _employeeServiceOptions.ValidationEndpoint,
-                        credentials,
-                        "Employee");
-                    _logger.LogDebug("EmployeeService validation result: Exists={Exists}, Type={Type}, Error={Error}", employeeValidationResult.Exists, employeeValidationResult.UserType, employeeValidationResult.Error);
+                    validationResult = await ValidateCredentials(_employeeServiceOptions.ValidationEndpoint, jsonContent, "Employee");
+                    _logger.LogDebug("EmployeeService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
                 }
 
-                ValidationResult finalValidationResult = customerValidationResult.Exists ? customerValidationResult : employeeValidationResult;
-
-                if (finalValidationResult.Exists)
+                if (validationResult.Exists)
                 {
                     _logger.LogInformation("User exists. Generating tokens.");
-                    // Generate access token and refresh token string
-                    var accessToken = _tokenGenerator.GenerateJwtToken(username, finalValidationResult.Roles);
+                    var accessToken = _tokenGenerator.GenerateJwtToken(username, validationResult.Roles);
                     var refreshTokenString = _tokenGenerator.GenerateRefreshTokenString();
 
-                    // Save refresh token to database
                     var refreshToken = new RefreshToken
                     {
                         Token = refreshTokenString,
@@ -113,8 +101,8 @@ namespace Maliev.AuthService.Api.Controllers
                 }
                 else
                 {
-                    _logger.LogWarning("User does not exist or validation failed. Returning Unauthorized. Error: {Error}", finalValidationResult.Error);
-                    return Unauthorized(finalValidationResult.Error ?? "User does not exist or validation failed.");
+                    _logger.LogWarning("User does not exist or validation failed. Returning Unauthorized. Error: {Error}", validationResult.Error);
+                    return Unauthorized(validationResult.Error ?? "User does not exist or validation failed.");
                 }
             }
             else
@@ -209,10 +197,9 @@ namespace Maliev.AuthService.Api.Controllers
         [ApiExplorerSettings(IgnoreApi = true)]
         public async Task<ValidationResult> ValidateCredentials(
             string validationEndpoint,
-            object credentials,
+            StringContent jsonContent,
             string userType)
         {
-            var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, validationEndpoint) { Content = jsonContent };

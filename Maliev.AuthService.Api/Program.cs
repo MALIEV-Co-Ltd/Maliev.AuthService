@@ -52,7 +52,14 @@ builder.Services.AddTransient<IConfigureOptions<SwaggerGenOptions>, Maliev.AuthS
 builder.Services.AddSwaggerGen();
 
 // Register Typed HttpClient for ExternalAuthServiceHttpClient
-builder.Services.AddHttpClient<ExternalAuthServiceHttpClient>();
+builder.Services.AddHttpClient<ExternalAuthServiceHttpClient>((serviceProvider, client) =>
+{
+    var customerServiceOptions = serviceProvider.GetRequiredService<IOptions<CustomerServiceOptions>>().Value;
+    if (!string.IsNullOrEmpty(customerServiceOptions.ValidationEndpoint))
+    {
+        client.BaseAddress = new Uri(customerServiceOptions.ValidationEndpoint);
+    }
+});
 
 // Configure strongly-typed configuration options
 builder.Services.Configure<CustomerServiceOptions>(builder.Configuration.GetSection("CustomerService"));

@@ -259,7 +259,7 @@ namespace Maliev.AuthService.Tests.Auth
             // Assert
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
-    [Fact]
+            [Fact]
         public async Task PostRefreshToken_WithInvalidSignature_ReturnsUnauthorized()
         {
             // Arrange
