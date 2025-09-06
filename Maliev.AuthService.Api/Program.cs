@@ -17,6 +17,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Maliev.AuthService.Api.HealthChecks;
 using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Npgsql.EntityFrameworkCore.PostgreSQL;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -67,7 +68,7 @@ else
 {
     builder.Services.AddDbContext<RefreshTokenDbContext>(options =>
     {
-        options.UseSqlServer(builder.Configuration.GetConnectionString("RefreshTokenDbContext"));
+        options.UseNpgsql(builder.Configuration.GetConnectionString("RefreshTokenDbContext"));
     });
 }
 
