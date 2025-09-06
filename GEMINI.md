@@ -1,4 +1,4 @@
-1# Project Overview
+# Project Overview
 
 This project is an authentication service built with ASP.NET Core. It provides endpoints for user and employee authentication, and for generating JWT tokens. The service uses ASP.NET Core Identity for user management and JWT for token-based authentication. It also includes a testing project, which indicates a commitment to code quality.
 
