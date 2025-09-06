@@ -25,7 +25,7 @@ namespace Maliev.AuthService.Tests.Auth
         private readonly WebApplicationFactory<Maliev.AuthService.Api.Controllers.AuthenticationController> _factory;
         private readonly Mock<HttpMessageHandler> _mockHttpMessageHandler;
         
-        private static string _inMemoryDatabaseName;
+        private static string _inMemoryDatabaseName = string.Empty;
 
         public AuthEndpoints_IntegrationTests(WebApplicationFactory<Maliev.AuthService.Api.Controllers.AuthenticationController> factory)
         {
@@ -35,9 +35,11 @@ namespace Maliev.AuthService.Tests.Auth
             _mockHttpMessageHandler.Protected()
                                    .Setup<Task<HttpResponseMessage>>(
                                        "SendAsync",
-                                       ItExpr.Is<HttpRequestMessage>(req => 
-                                           req.RequestUri.ToString().Contains("http://api.maliev.com/customers/validate") || 
-                                           req.RequestUri.ToString().Contains("http://api.maliev.com/employees/validate")),
+                                       ItExpr.Is<HttpRequestMessage>(req =>
+                                            req.RequestUri != null &&
+                                            (req.RequestUri.ToString().Contains("http://api.maliev.com/customers/validate") ||
+                                            req.RequestUri.ToString().Contains("http://api.maliev.com/employees/validate"))
+                                        ),
                                        ItExpr.IsAny<CancellationToken>()
                                    )
                                    .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
@@ -51,7 +53,7 @@ namespace Maliev.AuthService.Tests.Auth
             {
                 builder.ConfigureAppConfiguration((context, config) =>
                 {
-                    config.AddInMemoryCollection(new Dictionary<string, string>
+                    config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         {"Jwt:SecurityKey", "thisisalongtestkeyforjwtsecurity"},
                         {"Jwt:Issuer", "test.maliev.com"},
@@ -99,8 +101,13 @@ namespace Maliev.AuthService.Tests.Auth
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var responseContent = await response.Content.ReadAsStringAsync();
             var tokenResponse = JsonSerializer.Deserialize<TokenResponse>(responseContent, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            Assert.False(string.IsNullOrEmpty(tokenResponse.AccessToken));
-            Assert.False(string.IsNullOrEmpty(tokenResponse.RefreshToken));
+            if (tokenResponse == null)
+            {
+                Assert.Fail("TokenResponse was null.");
+                return;
+            }
+            Assert.False(string.IsNullOrEmpty(tokenResponse!.AccessToken));
+            Assert.False(string.IsNullOrEmpty(tokenResponse!.RefreshToken));
         }
 
         [Fact]
@@ -119,8 +126,13 @@ namespace Maliev.AuthService.Tests.Auth
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var responseContent = await response.Content.ReadAsStringAsync();
             var tokenResponse = JsonSerializer.Deserialize<TokenResponse>(responseContent, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            Assert.False(string.IsNullOrEmpty(tokenResponse.AccessToken));
-            Assert.False(string.IsNullOrEmpty(tokenResponse.RefreshToken));
+            if (tokenResponse == null)
+            {
+                Assert.Fail("TokenResponse was null.");
+                return;
+            }
+            Assert.False(string.IsNullOrEmpty(tokenResponse!.AccessToken));
+            Assert.False(string.IsNullOrEmpty(tokenResponse!.RefreshToken));
         }
 
         [Fact]
@@ -130,9 +142,11 @@ namespace Maliev.AuthService.Tests.Auth
             _mockHttpMessageHandler.Protected()
                                    .Setup<Task<HttpResponseMessage>>(
                                        "SendAsync",
-                                       ItExpr.Is<HttpRequestMessage>(req => 
-                                           req.RequestUri.ToString().Contains("http://api.maliev.com/customers/validate") || 
-                                           req.RequestUri.ToString().Contains("http://api.maliev.com/employees/validate")),
+                                       ItExpr.Is<HttpRequestMessage>(req =>
+                                            req.RequestUri != null &&
+                                            (req.RequestUri.ToString().Contains("http://api.maliev.com/customers/validate") ||
+                                            req.RequestUri.ToString().Contains("http://api.maliev.com/employees/validate"))
+                                        ),
                                        ItExpr.IsAny<CancellationToken>()
                                    )
                                    .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.Unauthorized));
@@ -216,8 +230,13 @@ namespace Maliev.AuthService.Tests.Auth
             // Assert
             response.EnsureSuccessStatusCode();
             var refreshedTokenResponse = JsonSerializer.Deserialize<TokenResponse>(await response.Content.ReadAsStringAsync(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            Assert.False(string.IsNullOrEmpty(refreshedTokenResponse.AccessToken));
-            Assert.False(string.IsNullOrEmpty(refreshedTokenResponse.RefreshToken));
+            if (refreshedTokenResponse == null)
+            {
+                Assert.Fail("RefreshedTokenResponse was null.");
+                return;
+            }
+            Assert.False(string.IsNullOrEmpty(refreshedTokenResponse!.AccessToken));
+            Assert.False(string.IsNullOrEmpty(refreshedTokenResponse!.RefreshToken));
             Assert.NotEqual(initialTokenResponse.AccessToken, refreshedTokenResponse.AccessToken);
             Assert.NotEqual(initialTokenResponse.RefreshToken, refreshedTokenResponse.RefreshToken);
         }
@@ -301,8 +320,8 @@ namespace Maliev.AuthService.Tests.Auth
     // Helper class to deserialize token response
     public class TokenResponse
     {
-        public string AccessToken { get; set; }
-        public string RefreshToken { get; set; }
+        public required string AccessToken { get; set; }
+        public required string RefreshToken { get; set; }
     }
 
     // Helper class for refresh token request
