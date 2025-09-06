@@ -18,6 +18,7 @@ using Maliev.AuthService.Api.HealthChecks;
 using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Npgsql.EntityFrameworkCore.PostgreSQL;
+using Maliev.AuthService.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -155,7 +156,7 @@ app.UseWhen(context => context.Request.Path.StartsWithSegments("/auth/swagger"),
     appBuilder.UseAuthorization();
 });
 
-app.UseExceptionHandler("/auth/error"); // Add ProblemDetails exception handler
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
@@ -178,4 +179,3 @@ app.MapHealthChecks("/auth/readiness", new HealthCheckOptions
 app.MapControllers();
 
 app.Run();
-        
