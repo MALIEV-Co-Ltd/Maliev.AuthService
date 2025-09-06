@@ -62,49 +62,38 @@ namespace Maliev.AuthService.Api.Controllers
 
                 var credentials = new { username = username, password = password };
 
-                bool userExists = false;
-                string userType = string.Empty;
-                List<string> roles = new List<string>();
+                ValidationResult customerValidationResult = new ValidationResult { Exists = false };
+                ValidationResult employeeValidationResult = new ValidationResult { Exists = false };
 
                 // Try validating with CustomerService
                 if (!string.IsNullOrEmpty(_customerServiceOptions.ValidationEndpoint))
                 {
                     _logger.LogDebug("Attempting to validate with CustomerService at {Endpoint}", _customerServiceOptions.ValidationEndpoint);
-                    var (exists, type, userRoles) = await ValidateCredentials(
+                    customerValidationResult = await ValidateCredentials(
                         _customerServiceOptions.ValidationEndpoint,
                         credentials,
                         "Customer");
-                    _logger.LogDebug("CustomerService validation result: Exists={Exists}, Type={Type}", exists, type);
-                    if (exists)
-                    {
-                        userExists = exists;
-                        userType = type;
-                        roles.AddRange(userRoles);
-                    }
+                    _logger.LogDebug("CustomerService validation result: Exists={Exists}, Type={Type}, Error={Error}", customerValidationResult.Exists, customerValidationResult.UserType, customerValidationResult.Error);
                 }
 
                 // If not found in CustomerService, try EmployeeService
-                if (!userExists && !string.IsNullOrEmpty(_employeeServiceOptions.ValidationEndpoint))
+                if (!customerValidationResult.Exists && !string.IsNullOrEmpty(_employeeServiceOptions.ValidationEndpoint))
                 {
                     _logger.LogDebug("Attempting to validate with EmployeeService at {Endpoint}", _employeeServiceOptions.ValidationEndpoint);
-                    var (exists, type, userRoles) = await ValidateCredentials(
+                    employeeValidationResult = await ValidateCredentials(
                         _employeeServiceOptions.ValidationEndpoint,
                         credentials,
                         "Employee");
-                    _logger.LogDebug("EmployeeService validation result: Exists={Exists}, Type={Type}", exists, type);
-                    if (exists)
-                    {
-                        userExists = exists;
-                        userType = type;
-                        roles.AddRange(userRoles);
-                    }
+                    _logger.LogDebug("EmployeeService validation result: Exists={Exists}, Type={Type}, Error={Error}", employeeValidationResult.Exists, employeeValidationResult.UserType, employeeValidationResult.Error);
                 }
 
-                if (userExists)
+                ValidationResult finalValidationResult = customerValidationResult.Exists ? customerValidationResult : employeeValidationResult;
+
+                if (finalValidationResult.Exists)
                 {
                     _logger.LogInformation("User exists. Generating tokens.");
                     // Generate access token and refresh token string
-                    var accessToken = _tokenGenerator.GenerateJwtToken(username, roles);
+                    var accessToken = _tokenGenerator.GenerateJwtToken(username, finalValidationResult.Roles);
                     var refreshTokenString = _tokenGenerator.GenerateRefreshTokenString();
 
                     // Save refresh token to database
@@ -124,8 +113,8 @@ namespace Maliev.AuthService.Api.Controllers
                 }
                 else
                 {
-                    _logger.LogWarning("User does not exist or validation failed. Returning Unauthorized.");
-                    return Unauthorized();
+                    _logger.LogWarning("User does not exist or validation failed. Returning Unauthorized. Error: {Error}", finalValidationResult.Error);
+                    return Unauthorized(finalValidationResult.Error ?? "User does not exist or validation failed.");
                 }
             }
             else
@@ -217,7 +206,7 @@ namespace Maliev.AuthService.Api.Controllers
             }
         }
 
-        private async Task<(bool exists, string userType, List<string> roles)> ValidateCredentials(
+        protected internal async Task<ValidationResult> ValidateCredentials(
             string validationEndpoint,
             object credentials,
             string userType)
@@ -228,26 +217,55 @@ namespace Maliev.AuthService.Api.Controllers
                 var request = new HttpRequestMessage(HttpMethod.Post, validationEndpoint) { Content = jsonContent };
                 var response = await _externalAuthServiceHttpClient.Client.SendAsync(request);
 
-                if (response.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    _logger.LogWarning("External authentication service returned Unauthorized for {UserType} validation.", userType);
-                    return (false, string.Empty, new List<string>());
-                }
                 if (response.IsSuccessStatusCode)
                 {
-                    return (true, userType, new List<string> { userType });
+                    var responseBody = await response.Content.ReadAsStringAsync();
+                    List<string> roles = new List<string>();
+                    try
+                    {
+                        // Assuming the external service returns a JSON object with a 'roles' array
+                        using (JsonDocument doc = JsonDocument.Parse(responseBody))
+                        {
+                            if (doc.RootElement.TryGetProperty("roles", out JsonElement rolesElement) && rolesElement.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (JsonElement role in rolesElement.EnumerateArray())
+                                {
+                                    roles.Add(role.GetString() ?? string.Empty);
+                                }
+                            }
+                        }
+                    }
+                    catch (JsonException ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse roles from external service response for {UserType}. Using default role.", userType);
+                    }
+
+                    if (!roles.Any())
+                    {
+                        roles.Add(userType); // Default role if none found or parsing failed
+                    }
+
+                    return new ValidationResult { Exists = true, UserType = userType, Roles = roles };
                 }
-                _logger.LogWarning("External authentication service returned {StatusCode} for {UserType} validation.", response.StatusCode, userType);
+                else
+                {
+                    string errorMessage = $"External authentication service returned {response.StatusCode} for {userType} validation.";
+                    _logger.LogWarning(errorMessage);
+                    return new ValidationResult { Exists = false, UserType = userType, Error = errorMessage, StatusCode = (int)response.StatusCode };
+                }
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError(ex, "HttpRequestException during {UserType} validation.", userType);
+                string errorMessage = $"HttpRequestException during {userType} validation: {ex.Message}";
+                _logger.LogError(ex, errorMessage);
+                return new ValidationResult { Exists = false, UserType = userType, Error = errorMessage };
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "An unexpected error occurred during {UserType} validation.", userType);
+                string errorMessage = $"An unexpected error occurred during {userType} validation: {ex.Message}";
+                _logger.LogError(ex, errorMessage);
+                return new ValidationResult { Exists = false, UserType = userType, Error = errorMessage };
             }
-            return (false, string.Empty, new List<string>());
         }
 
         
