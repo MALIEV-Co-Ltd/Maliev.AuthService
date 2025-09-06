@@ -20,6 +20,7 @@ jobs:
 
     - name: Restore dependencies
       run: dotnet restore Maliev.AuthService.sln
+      working-directory: ${{ github.workspace }}
 
     - name: Build
       run: dotnet build Maliev.AuthService.sln --no-restore

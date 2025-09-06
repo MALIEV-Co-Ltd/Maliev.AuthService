@@ -26,6 +26,7 @@ jobs:
 
     - name: Test
       run: dotnet test Maliev.AuthService.sln --no-build --verbosity normal
+      working-directory: ${{ github.workspace }}
 
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v1
