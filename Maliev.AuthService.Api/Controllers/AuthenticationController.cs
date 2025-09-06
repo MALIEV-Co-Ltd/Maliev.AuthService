@@ -206,7 +206,7 @@ namespace Maliev.AuthService.Api.Controllers
             }
         }
 
-        protected internal async Task<ValidationResult> ValidateCredentials(
+        public async Task<ValidationResult> ValidateCredentials(
             string validationEndpoint,
             object credentials,
             string userType)
