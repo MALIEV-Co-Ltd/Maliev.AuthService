@@ -206,6 +206,7 @@ namespace Maliev.AuthService.Api.Controllers
             }
         }
 
+        [ApiExplorerSettings(IgnoreApi = true)]
         public async Task<ValidationResult> ValidateCredentials(
             string validationEndpoint,
             object credentials,
