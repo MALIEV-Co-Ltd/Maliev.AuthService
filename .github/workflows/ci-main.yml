@@ -1,9 +1,8 @@
 name: CI - Main to Production
 
 on:
-  push:
-    branches:
-      - main
+  release:
+    types: [published]
 
 jobs:
   build-and-deploy:
@@ -41,5 +40,25 @@ jobs:
     - name: Build and push Docker image
       run: |
         gcloud auth configure-docker asia-southeast1-docker.pkg.dev
-        docker build -t asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-prod/maliev-authservice:${{ github.sha }} -f Maliev.AuthService.Api/Dockerfile .
-        docker push asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-prod/maliev-authservice:${{ github.sha }}
+        docker build -t asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-prod/maliev-authservice:${{ github.ref_name }} -f Maliev.AuthService.Api/Dockerfile .
+        docker push asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-prod/maliev-authservice:${{ github.ref_name }}
+
+    - name: Checkout maliev-gitops repository
+      uses: actions/checkout@v3
+      with:
+        repository: MALIEV-Co-Ltd/maliev-gitops
+        token: ${{ secrets.GITOPS_PAT }}
+        path: maliev-gitops
+
+    - name: Update targetRevision in maliev-gitops
+      run: |
+        sed -i "s/targetRevision: .*/targetRevision: ${{ github.ref_name }}/" maliev-gitops/argocd/environments/prod/apps/auth-service.yaml
+        
+    - name: Commit and push changes
+      run: |
+        cd maliev-gitops
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        git add .
+        git commit -m "Update targetRevision for auth-service to ${{ github.ref_name }}"
+        git push

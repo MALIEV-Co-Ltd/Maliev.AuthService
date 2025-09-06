@@ -44,3 +44,23 @@ jobs:
         export RELEASE_VERSION=$(echo ${{ github.ref }} | sed -e 's,.*/v,,g')
         docker build -t asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-authservice:$RELEASE_VERSION -f Maliev.AuthService.Api/Dockerfile .
         docker push asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-authservice:$RELEASE_VERSION
+
+    - name: Checkout maliev-gitops repository
+      uses: actions/checkout@v3
+      with:
+        repository: MALIEV-Co-Ltd/maliev-gitops
+        token: ${{ secrets.GITOPS_PAT }}
+        path: maliev-gitops
+
+    - name: Update targetRevision in maliev-gitops
+      run: |
+        sed -i "s/targetRevision: .*/targetRevision: $RELEASE_VERSION/" maliev-gitops/argocd/environments/staging/apps/auth-service.yaml
+        
+    - name: Commit and push changes
+      run: |
+        cd maliev-gitops
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        git add .
+        git commit -m "Update targetRevision for auth-service to ${{ github.sha }}"
+        git push
