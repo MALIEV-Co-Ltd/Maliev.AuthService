@@ -52,6 +52,10 @@ namespace Maliev.AuthService.Api.Controllers
 
             if (System.Net.Http.Headers.AuthenticationHeaderValue.TryParse(header, out var authHeader) && authHeader.Scheme.Equals("Basic", StringComparison.OrdinalIgnoreCase))
             {
+                if (authHeader.Parameter == null)
+                {
+                    return BadRequest("Invalid authorization header format");
+                }
                 var parameter = Encoding.UTF8.GetString(Convert.FromBase64String(authHeader.Parameter)).Split(':', 2);
                 var username = parameter[0];
                 var password = parameter[1];
