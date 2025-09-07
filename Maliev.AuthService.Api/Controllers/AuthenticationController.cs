@@ -62,8 +62,8 @@ namespace Maliev.AuthService.Api.Controllers
                 _logger.LogDebug("Extracted Username: {Username}", username);
                 // Do not log password for security reasons
 
-                var credentials = new { username, password };
-                var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
+                var userInfo = new { username };
+                var jsonContent = new StringContent(JsonSerializer.Serialize(userInfo), Encoding.UTF8, "application/json");
 
                 ValidationResult validationResult = new ValidationResult { Exists = false };
 
@@ -198,6 +198,35 @@ namespace Maliev.AuthService.Api.Controllers
             }
         }
 
+        /// <summary>
+        /// Validates user existence with external ASP.NET Identity services
+        /// </summary>
+        /// <param name="validationEndpoint">The validation endpoint URL configured via CustomerServiceOptions or EmployeeServiceOptions</param>
+        /// <param name="jsonContent">JSON payload containing only username: {"username": "user123"}</param>
+        /// <param name="userType">Type of user (Customer or Employee)</param>
+        /// <returns>ValidationResult indicating if user exists in ASP.NET Identity database and their roles</returns>
+        /// <remarks>
+        /// Validation endpoints are configured via external configuration (secrets/environment variables):
+        /// - CustomerService:ValidationEndpoint for customer validation
+        /// - EmployeeService:ValidationEndpoint for employee validation
+        /// 
+        /// Expected request format: POST to validation endpoint with JSON body:
+        /// {
+        ///   "username": "user123"
+        /// }
+        /// 
+        /// Expected response format:
+        /// {
+        ///   "exists": true,
+        ///   "roles": ["Customer", "Premium"] // ASP.NET Identity roles, optional
+        /// }
+        /// 
+        /// The validation endpoints should query the respective ASP.NET Identity database
+        /// to verify if the user exists and return their assigned roles.
+        /// 
+        /// If "exists" is false or missing, user is considered non-existent.
+        /// If "roles" is missing, defaults to the userType (Customer/Employee).
+        /// </remarks>
         [ApiExplorerSettings(IgnoreApi = true)]
         public async Task<ValidationResult> ValidateCredentials(
             string validationEndpoint,
@@ -212,12 +241,21 @@ namespace Maliev.AuthService.Api.Controllers
                 if (response.IsSuccessStatusCode)
                 {
                     var responseBody = await response.Content.ReadAsStringAsync();
+                    bool userExists = false;
                     List<string> roles = new List<string>();
+                    
                     try
                     {
-                        // Assuming the external service returns a JSON object with a 'roles' array
+                        // Parse the response to check if user exists and get roles
                         using (JsonDocument doc = JsonDocument.Parse(responseBody))
                         {
+                            // Check if user exists
+                            if (doc.RootElement.TryGetProperty("exists", out JsonElement existsElement))
+                            {
+                                userExists = existsElement.GetBoolean();
+                            }
+                            
+                            // Get roles if provided
                             if (doc.RootElement.TryGetProperty("roles", out JsonElement rolesElement) && rolesElement.ValueKind == JsonValueKind.Array)
                             {
                                 foreach (JsonElement role in rolesElement.EnumerateArray())
@@ -229,15 +267,24 @@ namespace Maliev.AuthService.Api.Controllers
                     }
                     catch (JsonException ex)
                     {
-                        _logger.LogWarning(ex, "Failed to parse roles from external service response for {UserType}. Using default role.", userType);
+                        _logger.LogWarning(ex, "Failed to parse response from external service for {UserType}. Assuming user doesn't exist.", userType);
+                        userExists = false;
                     }
 
-                    if (!roles.Any())
+                    if (userExists)
                     {
-                        roles.Add(userType); // Default role if none found or parsing failed
+                        // Add default role if no roles provided
+                        if (!roles.Any())
+                        {
+                            roles.Add(userType); // Default role if none found
+                        }
+                        
+                        return new ValidationResult { Exists = true, UserType = userType, Roles = roles };
                     }
-
-                    return new ValidationResult { Exists = true, UserType = userType, Roles = roles };
+                    else
+                    {
+                        return new ValidationResult { Exists = false, UserType = userType, Error = $"User not found in {userType} service." };
+                    }
                 }
                 else
                 {
