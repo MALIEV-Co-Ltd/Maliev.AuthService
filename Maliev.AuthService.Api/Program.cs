@@ -19,6 +19,7 @@ using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Npgsql.EntityFrameworkCore.PostgreSQL;
 using Maliev.AuthService.Api.Middleware;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -65,6 +66,8 @@ builder.Services.AddHttpClient<ExternalAuthServiceHttpClient>((serviceProvider, 
 builder.Services.Configure<CustomerServiceOptions>(builder.Configuration.GetSection("CustomerService"));
 builder.Services.Configure<EmployeeServiceOptions>(builder.Configuration.GetSection("EmployeeService"));
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection(RateLimitOptions.SectionName));
+builder.Services.Configure<CacheOptions>(builder.Configuration.GetSection(CacheOptions.SectionName));
 
 // Configure RefreshToken DbContext
 if (builder.Environment.IsEnvironment("Testing"))
@@ -84,6 +87,69 @@ builder.Services.AddDatabaseDeveloperPageExceptionFilter();
 
 // Configure Token Generator
 builder.Services.AddSingleton<ITokenGenerator, TokenGenerator>();
+
+// Configure Memory Cache
+builder.Services.AddMemoryCache(options =>
+{
+    var cacheOptions = new CacheOptions();
+    builder.Configuration.GetSection(CacheOptions.SectionName).Bind(cacheOptions);
+    options.SizeLimit = cacheOptions.ValidationCache.MaxCacheSize;
+});
+
+// Register Validation Cache Service
+builder.Services.AddScoped<IValidationCacheService, ValidationCacheService>();
+
+// Configure Rate Limiting
+builder.Services.AddRateLimiter(options =>
+{
+    var rateLimitOptions = new RateLimitOptions();
+    builder.Configuration.GetSection(RateLimitOptions.SectionName).Bind(rateLimitOptions);
+    
+    // Token endpoint rate limiting (more restrictive)
+    options.AddPolicy("TokenPolicy", context =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = rateLimitOptions.TokenEndpoint.PermitLimit,
+                Window = rateLimitOptions.TokenEndpoint.Window,
+                SegmentsPerWindow = 2,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = rateLimitOptions.TokenEndpoint.QueueLimit
+            }));
+    
+    // Refresh token endpoint rate limiting (less restrictive)
+    options.AddPolicy("RefreshPolicy", context =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = rateLimitOptions.RefreshEndpoint.PermitLimit,
+                Window = rateLimitOptions.RefreshEndpoint.Window,
+                SegmentsPerWindow = 2,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = rateLimitOptions.RefreshEndpoint.QueueLimit
+            }));
+    
+    // Global rate limiting
+    options.AddPolicy("GlobalPolicy", context =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = rateLimitOptions.Global.PermitLimit,
+                Window = rateLimitOptions.Global.Window,
+                SegmentsPerWindow = 4,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = rateLimitOptions.Global.QueueLimit
+            }));
+    
+    options.OnRejected = async (context, token) =>
+    {
+        context.HttpContext.Response.StatusCode = 429;
+        await context.HttpContext.Response.WriteAsync("Rate limit exceeded. Please try again later.", token);
+    };
+});
 
 // Configure CORS
 builder.Services.AddCors(options =>
@@ -165,6 +231,8 @@ app.UseWhen(context => context.Request.Path.StartsWithSegments("/auth/swagger"),
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseHttpsRedirection();
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 

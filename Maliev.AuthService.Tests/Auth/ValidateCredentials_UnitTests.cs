@@ -27,6 +27,7 @@ namespace Maliev.AuthService.Tests.Auth
         private readonly Mock<ILogger<AuthenticationController>> _mockLogger;
         private readonly Mock<IOptions<CustomerServiceOptions>> _mockCustomerServiceOptions;
         private readonly Mock<IOptions<EmployeeServiceOptions>> _mockEmployeeServiceOptions;
+        private readonly Mock<IValidationCacheService> _mockValidationCacheService;
         private readonly AuthenticationController _controller;
 
         public ValidateCredentials_UnitTests()
@@ -37,9 +38,14 @@ namespace Maliev.AuthService.Tests.Auth
             _mockLogger = new Mock<ILogger<AuthenticationController>>();
             _mockCustomerServiceOptions = new Mock<IOptions<CustomerServiceOptions>>();
             _mockEmployeeServiceOptions = new Mock<IOptions<EmployeeServiceOptions>>();
+            _mockValidationCacheService = new Mock<IValidationCacheService>();
 
             _mockCustomerServiceOptions.Setup(o => o.Value).Returns(new CustomerServiceOptions { ValidationEndpoint = "http://customer.service/validate" });
             _mockEmployeeServiceOptions.Setup(o => o.Value).Returns(new EmployeeServiceOptions { ValidationEndpoint = "http://employee.service/validate" });
+            
+            // Setup cache service to return null by default (cache miss)
+            _mockValidationCacheService.Setup(c => c.GetValidationResultAsync(It.IsAny<string>(), It.IsAny<string>()))
+                .ReturnsAsync((ValidationResult?)null);
 
             _controller = new AuthenticationController(
                 _mockTokenGenerator.Object,
@@ -47,7 +53,8 @@ namespace Maliev.AuthService.Tests.Auth
                 _mockDbContext.Object,
                 _mockLogger.Object,
                 _mockCustomerServiceOptions.Object,
-                _mockEmployeeServiceOptions.Object);
+                _mockEmployeeServiceOptions.Object,
+                _mockValidationCacheService.Object);
         }
 
         private void SetupHttpClientMock(HttpStatusCode statusCode, string? content = null, Exception? exception = null)
@@ -79,7 +86,7 @@ namespace Maliev.AuthService.Tests.Auth
             // Arrange
             var credentials = new { username = "testuser", password = "password" };
             var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
-            var responseContent = "{\"roles\":[\"Admin\",\"User\"]}";
+            var responseContent = "{\"exists\":true,\"roles\":[\"Admin\",\"User\"]}";
             SetupHttpClientMock(HttpStatusCode.OK, responseContent);
 
             // Act
@@ -100,7 +107,7 @@ namespace Maliev.AuthService.Tests.Auth
             // Arrange
             var credentials = new { username = "testuser", password = "password" };
             var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
-            var responseContent = "{}"; // No roles in response
+            var responseContent = "{\"exists\":true}"; // No roles in response
             SetupHttpClientMock(HttpStatusCode.OK, responseContent);
 
             // Act

@@ -31,7 +31,14 @@ namespace Maliev.AuthService.Tests.Auth
         {
             _mockHttpMessageHandler = new Mock<HttpMessageHandler>();
 
-            // Setup the mock HttpMessageHandler to return OK for any validation endpoint
+            // Setup the mock HttpMessageHandler to return OK with proper JSON response for validation endpoints
+            var validationResponse = new
+            {
+                exists = true,
+                roles = new[] { "Customer" }
+            };
+            var jsonResponse = JsonSerializer.Serialize(validationResponse);
+            
             _mockHttpMessageHandler.Protected()
                                    .Setup<Task<HttpResponseMessage>>(
                                        "SendAsync",
@@ -42,7 +49,10 @@ namespace Maliev.AuthService.Tests.Auth
                                         ),
                                        ItExpr.IsAny<CancellationToken>()
                                    )
-                                   .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+                                   .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+                                   {
+                                       Content = new StringContent(jsonResponse, System.Text.Encoding.UTF8, "application/json")
+                                   });
 
             if (string.IsNullOrEmpty(_inMemoryDatabaseName))
             {

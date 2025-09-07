@@ -12,6 +12,7 @@ using System.Text;
 using System.Text.Json;
 using Asp.Versioning;
 using System.Net.Http.Headers;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Maliev.AuthService.Api.Controllers
 {
@@ -26,6 +27,7 @@ namespace Maliev.AuthService.Api.Controllers
         private readonly ILogger<AuthenticationController> _logger;
         private readonly CustomerServiceOptions _customerServiceOptions;
         private readonly EmployeeServiceOptions _employeeServiceOptions;
+        private readonly IValidationCacheService _validationCacheService;
 
         public AuthenticationController(
             ITokenGenerator tokenGenerator,
@@ -33,7 +35,8 @@ namespace Maliev.AuthService.Api.Controllers
             RefreshTokenDbContext dbContext,
             ILogger<AuthenticationController> logger,
             IOptions<CustomerServiceOptions> customerServiceOptions,
-            IOptions<EmployeeServiceOptions> employeeServiceOptions)
+            IOptions<EmployeeServiceOptions> employeeServiceOptions,
+            IValidationCacheService validationCacheService)
         {
             _tokenGenerator = tokenGenerator;
             _externalAuthServiceHttpClient = externalAuthServiceHttpClient;
@@ -41,9 +44,11 @@ namespace Maliev.AuthService.Api.Controllers
             _logger = logger;
             _customerServiceOptions = customerServiceOptions.Value;
             _employeeServiceOptions = employeeServiceOptions.Value;
+            _validationCacheService = validationCacheService;
         }
 
         [HttpPost("token")]
+        [EnableRateLimiting("TokenPolicy")]
         public async Task<IActionResult> Token()
         {
             _logger.LogInformation("Token endpoint called.");
@@ -67,20 +72,48 @@ namespace Maliev.AuthService.Api.Controllers
 
                 ValidationResult validationResult = new ValidationResult { Exists = false };
 
-                // Try validating with CustomerService
+                // Try validating with CustomerService (check cache first)
                 if (!string.IsNullOrEmpty(_customerServiceOptions.ValidationEndpoint))
                 {
                     _logger.LogDebug("Attempting to validate with CustomerService at {Endpoint}", _customerServiceOptions.ValidationEndpoint);
-                    validationResult = await ValidateCredentials(_customerServiceOptions.ValidationEndpoint, jsonContent, "Customer");
-                    _logger.LogDebug("CustomerService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
+                    
+                    // Check cache first
+                    var cachedResult = await _validationCacheService.GetValidationResultAsync(username, "Customer");
+                    if (cachedResult != null)
+                    {
+                        validationResult = cachedResult;
+                        _logger.LogDebug("CustomerService validation result from cache: Exists={Exists}, Type={Type}", validationResult.Exists, validationResult.UserType);
+                    }
+                    else
+                    {
+                        validationResult = await ValidateCredentials(_customerServiceOptions.ValidationEndpoint, jsonContent, "Customer");
+                        _logger.LogDebug("CustomerService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
+                        
+                        // Cache the result
+                        await _validationCacheService.SetValidationResultAsync(username, "Customer", validationResult);
+                    }
                 }
 
-                // If not found in CustomerService, try EmployeeService
+                // If not found in CustomerService, try EmployeeService (check cache first)
                 if (!validationResult.Exists && !string.IsNullOrEmpty(_employeeServiceOptions.ValidationEndpoint))
                 {
                     _logger.LogDebug("Attempting to validate with EmployeeService at {Endpoint}", _employeeServiceOptions.ValidationEndpoint);
-                    validationResult = await ValidateCredentials(_employeeServiceOptions.ValidationEndpoint, jsonContent, "Employee");
-                    _logger.LogDebug("EmployeeService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
+                    
+                    // Check cache first
+                    var cachedResult = await _validationCacheService.GetValidationResultAsync(username, "Employee");
+                    if (cachedResult != null)
+                    {
+                        validationResult = cachedResult;
+                        _logger.LogDebug("EmployeeService validation result from cache: Exists={Exists}, Type={Type}", validationResult.Exists, validationResult.UserType);
+                    }
+                    else
+                    {
+                        validationResult = await ValidateCredentials(_employeeServiceOptions.ValidationEndpoint, jsonContent, "Employee");
+                        _logger.LogDebug("EmployeeService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
+                        
+                        // Cache the result
+                        await _validationCacheService.SetValidationResultAsync(username, "Employee", validationResult);
+                    }
                 }
 
                 if (validationResult.Exists)
@@ -117,6 +150,7 @@ namespace Maliev.AuthService.Api.Controllers
         }
 
         [HttpPost("token/refresh")]
+        [EnableRateLimiting("RefreshPolicy")]
         public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
         {
             _logger.LogInformation("RefreshToken endpoint called.");
