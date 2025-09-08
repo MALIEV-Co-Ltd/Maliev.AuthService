@@ -13,6 +13,7 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["Maliev.AuthService.Api/Maliev.AuthService.Api.csproj", "Maliev.AuthService.Api/"]
+COPY ["Maliev.AuthService.JwtToken/Maliev.AuthService.JwtToken.csproj", "Maliev.AuthService.JwtToken/"]
 RUN dotnet restore "./Maliev.AuthService.Api/Maliev.AuthService.Api.csproj"
 COPY . .
 WORKDIR "/src/Maliev.AuthService.Api"
