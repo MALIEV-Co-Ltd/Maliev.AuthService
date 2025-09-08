@@ -92,7 +92,6 @@ namespace Maliev.AuthService.JwtToken
             var username = jwtSecurityToken.Claims.First(claim => claim.Type == ClaimTypes.Name).Value;
             var roles = jwtSecurityToken.Claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).ToList();
 
-
             _logger.LogInformation("Extracted username: {Username}, roles: {Roles} from expired token.", username, string.Join(", ", roles));
 
             // This method will not interact with the database directly.
@@ -126,9 +125,8 @@ namespace Maliev.AuthService.JwtToken
             };
 
             var principal = _tokenHandler.ValidateToken(token, tokenValidationParameters, out var securityToken);
-            var jwtSecurityToken = securityToken as JwtSecurityToken;
 
-            if (jwtSecurityToken == null || !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256Signature, StringComparison.InvariantCultureIgnoreCase))
+            if (securityToken is not JwtSecurityToken jwtSecurityToken || !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256Signature, StringComparison.InvariantCultureIgnoreCase))
             {
                 _logger.LogWarning("Invalid token. Token is null or algorithm is not HmacSha256.");
                 throw new SecurityTokenException("Invalid token");

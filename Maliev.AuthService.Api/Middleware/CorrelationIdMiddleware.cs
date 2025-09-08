@@ -17,10 +17,10 @@ namespace Maliev.AuthService.Api.Middleware
         public async Task InvokeAsync(HttpContext context)
         {
             var correlationId = GetOrCreateCorrelationId(context);
-            
+
             // Add to response headers
             context.Response.Headers.TryAdd(CorrelationIdHeader, correlationId);
-            
+
             // Add to Serilog LogContext for structured logging
             using (LogContext.PushProperty("CorrelationId", correlationId))
             {

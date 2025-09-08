@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Maliev.AuthService.Api.Models
+namespace Maliev.AuthService.Data.Entities
 {
     public class RefreshToken
     {
@@ -8,10 +8,10 @@ namespace Maliev.AuthService.Api.Models
         public int Id { get; set; }
 
         [Required]
-        public required string Username { get; set; }
+        public string Username { get; set; }
 
         [Required]
-        public required string Token { get; set; }
+        public string Token { get; set; }
 
         [Required]
         public DateTime Expires { get; set; }

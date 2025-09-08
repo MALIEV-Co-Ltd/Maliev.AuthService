@@ -1,7 +1,7 @@
-using Maliev.AuthService.Api.Models;
+using Maliev.AuthService.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace Maliev.AuthService.Api.Data
+namespace Maliev.AuthService.Data.DbContexts
 {
     public class RefreshTokenDbContext : DbContext
     {
@@ -10,6 +10,11 @@ namespace Maliev.AuthService.Api.Data
         }
 
         public DbSet<RefreshToken> RefreshTokens { get; set; } = null!;
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+        }
 
         public async Task CleanExpiredAndRevokedTokensAsync()
         {

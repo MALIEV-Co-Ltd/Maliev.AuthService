@@ -26,7 +26,6 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.4" />
     
-    <ProjectReference Include="..\Maliev.AuthService.JwtToken\Maliev.AuthService.JwtToken.csproj" />
     <PackageReference Include="NetEscapades.Configuration.Yaml" Version="2.2.0" />
     <PackageReference Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" Version="9.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="9.0.0" />
@@ -41,6 +40,11 @@
     <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="9.0.0" />
     
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Maliev.AuthService.Data\Maliev.AuthService.Data.csproj" />
+    <ProjectReference Include="..\Maliev.AuthService.JwtToken\Maliev.AuthService.JwtToken.csproj" />
   </ItemGroup>
 
 </Project>

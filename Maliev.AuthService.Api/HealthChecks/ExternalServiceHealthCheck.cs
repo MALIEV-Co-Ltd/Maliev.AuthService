@@ -1,10 +1,7 @@
-using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Maliev.AuthService.Api.Services;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Net.Http;
-using Microsoft.Extensions.Options;
 using Maliev.AuthService.Api.Models;
+using Maliev.AuthService.Api.Services;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 
 namespace Maliev.AuthService.Api.HealthChecks
 {

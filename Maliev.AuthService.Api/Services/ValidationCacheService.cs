@@ -28,7 +28,7 @@ namespace Maliev.AuthService.Api.Services
             }
 
             var cacheKey = GetCacheKey(username, userType);
-            
+
             if (_memoryCache.TryGetValue(cacheKey, out ValidationResult? cachedResult))
             {
                 _logger.LogDebug("Cache hit for user: {Username}, type: {UserType}", username, userType);
@@ -47,7 +47,7 @@ namespace Maliev.AuthService.Api.Services
             }
 
             var cacheKey = GetCacheKey(username, userType);
-            
+
             var cacheOptions = new MemoryCacheEntryOptions
             {
                 AbsoluteExpirationRelativeToNow = _cacheOptions.ValidationCache.ExpirationTime,
@@ -56,7 +56,7 @@ namespace Maliev.AuthService.Api.Services
             };
 
             _memoryCache.Set(cacheKey, result, cacheOptions);
-            _logger.LogDebug("Cached validation result for user: {Username}, type: {UserType}, exists: {Exists}", 
+            _logger.LogDebug("Cached validation result for user: {Username}, type: {UserType}, exists: {Exists}",
                 username, userType, result.Exists);
 
             return Task.CompletedTask;

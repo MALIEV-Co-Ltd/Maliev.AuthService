@@ -1,21 +1,21 @@
-using Moq;
-using Xunit;
-using System.Net;
-using System.Net.Http;
-using System.Threading.Tasks;
 using Maliev.AuthService.Api.Controllers;
+using Maliev.AuthService.Api.Models;
 using Maliev.AuthService.Api.Services;
-using Maliev.AuthService.Api.Data;
+using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.JwtToken;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Maliev.AuthService.Api.Models;
-using Maliev.AuthService.JwtToken;
+using Moq;
+using Moq.Protected;
+using System;
+using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
-using System;
 using System.Threading;
-using Microsoft.EntityFrameworkCore;
-using Moq.Protected;
+using System.Threading.Tasks;
+using Xunit;
 
 namespace Maliev.AuthService.Tests.Auth
 {
@@ -44,11 +44,11 @@ namespace Maliev.AuthService.Tests.Auth
 
             _mockCustomerServiceOptions.Setup(o => o.Value).Returns(new CustomerServiceOptions { ValidationEndpoint = "http://customer.service/validate" });
             _mockEmployeeServiceOptions.Setup(o => o.Value).Returns(new EmployeeServiceOptions { ValidationEndpoint = "http://employee.service/validate" });
-            
+
             // Setup cache service to return null by default (cache miss)
             _mockValidationCacheService.Setup(c => c.GetValidationResultAsync(It.IsAny<string>(), It.IsAny<string>()))
                 .ReturnsAsync((ValidationResult?)null);
-                
+
             // Setup credential validation service to return valid credentials by default
             _mockCredentialValidationService.Setup(c => c.ValidateCredentials(It.IsAny<string>(), It.IsAny<string>()))
                 .Returns(new CredentialValidationResult { IsValid = true, SanitizedUsername = "testuser", SanitizedPassword = "password" });

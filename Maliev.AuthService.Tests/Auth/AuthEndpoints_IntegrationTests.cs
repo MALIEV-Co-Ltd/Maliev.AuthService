@@ -1,13 +1,13 @@
-using Maliev.AuthService.Api.Data;
-using Maliev.AuthService.Api.Models;
 using Maliev.AuthService.Api.Services;
+using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Data.Entities;
+using Maliev.AuthService.JwtToken;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Moq.Protected;
-using Maliev.AuthService.JwtToken;
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -24,7 +24,7 @@ namespace Maliev.AuthService.Tests.Auth
     {
         private readonly WebApplicationFactory<Maliev.AuthService.Api.Controllers.AuthenticationController> _factory;
         private readonly Mock<HttpMessageHandler> _mockHttpMessageHandler;
-        
+
         private static string _inMemoryDatabaseName = string.Empty;
 
         public AuthEndpoints_IntegrationTests(WebApplicationFactory<Maliev.AuthService.Api.Controllers.AuthenticationController> factory)
@@ -259,7 +259,8 @@ namespace Maliev.AuthService.Tests.Auth
             // Assert
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
-            [Fact]
+
+        [Fact]
         public async Task PostRefreshToken_WithInvalidSignature_ReturnsUnauthorized()
         {
             // Arrange
@@ -320,14 +321,14 @@ namespace Maliev.AuthService.Tests.Auth
     // Helper class to deserialize token response
     public class TokenResponse
     {
-        public required string AccessToken { get; set; }
-        public required string RefreshToken { get; set; }
+        public string AccessToken { get; set; }
+        public string RefreshToken { get; set; }
     }
 
     // Helper class for refresh token request
     public class RefreshTokenRequest
     {
-        public required string AccessToken { get; set; }
-        public required string RefreshToken { get; set; }
+        public string AccessToken { get; set; }
+        public string RefreshToken { get; set; }
     }
 }

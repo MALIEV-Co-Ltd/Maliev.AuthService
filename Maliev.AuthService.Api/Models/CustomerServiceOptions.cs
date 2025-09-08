@@ -5,10 +5,11 @@ namespace Maliev.AuthService.Api.Models
     public class CustomerServiceOptions
     {
         public const string SectionName = "CustomerService";
-        
-        [Url(ErrorMessage = "Customer service validation endpoint must be a valid URL")]
-        public string? ValidationEndpoint { get; set; }
-        
+
+        [Required(ErrorMessage = "Customer Service ValidationEndpoint is required")]
+        [Url(ErrorMessage = "Customer Service ValidationEndpoint must be a valid URL")]
+        public string ValidationEndpoint { get; set; } = string.Empty;
+
         public bool IsConfigured => !string.IsNullOrEmpty(ValidationEndpoint);
     }
 }

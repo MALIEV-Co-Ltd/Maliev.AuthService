@@ -14,6 +14,7 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["Maliev.AuthService.Api/Maliev.AuthService.Api.csproj", "Maliev.AuthService.Api/"]
 COPY ["Maliev.AuthService.JwtToken/Maliev.AuthService.JwtToken.csproj", "Maliev.AuthService.JwtToken/"]
+COPY ["Maliev.AuthService.Data/Maliev.AuthService.Data.csproj", "Maliev.AuthService.Data/"]
 RUN dotnet restore "./Maliev.AuthService.Api/Maliev.AuthService.Api.csproj"
 COPY . .
 WORKDIR "/src/Maliev.AuthService.Api"

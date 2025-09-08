@@ -63,7 +63,7 @@ namespace Maliev.AuthService.Api.Services
             // Validate using DataAnnotations
             var validationResults = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
             var validationContext = new ValidationContext(jwt);
-            
+
             if (!Validator.TryValidateObject(jwt, validationContext, validationResults, true))
             {
                 foreach (var validationError in validationResults)
@@ -79,8 +79,8 @@ namespace Maliev.AuthService.Api.Services
                 {
                     result.AddError("JWT SecurityKey must be at least 32 characters for security");
                 }
-                
-                if (jwt.SecurityKey.Contains("test", StringComparison.OrdinalIgnoreCase) || 
+
+                if (jwt.SecurityKey.Contains("test", StringComparison.OrdinalIgnoreCase) ||
                     jwt.SecurityKey.Contains("sample", StringComparison.OrdinalIgnoreCase))
                 {
                     result.AddWarning("JWT SecurityKey appears to contain test/sample values - ensure production keys are used");
@@ -157,7 +157,7 @@ namespace Maliev.AuthService.Api.Services
             try
             {
                 _logger.LogDebug("Testing connectivity to external service: {Endpoint}", endpoint);
-                
+
                 using var response = await _httpClient.GetAsync(endpoint, cancellationToken);
                 // Accept any response (even 404, 401, etc.) as long as we can connect
                 _logger.LogDebug("External service connectivity test result: {StatusCode}", response.StatusCode);
@@ -177,7 +177,7 @@ namespace Maliev.AuthService.Api.Services
             // Validate using DataAnnotations
             var validationResults = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
             var validationContext = new ValidationContext(rateLimits);
-            
+
             if (!Validator.TryValidateObject(rateLimits, validationContext, validationResults, true))
             {
                 foreach (var validationError in validationResults)
@@ -199,7 +199,7 @@ namespace Maliev.AuthService.Api.Services
             // Validate using DataAnnotations
             var validationResults = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
             var validationContext = new ValidationContext(cache);
-            
+
             if (!Validator.TryValidateObject(cache, validationContext, validationResults, true))
             {
                 foreach (var validationError in validationResults)
@@ -215,7 +215,7 @@ namespace Maliev.AuthService.Api.Services
         {
             var validationResults = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
             var validationContext = new ValidationContext(obj);
-            
+
             if (!Validator.TryValidateObject(obj, validationContext, validationResults, true))
             {
                 foreach (var validationError in validationResults)

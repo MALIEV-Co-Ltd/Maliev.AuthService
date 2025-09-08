@@ -1,8 +1,11 @@
-using Maliev.AuthService.Api.Data;
+using Asp.Versioning;
 using Maliev.AuthService.Api.Models;
 using Maliev.AuthService.Api.Services;
+using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Data.Entities;
 using Maliev.AuthService.JwtToken;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -10,9 +13,6 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using Asp.Versioning;
-using System.Net.Http.Headers;
-using Microsoft.AspNetCore.RateLimiting;
 
 namespace Maliev.AuthService.Api.Controllers
 {
@@ -64,7 +64,7 @@ namespace Maliev.AuthService.Api.Controllers
                 {
                     return BadRequest("Invalid authorization header format");
                 }
-                
+
                 string[] parameter;
                 try
                 {
@@ -74,15 +74,15 @@ namespace Maliev.AuthService.Api.Controllers
                 {
                     return BadRequest("Invalid Base64 encoding in authorization header");
                 }
-                
+
                 if (parameter.Length != 2)
                 {
                     return BadRequest("Invalid credential format in authorization header");
                 }
-                
+
                 var rawUsername = parameter[0];
                 var rawPassword = parameter[1];
-                
+
                 // Validate credentials
                 var credentialValidation = _credentialValidationService.ValidateCredentials(rawUsername, rawPassword);
                 if (!credentialValidation.IsValid)
@@ -90,14 +90,14 @@ namespace Maliev.AuthService.Api.Controllers
                     _logger.LogWarning("Invalid credentials provided: {Errors}", string.Join(", ", credentialValidation.Errors));
                     return BadRequest($"Invalid credentials: {string.Join(", ", credentialValidation.Errors)}");
                 }
-                
+
                 var username = credentialValidation.SanitizedUsername!;
                 var password = credentialValidation.SanitizedPassword!;
                 _logger.LogDebug("Validated and sanitized username: {Username}", username);
                 // Do not log password for security reasons
 
                 var userValidationRequest = new UserValidationRequest { Username = username, Password = password };
-                var jsonContent = new StringContent(JsonSerializer.Serialize(userValidationRequest), Encoding.UTF8, "application/json");
+                var jsonContent = new StringContent(JsonSerializer.Serialize(userValidationRequest), Encoding.UTF8, System.Net.Mime.MediaTypeNames.Application.Json);
 
                 Maliev.AuthService.Api.Models.ValidationResult validationResult = new Maliev.AuthService.Api.Models.ValidationResult { Exists = false };
 
@@ -105,7 +105,7 @@ namespace Maliev.AuthService.Api.Controllers
                 if (!string.IsNullOrEmpty(_customerServiceOptions.ValidationEndpoint))
                 {
                     _logger.LogDebug("Attempting to validate with CustomerService at {Endpoint}", _customerServiceOptions.ValidationEndpoint);
-                    
+
                     // Check cache first
                     var cachedResult = await _validationCacheService.GetValidationResultAsync(username, "Customer");
                     if (cachedResult != null)
@@ -117,7 +117,7 @@ namespace Maliev.AuthService.Api.Controllers
                     {
                         validationResult = await ValidateCredentials(_customerServiceOptions.ValidationEndpoint, jsonContent, UserType.Customer);
                         _logger.LogDebug("CustomerService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
-                        
+
                         // Cache the result
                         await _validationCacheService.SetValidationResultAsync(username, "Customer", validationResult);
                     }
@@ -127,7 +127,7 @@ namespace Maliev.AuthService.Api.Controllers
                 if (!validationResult.Exists && !string.IsNullOrEmpty(_employeeServiceOptions.ValidationEndpoint))
                 {
                     _logger.LogDebug("Attempting to validate with EmployeeService at {Endpoint}", _employeeServiceOptions.ValidationEndpoint);
-                    
+
                     // Check cache first
                     var cachedResult = await _validationCacheService.GetValidationResultAsync(username, "Employee");
                     if (cachedResult != null)
@@ -139,7 +139,7 @@ namespace Maliev.AuthService.Api.Controllers
                     {
                         validationResult = await ValidateCredentials(_employeeServiceOptions.ValidationEndpoint, jsonContent, UserType.Employee);
                         _logger.LogDebug("EmployeeService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
-                        
+
                         // Cache the result
                         await _validationCacheService.SetValidationResultAsync(username, "Employee", validationResult);
                     }
@@ -272,22 +272,22 @@ namespace Maliev.AuthService.Api.Controllers
         /// Validation endpoints are configured via external configuration (secrets/environment variables):
         /// - CustomerService:ValidationEndpoint for customer validation
         /// - EmployeeService:ValidationEndpoint for employee validation
-        /// 
+        ///
         /// Expected request format: POST to validation endpoint with JSON body:
         /// {
         ///   "Username": "user123",
         ///   "Password": "pass123"
         /// }
-        /// 
+        ///
         /// Expected response codes:
         /// - 200 OK: Valid credentials, user exists
         /// - 404 NOT FOUND: User does not exist
         /// - 400 BAD REQUEST: Invalid request format or credentials
         /// - Other status codes: Service error
-        /// 
+        ///
         /// The validation endpoints should validate the user credentials against the respective ASP.NET Identity database
         /// and return appropriate HTTP status codes to indicate the validation result.
-        /// 
+        ///
         /// No JSON response body is expected, only HTTP status codes are used for validation results.
         /// </remarks>
         [ApiExplorerSettings(IgnoreApi = true)]
@@ -340,12 +340,10 @@ namespace Maliev.AuthService.Api.Controllers
             }
         }
 
-        
-    private string? GetUsernameFromToken(string token)
+        private string? GetUsernameFromToken(string token)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
-            var jwtToken = tokenHandler.ReadToken(token) as JwtSecurityToken;
-            if (jwtToken == null)
+            if (tokenHandler.ReadToken(token) is not JwtSecurityToken jwtToken)
             {
                 _logger.LogWarning("GetUsernameFromToken: Failed to read JWT token. Token is null after ReadToken.");
                 return null;
@@ -356,7 +354,7 @@ namespace Maliev.AuthService.Api.Controllers
 
     public class RefreshTokenRequest
     {
-        public required string AccessToken { get; set; }
-        public required string RefreshToken { get; set; }
+        public string AccessToken { get; set; }
+        public string RefreshToken { get; set; }
     }
 }

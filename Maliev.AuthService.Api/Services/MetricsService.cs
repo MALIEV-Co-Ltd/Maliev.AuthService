@@ -17,7 +17,7 @@ namespace Maliev.AuthService.Api.Services
         private readonly Histogram<double> _requestDuration;
         private readonly Counter<long> _healthChecks;
         private readonly Counter<long> _configValidations;
-        
+
         private readonly ILogger<MetricsService> _logger;
         private readonly ConcurrentDictionary<string, object> _metrics = new();
 
@@ -25,50 +25,50 @@ namespace Maliev.AuthService.Api.Services
         {
             _logger = logger;
             _meter = new Meter("Maliev.AuthService", "1.0.0");
-            
+
             // Initialize counters and histograms
             _authAttempts = _meter.CreateCounter<long>(
                 "auth_attempts_total",
                 description: "Total number of authentication attempts");
-                
+
             _authSuccesses = _meter.CreateCounter<long>(
-                "auth_successes_total", 
+                "auth_successes_total",
                 description: "Total number of successful authentications");
-                
+
             _authFailures = _meter.CreateCounter<long>(
                 "auth_failures_total",
                 description: "Total number of failed authentications");
-                
+
             _tokenRefreshes = _meter.CreateCounter<long>(
                 "token_refreshes_total",
                 description: "Total number of token refresh attempts");
-                
+
             _rateLimitHits = _meter.CreateCounter<long>(
                 "rate_limit_hits_total",
                 description: "Total number of rate limit hits");
-                
+
             _cacheHits = _meter.CreateCounter<long>(
                 "cache_hits_total",
                 description: "Total number of cache hits");
-                
+
             _cacheMisses = _meter.CreateCounter<long>(
-                "cache_misses_total", 
+                "cache_misses_total",
                 description: "Total number of cache misses");
-                
+
             _externalServiceDuration = _meter.CreateHistogram<double>(
                 "external_service_duration_ms",
                 "ms",
                 "Duration of external service calls in milliseconds");
-                
+
             _requestDuration = _meter.CreateHistogram<double>(
                 "request_duration_ms",
-                "ms", 
+                "ms",
                 "Duration of HTTP requests in milliseconds");
-                
+
             _healthChecks = _meter.CreateCounter<long>(
                 "health_checks_total",
                 description: "Total number of health check executions");
-                
+
             _configValidations = _meter.CreateCounter<long>(
                 "config_validations_total",
                 description: "Total number of configuration validations");
@@ -88,7 +88,7 @@ namespace Maliev.AuthService.Api.Services
 
         public void IncrementAuthenticationFailure(string userType, string reason)
         {
-            _authFailures.Add(1, 
+            _authFailures.Add(1,
                 new KeyValuePair<string, object?>("user_type", userType),
                 new KeyValuePair<string, object?>("reason", reason));
             _logger.LogWarning("Authentication failure recorded for user type: {UserType}, reason: {Reason}", userType, reason);
@@ -123,7 +123,7 @@ namespace Maliev.AuthService.Api.Services
             _externalServiceDuration.Record(duration.TotalMilliseconds,
                 new KeyValuePair<string, object?>("service", service),
                 new KeyValuePair<string, object?>("success", success));
-            _logger.LogDebug("External service call duration recorded: {Service}, {Duration}ms, Success: {Success}", 
+            _logger.LogDebug("External service call duration recorded: {Service}, {Duration}ms, Success: {Success}",
                 service, duration.TotalMilliseconds, success);
         }
 

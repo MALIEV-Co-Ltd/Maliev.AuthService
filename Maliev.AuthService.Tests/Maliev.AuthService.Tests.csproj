@@ -25,6 +25,7 @@
     
   <ItemGroup>
     <ProjectReference Include="..\Maliev.AuthService.Api\Maliev.AuthService.Api.csproj" />
+    <ProjectReference Include="..\Maliev.AuthService.Data\Maliev.AuthService.Data.csproj" />
   </ItemGroup>
 
 </Project>

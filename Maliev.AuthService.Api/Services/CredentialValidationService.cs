@@ -64,7 +64,7 @@ namespace Maliev.AuthService.Api.Services
 
             if (result.Errors.Any())
             {
-                _logger.LogWarning("Credential validation failed for username: {Username}. Errors: {Errors}", 
+                _logger.LogWarning("Credential validation failed for username: {Username}. Errors: {Errors}",
                     username ?? "[null]", string.Join(", ", result.Errors));
             }
 
@@ -145,7 +145,7 @@ namespace Maliev.AuthService.Api.Services
                 return false;
 
             var lowerInput = input.ToLowerInvariant();
-            return _options.SuspiciousPatterns.Any(pattern => 
+            return _options.SuspiciousPatterns.Any(pattern =>
                 lowerInput.Contains(pattern.ToLowerInvariant()));
         }
 
@@ -174,8 +174,11 @@ namespace Maliev.AuthService.Api.Services
         {
             public bool IsValid { get; set; }
             public List<string> Errors { get; set; } = new();
-            
-            public void AddError(string error) => Errors.Add(error);
+
+            public void AddError(string error)
+            {
+                Errors.Add(error);
+            }
         }
     }
 }

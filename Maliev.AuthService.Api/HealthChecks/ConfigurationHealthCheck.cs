@@ -27,13 +27,13 @@ namespace Maliev.AuthService.Api.HealthChecks
                 if (validationResult.IsValid)
                 {
                     var data = new Dictionary<string, object>();
-                    
+
                     if (validationResult.Warnings.Any())
                     {
                         data["warnings"] = validationResult.Warnings;
                         return HealthCheckResult.Healthy("Configuration is valid with warnings", data);
                     }
-                    
+
                     return HealthCheckResult.Healthy("Configuration is valid");
                 }
                 else
@@ -44,7 +44,7 @@ namespace Maliev.AuthService.Api.HealthChecks
                         ["warnings"] = validationResult.Warnings
                     };
 
-                    _logger.LogError("Configuration validation failed: {Errors}", 
+                    _logger.LogError("Configuration validation failed: {Errors}",
                         string.Join("; ", validationResult.Errors));
 
                     return HealthCheckResult.Unhealthy("Configuration validation failed", data: data);
