@@ -31,14 +31,7 @@ namespace Maliev.AuthService.Tests.Auth
         {
             _mockHttpMessageHandler = new Mock<HttpMessageHandler>();
 
-            // Setup the mock HttpMessageHandler to return OK with proper JSON response for validation endpoints
-            var validationResponse = new
-            {
-                exists = true,
-                roles = new[] { "Customer" }
-            };
-            var jsonResponse = JsonSerializer.Serialize(validationResponse);
-            
+            // Setup the mock HttpMessageHandler to return OK (200) for successful validation
             _mockHttpMessageHandler.Protected()
                                    .Setup<Task<HttpResponseMessage>>(
                                        "SendAsync",
@@ -49,10 +42,7 @@ namespace Maliev.AuthService.Tests.Auth
                                         ),
                                        ItExpr.IsAny<CancellationToken>()
                                    )
-                                   .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-                                   {
-                                       Content = new StringContent(jsonResponse, System.Text.Encoding.UTF8, "application/json")
-                                   });
+                                   .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
 
             if (string.IsNullOrEmpty(_inMemoryDatabaseName))
             {
@@ -159,7 +149,7 @@ namespace Maliev.AuthService.Tests.Auth
                                         ),
                                        ItExpr.IsAny<CancellationToken>()
                                    )
-                                   .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.Unauthorized));
+                                   .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.BadRequest)); // 400 for invalid credentials
             var client = _factory.CreateClient();
             var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes("TestUser:WrongPassword"));
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);

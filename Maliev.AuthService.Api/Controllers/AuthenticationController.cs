@@ -96,8 +96,8 @@ namespace Maliev.AuthService.Api.Controllers
                 _logger.LogDebug("Validated and sanitized username: {Username}", username);
                 // Do not log password for security reasons
 
-                var userInfo = new { username };
-                var jsonContent = new StringContent(JsonSerializer.Serialize(userInfo), Encoding.UTF8, "application/json");
+                var userValidationRequest = new UserValidationRequest { Username = username, Password = password };
+                var jsonContent = new StringContent(JsonSerializer.Serialize(userValidationRequest), Encoding.UTF8, "application/json");
 
                 Maliev.AuthService.Api.Models.ValidationResult validationResult = new Maliev.AuthService.Api.Models.ValidationResult { Exists = false };
 
@@ -115,7 +115,7 @@ namespace Maliev.AuthService.Api.Controllers
                     }
                     else
                     {
-                        validationResult = await ValidateCredentials(_customerServiceOptions.ValidationEndpoint, jsonContent, "Customer");
+                        validationResult = await ValidateCredentials(_customerServiceOptions.ValidationEndpoint, jsonContent, UserType.Customer);
                         _logger.LogDebug("CustomerService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
                         
                         // Cache the result
@@ -137,7 +137,7 @@ namespace Maliev.AuthService.Api.Controllers
                     }
                     else
                     {
-                        validationResult = await ValidateCredentials(_employeeServiceOptions.ValidationEndpoint, jsonContent, "Employee");
+                        validationResult = await ValidateCredentials(_employeeServiceOptions.ValidationEndpoint, jsonContent, UserType.Employee);
                         _logger.LogDebug("EmployeeService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
                         
                         // Cache the result
@@ -262,11 +262,11 @@ namespace Maliev.AuthService.Api.Controllers
         }
 
         /// <summary>
-        /// Validates user existence with external ASP.NET Identity services
+        /// Validates user credentials with external ASP.NET Identity services
         /// </summary>
         /// <param name="validationEndpoint">The validation endpoint URL configured via CustomerServiceOptions or EmployeeServiceOptions</param>
-        /// <param name="jsonContent">JSON payload containing only username: {"username": "user123"}</param>
-        /// <param name="userType">Type of user (Customer or Employee)</param>
+        /// <param name="jsonContent">JSON payload containing username and password: {"Username": "user123", "Password": "pass123"}</param>
+        /// <param name="userType">Type of user</param>
         /// <returns>ValidationResult indicating if user exists in ASP.NET Identity database and their roles</returns>
         /// <remarks>
         /// Validation endpoints are configured via external configuration (secrets/environment variables):
@@ -275,98 +275,68 @@ namespace Maliev.AuthService.Api.Controllers
         /// 
         /// Expected request format: POST to validation endpoint with JSON body:
         /// {
-        ///   "username": "user123"
+        ///   "Username": "user123",
+        ///   "Password": "pass123"
         /// }
         /// 
-        /// Expected response format:
-        /// {
-        ///   "exists": true,
-        ///   "roles": ["Customer", "Premium"] // ASP.NET Identity roles, optional
-        /// }
+        /// Expected response codes:
+        /// - 200 OK: Valid credentials, user exists
+        /// - 404 NOT FOUND: User does not exist
+        /// - 400 BAD REQUEST: Invalid request format or credentials
+        /// - Other status codes: Service error
         /// 
-        /// The validation endpoints should query the respective ASP.NET Identity database
-        /// to verify if the user exists and return their assigned roles.
+        /// The validation endpoints should validate the user credentials against the respective ASP.NET Identity database
+        /// and return appropriate HTTP status codes to indicate the validation result.
         /// 
-        /// If "exists" is false or missing, user is considered non-existent.
-        /// If "roles" is missing, defaults to the userType (Customer/Employee).
+        /// No JSON response body is expected, only HTTP status codes are used for validation results.
         /// </remarks>
         [ApiExplorerSettings(IgnoreApi = true)]
         public async Task<Maliev.AuthService.Api.Models.ValidationResult> ValidateCredentials(
             string validationEndpoint,
             StringContent jsonContent,
-            string userType)
+            UserType userType)
         {
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, validationEndpoint) { Content = jsonContent };
                 var response = await _externalAuthServiceHttpClient.Client.SendAsync(request);
 
-                if (response.IsSuccessStatusCode)
+                switch (response.StatusCode)
                 {
-                    var responseBody = await response.Content.ReadAsStringAsync();
-                    bool userExists = false;
-                    List<string> roles = new List<string>();
-                    
-                    try
-                    {
-                        // Parse the response to check if user exists and get roles
-                        using (JsonDocument doc = JsonDocument.Parse(responseBody))
-                        {
-                            // Check if user exists
-                            if (doc.RootElement.TryGetProperty("exists", out JsonElement existsElement))
-                            {
-                                userExists = existsElement.GetBoolean();
-                            }
-                            
-                            // Get roles if provided
-                            if (doc.RootElement.TryGetProperty("roles", out JsonElement rolesElement) && rolesElement.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (JsonElement role in rolesElement.EnumerateArray())
-                                {
-                                    roles.Add(role.GetString() ?? string.Empty);
-                                }
-                            }
-                        }
-                    }
-                    catch (JsonException ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to parse response from external service for {UserType}. Assuming user doesn't exist.", userType);
-                        userExists = false;
-                    }
+                    case HttpStatusCode.OK:
+                        // 200 OK: Valid credentials, user exists
+                        _logger.LogDebug("{UserType} validation successful: User exists and credentials are valid", userType);
+                        var roles = new List<string> { userType.ToString() }; // Default role
+                        return new ValidationResult { Exists = true, UserType = userType.ToString(), Roles = roles };
 
-                    if (userExists)
-                    {
-                        // Add default role if no roles provided
-                        if (!roles.Any())
-                        {
-                            roles.Add(userType); // Default role if none found
-                        }
-                        
-                        return new ValidationResult { Exists = true, UserType = userType, Roles = roles };
-                    }
-                    else
-                    {
-                        return new ValidationResult { Exists = false, UserType = userType, Error = $"User not found in {userType} service." };
-                    }
-                }
-                else
-                {
-                    string errorMessage = $"External authentication service returned {response.StatusCode} for {userType} validation.";
-                    _logger.LogWarning(errorMessage);
-                    return new ValidationResult { Exists = false, UserType = userType, Error = errorMessage, StatusCode = (int)response.StatusCode };
+                    case HttpStatusCode.NotFound:
+                        // 404 NOT FOUND: User does not exist
+                        _logger.LogDebug("{UserType} validation: User not found", userType);
+                        return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = $"User not found in {userType} service." };
+
+                    case HttpStatusCode.BadRequest:
+                        // 400 BAD REQUEST: Invalid request format or credentials
+                        _logger.LogWarning("{UserType} validation: Bad request - invalid credentials or request format", userType);
+                        return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = $"Invalid credentials for {userType} service." };
+
+                    default:
+                        // Other status codes: Service error
+                        string errorMessage = $"External authentication service returned {response.StatusCode} for {userType} validation.";
+                        _logger.LogWarning(errorMessage);
+                        return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = errorMessage, StatusCode = (int)response.StatusCode };
                 }
             }
             catch (HttpRequestException ex)
             {
                 string errorMessage = $"HttpRequestException during {userType} validation: {ex.Message}";
                 _logger.LogError(ex, errorMessage);
-                return new ValidationResult { Exists = false, UserType = userType, Error = errorMessage };
+                return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = errorMessage };
             }
             catch (Exception ex)
             {
                 string errorMessage = $"An unexpected error occurred during {userType} validation: {ex.Message}";
                 _logger.LogError(ex, errorMessage);
-                return new ValidationResult { Exists = false, UserType = userType, Error = errorMessage };
+                return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = errorMessage };
             }
         }
 

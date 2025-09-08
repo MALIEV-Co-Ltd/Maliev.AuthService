@@ -88,37 +88,15 @@ namespace Maliev.AuthService.Tests.Auth
         }
 
         [Fact]
-        public async Task ValidateCredentials_SuccessWithRoles_ReturnsExistsTrueAndRoles()
+        public async Task ValidateCredentials_HttpOK_ReturnsExistsTrueWithDefaultRole()
         {
             // Arrange
-            var credentials = new { username = "testuser", password = "password" };
+            var credentials = new UserValidationRequest { Username = "testuser", Password = "password" };
             var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
-            var responseContent = "{\"exists\":true,\"roles\":[\"Admin\",\"User\"]}";
-            SetupHttpClientMock(HttpStatusCode.OK, responseContent);
+            SetupHttpClientMock(HttpStatusCode.OK);
 
             // Act
-            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, "Customer");
-
-            // Assert
-            Assert.True(result.Exists);
-            Assert.Equal("Customer", result.UserType);
-            Assert.Contains("Admin", result.Roles);
-            Assert.Contains("User", result.Roles);
-            Assert.Null(result.Error);
-            Assert.Null(result.StatusCode);
-        }
-
-        [Fact]
-        public async Task ValidateCredentials_SuccessWithoutRoles_ReturnsExistsTrueAndDefaultRole()
-        {
-            // Arrange
-            var credentials = new { username = "testuser", password = "password" };
-            var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
-            var responseContent = "{\"exists\":true}"; // No roles in response
-            SetupHttpClientMock(HttpStatusCode.OK, responseContent);
-
-            // Act
-            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, "Customer");
+            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, UserType.Customer);
 
             // Assert
             Assert.True(result.Exists);
@@ -130,35 +108,55 @@ namespace Maliev.AuthService.Tests.Auth
         }
 
         [Fact]
-        public async Task ValidateCredentials_Unauthorized_ReturnsExistsFalseAndError()
+        public async Task ValidateCredentials_HttpNotFound_ReturnsExistsFalseWithError()
         {
             // Arrange
-            var credentials = new { username = "testuser", password = "password" };
+            var credentials = new UserValidationRequest { Username = "testuser", Password = "password" };
             var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
-            SetupHttpClientMock(HttpStatusCode.Unauthorized);
+            SetupHttpClientMock(HttpStatusCode.NotFound);
 
             // Act
-            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, "Customer");
+            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, UserType.Customer);
 
             // Assert
             Assert.False(result.Exists);
             Assert.Equal("Customer", result.UserType);
             Assert.Empty(result.Roles);
             Assert.NotNull(result.Error);
-            Assert.Contains("Unauthorized", result.Error);
-            Assert.Equal((int)HttpStatusCode.Unauthorized, result.StatusCode);
+            Assert.Contains("User not found in Customer service", result.Error);
+            Assert.Null(result.StatusCode);
+        }
+
+        [Fact]
+        public async Task ValidateCredentials_HttpBadRequest_ReturnsExistsFalseWithError()
+        {
+            // Arrange
+            var credentials = new UserValidationRequest { Username = "testuser", Password = "password" };
+            var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
+            SetupHttpClientMock(HttpStatusCode.BadRequest);
+
+            // Act
+            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, UserType.Customer);
+
+            // Assert
+            Assert.False(result.Exists);
+            Assert.Equal("Customer", result.UserType);
+            Assert.Empty(result.Roles);
+            Assert.NotNull(result.Error);
+            Assert.Contains("Invalid credentials for Customer service", result.Error);
+            Assert.Null(result.StatusCode);
         }
 
         [Fact]
         public async Task ValidateCredentials_InternalServerError_ReturnsExistsFalseAndError()
         {
             // Arrange
-            var credentials = new { username = "testuser", password = "password" };
+            var credentials = new UserValidationRequest { Username = "testuser", Password = "password" };
             var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
             SetupHttpClientMock(HttpStatusCode.InternalServerError);
 
             // Act
-            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, "Customer");
+            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, UserType.Customer);
 
             // Assert
             Assert.False(result.Exists);
@@ -173,12 +171,12 @@ namespace Maliev.AuthService.Tests.Auth
         public async Task ValidateCredentials_HttpRequestException_ReturnsExistsFalseAndError()
         {
             // Arrange
-            var credentials = new { username = "testuser", password = "password" };
+            var credentials = new UserValidationRequest { Username = "testuser", Password = "password" };
             var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
             SetupHttpClientMock(HttpStatusCode.OK, exception: new HttpRequestException("Network error"));
 
             // Act
-            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, "Customer");
+            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, UserType.Customer);
 
             // Assert
             Assert.False(result.Exists);
@@ -193,12 +191,12 @@ namespace Maliev.AuthService.Tests.Auth
         public async Task ValidateCredentials_GeneralException_ReturnsExistsFalseAndError()
         {
             // Arrange
-            var credentials = new { username = "testuser", password = "password" };
+            var credentials = new UserValidationRequest { Username = "testuser", Password = "password" };
             var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
             SetupHttpClientMock(HttpStatusCode.OK, exception: new Exception("Generic error"));
 
             // Act
-            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, "Customer");
+            var result = await _controller.ValidateCredentials("http://customer.service/validate", jsonContent, UserType.Customer);
 
             // Assert
             Assert.False(result.Exists);
