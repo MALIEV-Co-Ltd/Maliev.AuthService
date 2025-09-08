@@ -8,10 +8,10 @@ namespace Maliev.AuthService.Data.Entities
         public int Id { get; set; }
 
         [Required]
-        public string Username { get; set; }
+        public required string Username { get; set; }
 
         [Required]
-        public string Token { get; set; }
+        public required string Token { get; set; }
 
         [Required]
         public DateTime Expires { get; set; }
