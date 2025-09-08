@@ -55,7 +55,7 @@ namespace Maliev.AuthService.Api.Services
             return result;
         }
 
-        public async Task<ConfigValidationResult> ValidateJwtConfigurationAsync()
+        public Task<ConfigValidationResult> ValidateJwtConfigurationAsync()
         {
             var result = new ConfigValidationResult { IsValid = true };
             var jwt = _jwtOptions.CurrentValue;
@@ -95,7 +95,7 @@ namespace Maliev.AuthService.Api.Services
             }
 
             result.IsValid = !result.Errors.Any();
-            return result;
+            return Task.FromResult(result);
         }
 
         public async Task<ConfigValidationResult> ValidateExternalServicesAsync()

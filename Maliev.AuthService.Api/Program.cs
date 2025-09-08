@@ -20,8 +20,36 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Npgsql.EntityFrameworkCore.PostgreSQL;
 using Maliev.AuthService.Api.Middleware;
 using System.Threading.RateLimiting;
+using Serilog;
+using Serilog.Events;
+using Serilog.Filters;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure Serilog
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(builder.Configuration)
+    .Enrich.FromLogContext()
+    .Enrich.WithEnvironmentName()
+    .Enrich.WithMachineName()
+    .Enrich.WithProcessId()
+    .Enrich.WithThreadId()
+    .Filter.ByExcluding(Matching.WithProperty<string>("RequestPath", path => 
+        path.StartsWith("/health") || path.StartsWith("/metrics")))
+    .WriteTo.Console(outputTemplate: 
+        "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {CorrelationId} {SourceContext} {Message:lj}{NewLine}{Exception}")
+    .WriteTo.File(
+        path: "logs/auth-service-.txt",
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 31,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {CorrelationId} {SourceContext} {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
+
+builder.Host.UseSerilog();
+
+try
+{
+    Log.Information("Starting Maliev Authentication Service");
 
 // Load secrets.yaml
 builder.Configuration.AddYamlFile("secrets.yaml", optional: true, reloadOnChange: true);
@@ -133,6 +161,12 @@ builder.Services.AddScoped<IConfigurationValidationService, ConfigurationValidat
 // Register Credential Validation Service
 builder.Services.AddScoped<ICredentialValidationService, CredentialValidationService>();
 
+// Register Metrics Service
+builder.Services.AddSingleton<IMetricsService, MetricsService>();
+
+// Configure Logging Options
+builder.Services.Configure<LoggingOptions>(builder.Configuration.GetSection(LoggingOptions.SectionName));
+
 // Configure Rate Limiting
 builder.Services.AddRateLimiter(options =>
 {
@@ -242,6 +276,9 @@ var app = builder.Build();
 
 app.UseForwardedHeaders();
 
+// Add correlation ID middleware early in pipeline
+app.UseCorrelationId();
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -289,3 +326,16 @@ app.MapHealthChecks("/auth/readiness", new HealthCheckOptions
 app.MapControllers();
 
 app.Run();
+
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Application terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
+
+// Make Program class accessible for integration tests
+public partial class Program { }
