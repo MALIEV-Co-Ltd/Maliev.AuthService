@@ -284,7 +284,7 @@ spec:
     - protocol: TCP
       port: 80
       targetPort: 8080
-  type: ClusterIP
+  type: NodePort
 
 ---
 apiVersion: networking.k8s.io/v1
