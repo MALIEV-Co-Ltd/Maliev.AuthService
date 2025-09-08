@@ -42,8 +42,8 @@ jobs:
       run: |
         gcloud auth configure-docker asia-southeast1-docker.pkg.dev
         export RELEASE_VERSION=$(echo ${{ github.ref }} | sed -e 's,.*/v,,g')
-        docker build -t asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-authservice:$RELEASE_VERSION -f Maliev.AuthService.Api/Dockerfile .
-        docker push asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-authservice:$RELEASE_VERSION
+        docker build -t asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-auth-service:$RELEASE_VERSION -f Maliev.AuthService.Api/Dockerfile .
+        docker push asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-auth-service:$RELEASE_VERSION
 
     - name: Checkout maliev-gitops repository
       uses: actions/checkout@v3
@@ -61,7 +61,7 @@ jobs:
       run: |
         export RELEASE_VERSION=$(echo ${{ github.ref }} | sed -e 's,.*/v,,g')
         cd maliev-gitops/3-apps/maliev-auth-service/overlays/staging
-        kustomize edit set image asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact/maliev-authservice=asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-authservice:$RELEASE_VERSION
+        kustomize edit set image asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact/maliev-auth-service=asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-auth-service:$RELEASE_VERSION
         
     - name: Commit and push changes
       run: |
