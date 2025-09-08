@@ -28,6 +28,7 @@ namespace Maliev.AuthService.Api.Controllers
         private readonly CustomerServiceOptions _customerServiceOptions;
         private readonly EmployeeServiceOptions _employeeServiceOptions;
         private readonly IValidationCacheService _validationCacheService;
+        private readonly ICredentialValidationService _credentialValidationService;
 
         public AuthenticationController(
             ITokenGenerator tokenGenerator,
@@ -36,7 +37,8 @@ namespace Maliev.AuthService.Api.Controllers
             ILogger<AuthenticationController> logger,
             IOptions<CustomerServiceOptions> customerServiceOptions,
             IOptions<EmployeeServiceOptions> employeeServiceOptions,
-            IValidationCacheService validationCacheService)
+            IValidationCacheService validationCacheService,
+            ICredentialValidationService credentialValidationService)
         {
             _tokenGenerator = tokenGenerator;
             _externalAuthServiceHttpClient = externalAuthServiceHttpClient;
@@ -45,6 +47,7 @@ namespace Maliev.AuthService.Api.Controllers
             _customerServiceOptions = customerServiceOptions.Value;
             _employeeServiceOptions = employeeServiceOptions.Value;
             _validationCacheService = validationCacheService;
+            _credentialValidationService = credentialValidationService;
         }
 
         [HttpPost("token")]
@@ -61,16 +64,42 @@ namespace Maliev.AuthService.Api.Controllers
                 {
                     return BadRequest("Invalid authorization header format");
                 }
-                var parameter = Encoding.UTF8.GetString(Convert.FromBase64String(authHeader.Parameter)).Split(':', 2);
-                var username = parameter[0];
-                var password = parameter[1];
-                _logger.LogDebug("Extracted Username: {Username}", username);
+                
+                string[] parameter;
+                try
+                {
+                    parameter = Encoding.UTF8.GetString(Convert.FromBase64String(authHeader.Parameter)).Split(':', 2);
+                }
+                catch (FormatException)
+                {
+                    return BadRequest("Invalid Base64 encoding in authorization header");
+                }
+                
+                if (parameter.Length != 2)
+                {
+                    return BadRequest("Invalid credential format in authorization header");
+                }
+                
+                var rawUsername = parameter[0];
+                var rawPassword = parameter[1];
+                
+                // Validate credentials
+                var credentialValidation = _credentialValidationService.ValidateCredentials(rawUsername, rawPassword);
+                if (!credentialValidation.IsValid)
+                {
+                    _logger.LogWarning("Invalid credentials provided: {Errors}", string.Join(", ", credentialValidation.Errors));
+                    return BadRequest($"Invalid credentials: {string.Join(", ", credentialValidation.Errors)}");
+                }
+                
+                var username = credentialValidation.SanitizedUsername!;
+                var password = credentialValidation.SanitizedPassword!;
+                _logger.LogDebug("Validated and sanitized username: {Username}", username);
                 // Do not log password for security reasons
 
                 var userInfo = new { username };
                 var jsonContent = new StringContent(JsonSerializer.Serialize(userInfo), Encoding.UTF8, "application/json");
 
-                ValidationResult validationResult = new ValidationResult { Exists = false };
+                Maliev.AuthService.Api.Models.ValidationResult validationResult = new Maliev.AuthService.Api.Models.ValidationResult { Exists = false };
 
                 // Try validating with CustomerService (check cache first)
                 if (!string.IsNullOrEmpty(_customerServiceOptions.ValidationEndpoint))
@@ -262,7 +291,7 @@ namespace Maliev.AuthService.Api.Controllers
         /// If "roles" is missing, defaults to the userType (Customer/Employee).
         /// </remarks>
         [ApiExplorerSettings(IgnoreApi = true)]
-        public async Task<ValidationResult> ValidateCredentials(
+        public async Task<Maliev.AuthService.Api.Models.ValidationResult> ValidateCredentials(
             string validationEndpoint,
             StringContent jsonContent,
             string userType)

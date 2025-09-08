@@ -28,6 +28,7 @@ namespace Maliev.AuthService.Tests.Auth
         private readonly Mock<IOptions<CustomerServiceOptions>> _mockCustomerServiceOptions;
         private readonly Mock<IOptions<EmployeeServiceOptions>> _mockEmployeeServiceOptions;
         private readonly Mock<IValidationCacheService> _mockValidationCacheService;
+        private readonly Mock<ICredentialValidationService> _mockCredentialValidationService;
         private readonly AuthenticationController _controller;
 
         public ValidateCredentials_UnitTests()
@@ -39,6 +40,7 @@ namespace Maliev.AuthService.Tests.Auth
             _mockCustomerServiceOptions = new Mock<IOptions<CustomerServiceOptions>>();
             _mockEmployeeServiceOptions = new Mock<IOptions<EmployeeServiceOptions>>();
             _mockValidationCacheService = new Mock<IValidationCacheService>();
+            _mockCredentialValidationService = new Mock<ICredentialValidationService>();
 
             _mockCustomerServiceOptions.Setup(o => o.Value).Returns(new CustomerServiceOptions { ValidationEndpoint = "http://customer.service/validate" });
             _mockEmployeeServiceOptions.Setup(o => o.Value).Returns(new EmployeeServiceOptions { ValidationEndpoint = "http://employee.service/validate" });
@@ -46,6 +48,10 @@ namespace Maliev.AuthService.Tests.Auth
             // Setup cache service to return null by default (cache miss)
             _mockValidationCacheService.Setup(c => c.GetValidationResultAsync(It.IsAny<string>(), It.IsAny<string>()))
                 .ReturnsAsync((ValidationResult?)null);
+                
+            // Setup credential validation service to return valid credentials by default
+            _mockCredentialValidationService.Setup(c => c.ValidateCredentials(It.IsAny<string>(), It.IsAny<string>()))
+                .Returns(new CredentialValidationResult { IsValid = true, SanitizedUsername = "testuser", SanitizedPassword = "password" });
 
             _controller = new AuthenticationController(
                 _mockTokenGenerator.Object,
@@ -54,7 +60,8 @@ namespace Maliev.AuthService.Tests.Auth
                 _mockLogger.Object,
                 _mockCustomerServiceOptions.Object,
                 _mockEmployeeServiceOptions.Object,
-                _mockValidationCacheService.Object);
+                _mockValidationCacheService.Object,
+                _mockCredentialValidationService.Object);
         }
 
         private void SetupHttpClientMock(HttpStatusCode statusCode, string? content = null, Exception? exception = null)

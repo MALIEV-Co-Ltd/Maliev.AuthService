@@ -63,3 +63,4 @@ migration_source
 .gemini/
 gha-creds-*.json
 secrets.yaml
+.claude/settings.local.json

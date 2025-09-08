@@ -62,12 +62,39 @@ builder.Services.AddHttpClient<ExternalAuthServiceHttpClient>((serviceProvider, 
     }
 });
 
-// Configure strongly-typed configuration options
-builder.Services.Configure<CustomerServiceOptions>(builder.Configuration.GetSection("CustomerService"));
-builder.Services.Configure<EmployeeServiceOptions>(builder.Configuration.GetSection("EmployeeService"));
-builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+// Configure strongly-typed configuration options with validation
+builder.Services.Configure<CustomerServiceOptions>(builder.Configuration.GetSection(CustomerServiceOptions.SectionName));
+builder.Services.Configure<EmployeeServiceOptions>(builder.Configuration.GetSection(EmployeeServiceOptions.SectionName));
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection(RateLimitOptions.SectionName));
 builder.Services.Configure<CacheOptions>(builder.Configuration.GetSection(CacheOptions.SectionName));
+builder.Services.Configure<CredentialValidationOptions>(builder.Configuration.GetSection(CredentialValidationOptions.SectionName));
+
+// Enable configuration validation
+builder.Services.AddOptions<JwtOptions>()
+    .Bind(builder.Configuration.GetSection(JwtOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+builder.Services.AddOptions<CustomerServiceOptions>()
+    .Bind(builder.Configuration.GetSection(CustomerServiceOptions.SectionName))
+    .ValidateDataAnnotations();
+
+builder.Services.AddOptions<EmployeeServiceOptions>()
+    .Bind(builder.Configuration.GetSection(EmployeeServiceOptions.SectionName))
+    .ValidateDataAnnotations();
+
+builder.Services.AddOptions<RateLimitOptions>()
+    .Bind(builder.Configuration.GetSection(RateLimitOptions.SectionName))
+    .ValidateDataAnnotations();
+
+builder.Services.AddOptions<CacheOptions>()
+    .Bind(builder.Configuration.GetSection(CacheOptions.SectionName))
+    .ValidateDataAnnotations();
+
+builder.Services.AddOptions<CredentialValidationOptions>()
+    .Bind(builder.Configuration.GetSection(CredentialValidationOptions.SectionName))
+    .ValidateDataAnnotations();
 
 // Configure RefreshToken DbContext
 if (builder.Environment.IsEnvironment("Testing"))
@@ -98,6 +125,13 @@ builder.Services.AddMemoryCache(options =>
 
 // Register Validation Cache Service
 builder.Services.AddScoped<IValidationCacheService, ValidationCacheService>();
+
+// Register Configuration Validation Service
+builder.Services.AddHttpClient<IConfigurationValidationService, ConfigurationValidationService>();
+builder.Services.AddScoped<IConfigurationValidationService, ConfigurationValidationService>();
+
+// Register Credential Validation Service
+builder.Services.AddScoped<ICredentialValidationService, CredentialValidationService>();
 
 // Configure Rate Limiting
 builder.Services.AddRateLimiter(options =>
@@ -201,7 +235,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<RefreshTokenDbContext>("RefreshTokenDbContext", tags: new[] { "readiness" })
-    .AddCheck<ExternalServiceHealthCheck>("External Services Check", tags: new[] { "readiness" });
+    .AddCheck<ExternalServiceHealthCheck>("External Services Check", tags: new[] { "readiness" })
+    .AddCheck<ConfigurationHealthCheck>("Configuration Check", tags: new[] { "readiness" });
 
 var app = builder.Build();
 
