@@ -288,7 +288,7 @@ try
         {
             c.SwaggerEndpoint($"./{description.GroupName}/swagger.json", description.GroupName.ToUpperInvariant());
         }
-        c.RoutePrefix = "swagger";
+        c.RoutePrefix = "auth/swagger";
     });
 
     // Secure Swagger UI
