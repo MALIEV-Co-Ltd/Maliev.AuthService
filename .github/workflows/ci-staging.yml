@@ -69,5 +69,7 @@ jobs:
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         git add .
-        git commit -m "Update auth-service image to $RELEASE_VERSION"
+        export RELEASE_VERSION=$(echo ${{ github.ref }} | sed -e 's,.*/v,,g')
+        git commit -m "Update auth-service image to $RELEASE_VERSION" || exit 0
+        git pull --rebase origin $(git branch --show-current) || true
         git push
