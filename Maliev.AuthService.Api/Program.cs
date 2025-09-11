@@ -222,8 +222,10 @@ try
             policy =>
             {
                 policy.WithOrigins(
-                    "https://api.maliev.com",
-                    "http://api.maliev.com")
+                    "https://maliev.com",
+                    "https://*.maliev.com",
+                    "http://maliev.com",
+                    "http://*.maliev.com")
                 .AllowAnyHeader()
                 .AllowAnyMethod();
             });
