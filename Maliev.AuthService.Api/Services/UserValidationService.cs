@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 
 namespace Maliev.AuthService.Api.Services
 {
@@ -26,7 +27,8 @@ namespace Maliev.AuthService.Api.Services
             string username,
             string password,
             CustomerServiceOptions customerServiceOptions,
-            EmployeeServiceOptions employeeServiceOptions)
+            EmployeeServiceOptions employeeServiceOptions,
+            CancellationToken cancellationToken = default)
         {
             var userValidationRequest = new UserValidationRequest { Username = username, Password = password };
             var jsonContent = new StringContent(JsonSerializer.Serialize(userValidationRequest), Encoding.UTF8, "application/json");
@@ -50,7 +52,8 @@ namespace Maliev.AuthService.Api.Services
                     validationResult = await _externalAuthenticationService.ValidateCredentialsAsync(
                         customerServiceOptions.ValidationEndpoint, 
                         jsonContent, 
-                        UserType.Customer);
+                        UserType.Customer,
+                        cancellationToken);
                     _logger.LogDebug("CustomerService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
 
                     // Cache the result
@@ -75,7 +78,8 @@ namespace Maliev.AuthService.Api.Services
                     validationResult = await _externalAuthenticationService.ValidateCredentialsAsync(
                         employeeServiceOptions.ValidationEndpoint, 
                         jsonContent, 
-                        UserType.Employee);
+                        UserType.Employee,
+                        cancellationToken);
                     _logger.LogDebug("EmployeeService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
 
                     // Cache the result

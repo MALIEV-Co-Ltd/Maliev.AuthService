@@ -1,5 +1,6 @@
 using Maliev.AuthService.Api.Models;
 using System.Net;
+using System.Threading;
 
 namespace Maliev.AuthService.Api.Services
 {
@@ -9,6 +10,7 @@ namespace Maliev.AuthService.Api.Services
             string username,
             string password,
             CustomerServiceOptions customerServiceOptions,
-            EmployeeServiceOptions employeeServiceOptions);
+            EmployeeServiceOptions employeeServiceOptions,
+            CancellationToken cancellationToken = default);
     }
 }

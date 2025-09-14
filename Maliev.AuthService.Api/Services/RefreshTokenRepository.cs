@@ -2,6 +2,7 @@ using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Threading;
 
 namespace Maliev.AuthService.Api.Services
 {
@@ -16,14 +17,14 @@ namespace Maliev.AuthService.Api.Services
             _logger = logger;
         }
 
-        public async Task<int> CleanExpiredAndRevokedTokensAsync()
+        public async Task<int> CleanExpiredAndRevokedTokensAsync(CancellationToken cancellationToken = default)
         {
             try
             {
                 // Use ExecuteDeleteAsync for better performance (PostgreSQL, SQL Server, etc.)
                 var deletedCount = await _dbContext.RefreshTokens
                     .Where(rt => rt.Expires < DateTime.UtcNow && rt.Revoked != null)
-                    .ExecuteDeleteAsync();
+                    .ExecuteDeleteAsync(cancellationToken);
                 
                 _logger.LogInformation("Cleaned up {DeletedCount} expired and revoked refresh tokens using ExecuteDeleteAsync", deletedCount);
                 return deletedCount;
@@ -33,12 +34,12 @@ namespace Maliev.AuthService.Api.Services
                 // Fall back to traditional approach for providers that don't support ExecuteDeleteAsync (like InMemory)
                 var tokensToClean = await _dbContext.RefreshTokens
                     .Where(rt => rt.Expires < DateTime.UtcNow && rt.Revoked != null)
-                    .ToListAsync();
+                    .ToListAsync(cancellationToken);
 
                 if (tokensToClean.Any())
                 {
                     _dbContext.RefreshTokens.RemoveRange(tokensToClean);
-                    await _dbContext.SaveChangesAsync();
+                    await _dbContext.SaveChangesAsync(cancellationToken);
                     _logger.LogInformation("Cleaned up {DeletedCount} expired and revoked refresh tokens using traditional approach", tokensToClean.Count);
                     return tokensToClean.Count;
                 }
@@ -50,9 +51,9 @@ namespace Maliev.AuthService.Api.Services
             }
         }
 
-        public async Task<RefreshToken?> GetRefreshTokenByTokenAsync(string token)
+        public async Task<RefreshToken?> GetRefreshTokenByTokenAsync(string token, CancellationToken cancellationToken = default)
         {
-            return await _dbContext.RefreshTokens.SingleOrDefaultAsync(rt => rt.Token == token);
+            return await _dbContext.RefreshTokens.SingleOrDefaultAsync(rt => rt.Token == token, cancellationToken);
         }
 
         public void AddRefreshToken(RefreshToken refreshToken)
@@ -65,9 +66,9 @@ namespace Maliev.AuthService.Api.Services
             _dbContext.RefreshTokens.Update(refreshToken);
         }
 
-        public async Task<int> SaveChangesAsync()
+        public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
-            return await _dbContext.SaveChangesAsync();
+            return await _dbContext.SaveChangesAsync(cancellationToken);
         }
     }
 }

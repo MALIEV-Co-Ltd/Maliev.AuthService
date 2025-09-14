@@ -49,7 +49,7 @@ namespace Maliev.AuthService.Api.Controllers
 
         [HttpPost("token")]
         [EnableRateLimiting("TokenPolicy")]
-        public async Task<IActionResult> Token()
+        public async Task<IActionResult> Token(CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("Token endpoint called.");
             var header = Request.Headers["Authorization"].ToString();
@@ -98,7 +98,8 @@ namespace Maliev.AuthService.Api.Controllers
                     username, 
                     password, 
                     _customerServiceOptions, 
-                    _employeeServiceOptions);
+                    _employeeServiceOptions,
+                    cancellationToken);
 
                 if (validationResult.Exists)
                 {
@@ -115,7 +116,7 @@ namespace Maliev.AuthService.Api.Controllers
                         CreatedByIp = HttpContext.Connection.RemoteIpAddress?.ToString()
                     };
                     _refreshTokenRepository.AddRefreshToken(refreshToken);
-                    await _refreshTokenRepository.SaveChangesAsync();
+                    await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
                     _logger.LogInformation("Tokens generated and refresh token saved.");
 
                     return Ok(new { AccessToken = accessToken, RefreshToken = refreshTokenString });
@@ -135,14 +136,14 @@ namespace Maliev.AuthService.Api.Controllers
 
         [HttpPost("token/refresh")]
         [EnableRateLimiting("RefreshPolicy")]
-        public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
+        public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request, CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("RefreshToken endpoint called.");
             _logger.LogInformation("Request - AccessToken: {AccessToken}", request.AccessToken.Length > 8 ? request.AccessToken.Substring(0, 8) + "..." : request.AccessToken);
             _logger.LogInformation("Request - RefreshToken: {RefreshToken}", request.RefreshToken.Length > 8 ? request.RefreshToken.Substring(0, 8) + "..." : request.RefreshToken);
 
             // Clean up expired and revoked refresh tokens
-            await _refreshTokenRepository.CleanExpiredAndRevokedTokensAsync();
+            await _refreshTokenRepository.CleanExpiredAndRevokedTokensAsync(cancellationToken);
 
             if (request == null || string.IsNullOrEmpty(request.AccessToken) || string.IsNullOrEmpty(request.RefreshToken))
             {
@@ -152,7 +153,7 @@ namespace Maliev.AuthService.Api.Controllers
 
             try
             {
-                var savedRefreshToken = await _refreshTokenRepository.GetRefreshTokenByTokenAsync(request.RefreshToken);
+                var savedRefreshToken = await _refreshTokenRepository.GetRefreshTokenByTokenAsync(request.RefreshToken, cancellationToken);
                 _logger.LogInformation("Saved RefreshToken from DB - Token: {Token}", savedRefreshToken?.Token != null && savedRefreshToken.Token.Length > 8 ? savedRefreshToken.Token.Substring(0, 8) + "..." : savedRefreshToken?.Token);
                 _logger.LogInformation("Saved RefreshToken from DB - Username: {Username}", savedRefreshToken?.Username);
                 _logger.LogInformation("Saved RefreshToken from DB - IsActive: {IsActive}", savedRefreshToken?.IsActive);
@@ -185,7 +186,7 @@ namespace Maliev.AuthService.Api.Controllers
                 // Revoke old refresh token
                 savedRefreshToken.Revoked = DateTime.UtcNow;
                 _refreshTokenRepository.UpdateRefreshToken(savedRefreshToken);
-                await _refreshTokenRepository.SaveChangesAsync();
+                await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
                 _logger.LogInformation("Old RefreshToken revoked and saved to DB.");
 
                 // Save new refresh token to database
@@ -199,7 +200,7 @@ namespace Maliev.AuthService.Api.Controllers
                     ReplacedByToken = request.RefreshToken
                 };
                 _refreshTokenRepository.AddRefreshToken(newRefreshToken);
-                await _refreshTokenRepository.SaveChangesAsync();
+                await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
                 _logger.LogInformation("New RefreshToken saved to DB.");
 
                 return Ok(new { AccessToken = newAccessToken, RefreshToken = newRefreshToken.Token });

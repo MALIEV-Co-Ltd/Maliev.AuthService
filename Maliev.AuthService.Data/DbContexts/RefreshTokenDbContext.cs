@@ -1,6 +1,7 @@
 using Maliev.AuthService.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Threading;
 
 namespace Maliev.AuthService.Data.DbContexts
 {
@@ -17,14 +18,14 @@ namespace Maliev.AuthService.Data.DbContexts
             base.OnModelCreating(modelBuilder);
         }
 
-        public async Task CleanExpiredAndRevokedTokensAsync(ILogger<RefreshTokenDbContext>? logger = null)
+        public async Task CleanExpiredAndRevokedTokensAsync(ILogger<RefreshTokenDbContext>? logger = null, CancellationToken cancellationToken = default)
         {
             try
             {
                 // Try to use ExecuteDeleteAsync for better performance (PostgreSQL, SQL Server, etc.)
                 var deletedCount = await RefreshTokens
                     .Where(rt => rt.Expires < DateTime.UtcNow && rt.Revoked != null)
-                    .ExecuteDeleteAsync();
+                    .ExecuteDeleteAsync(cancellationToken);
                 
                 logger?.LogInformation("Cleaned up {DeletedCount} expired and revoked refresh tokens using ExecuteDeleteAsync", deletedCount);
             }
@@ -33,12 +34,12 @@ namespace Maliev.AuthService.Data.DbContexts
                 // Fall back to traditional approach for providers that don't support ExecuteDeleteAsync (like InMemory)
                 var tokensToClean = await RefreshTokens
                     .Where(rt => rt.Expires < DateTime.UtcNow && rt.Revoked != null)
-                    .ToListAsync();
+                    .ToListAsync(cancellationToken);
 
                 if (tokensToClean.Any())
                 {
                     RefreshTokens.RemoveRange(tokensToClean);
-                    await SaveChangesAsync();
+                    await SaveChangesAsync(cancellationToken);
                     logger?.LogInformation("Cleaned up {DeletedCount} expired and revoked refresh tokens using traditional approach", tokensToClean.Count);
                 }
                 else

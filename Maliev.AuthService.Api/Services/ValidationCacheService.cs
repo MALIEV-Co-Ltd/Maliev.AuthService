@@ -1,6 +1,7 @@
 using Maliev.AuthService.Api.Models;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using System.Threading;
 
 namespace Maliev.AuthService.Api.Services
 {
@@ -20,8 +21,14 @@ namespace Maliev.AuthService.Api.Services
             _logger = logger;
         }
 
-        public Task<ValidationResult?> GetValidationResultAsync(string username, string userType)
+        public Task<ValidationResult?> GetValidationResultAsync(string username, string userType, CancellationToken cancellationToken = default)
         {
+            // Check for cancellation before doing work
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled<ValidationResult?>(cancellationToken);
+            }
+
             if (!_cacheOptions.ValidationCache.Enabled)
             {
                 return Task.FromResult<ValidationResult?>(null);
@@ -39,8 +46,14 @@ namespace Maliev.AuthService.Api.Services
             return Task.FromResult<ValidationResult?>(null);
         }
 
-        public Task SetValidationResultAsync(string username, string userType, ValidationResult result)
+        public Task SetValidationResultAsync(string username, string userType, ValidationResult result, CancellationToken cancellationToken = default)
         {
+            // Check for cancellation before doing work
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled(cancellationToken);
+            }
+
             if (!_cacheOptions.ValidationCache.Enabled)
             {
                 return Task.CompletedTask;
@@ -62,8 +75,14 @@ namespace Maliev.AuthService.Api.Services
             return Task.CompletedTask;
         }
 
-        public Task InvalidateUserValidationAsync(string username)
+        public Task InvalidateUserValidationAsync(string username, CancellationToken cancellationToken = default)
         {
+            // Check for cancellation before doing work
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled(cancellationToken);
+            }
+
             if (!_cacheOptions.ValidationCache.Enabled)
             {
                 return Task.CompletedTask;
@@ -79,8 +98,14 @@ namespace Maliev.AuthService.Api.Services
             return Task.CompletedTask;
         }
 
-        public Task ClearExpiredEntriesAsync()
+        public Task ClearExpiredEntriesAsync(CancellationToken cancellationToken = default)
         {
+            // Check for cancellation before doing work
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled(cancellationToken);
+            }
+
             // Memory cache handles expiration automatically
             // This method could be used for custom cleanup logic if needed
             _logger.LogDebug("Cache cleanup requested - MemoryCache handles expiration automatically");

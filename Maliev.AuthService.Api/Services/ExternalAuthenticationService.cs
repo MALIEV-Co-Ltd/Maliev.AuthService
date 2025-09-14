@@ -1,6 +1,7 @@
 using Maliev.AuthService.Api.Models;
 using Microsoft.Extensions.Logging;
 using System.Net;
+using System.Threading;
 
 namespace Maliev.AuthService.Api.Services
 {
@@ -20,12 +21,13 @@ namespace Maliev.AuthService.Api.Services
         public async Task<ValidationResult> ValidateCredentialsAsync(
             string validationEndpoint,
             StringContent jsonContent,
-            UserType userType)
+            UserType userType,
+            CancellationToken cancellationToken = default)
         {
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, validationEndpoint) { Content = jsonContent };
-                var response = await _externalAuthServiceHttpClient.Client.SendAsync(request);
+                var response = await _externalAuthServiceHttpClient.Client.SendAsync(request, cancellationToken);
 
                 return HandleExternalServiceResponse(response, userType);
             }

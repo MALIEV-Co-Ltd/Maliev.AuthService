@@ -1,5 +1,6 @@
 using Maliev.AuthService.Api.Models;
 using System.Net;
+using System.Threading;
 
 namespace Maliev.AuthService.Api.Services
 {
@@ -8,6 +9,7 @@ namespace Maliev.AuthService.Api.Services
         Task<ValidationResult> ValidateCredentialsAsync(
             string validationEndpoint,
             StringContent jsonContent,
-            UserType userType);
+            UserType userType,
+            CancellationToken cancellationToken = default);
     }
 }
