@@ -162,6 +162,9 @@ try
     // Register User Validation Service
     builder.Services.AddScoped<IUserValidationService, UserValidationService>();
 
+    // Register Authentication Service
+    builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
+
     // Register Metrics Service
     builder.Services.AddSingleton<IMetricsService, MetricsService>();
 
