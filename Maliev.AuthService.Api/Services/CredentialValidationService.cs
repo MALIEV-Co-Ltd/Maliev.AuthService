@@ -1,3 +1,4 @@
+using Maliev.AuthService.Common.Exceptions;
 using Maliev.AuthService.Api.Models;
 using Microsoft.Extensions.Options;
 using System.Text.RegularExpressions;

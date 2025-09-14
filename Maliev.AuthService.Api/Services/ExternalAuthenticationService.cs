@@ -1,3 +1,4 @@
+using Maliev.AuthService.Common.Exceptions;
 using Maliev.AuthService.Api.Models;
 using Microsoft.Extensions.Logging;
 using System.Net;
@@ -45,19 +46,28 @@ namespace Maliev.AuthService.Api.Services
             HttpResponseMessage response,
             UserType userType)
         {
-            switch (response.StatusCode)
+            try
             {
-                case HttpStatusCode.OK:
-                    return HandleSuccessResponse(userType);
+                switch (response.StatusCode)
+                {
+                    case HttpStatusCode.OK:
+                        return HandleSuccessResponse(userType);
 
-                case HttpStatusCode.NotFound:
-                    return HandleNotFoundResponse(userType);
+                    case HttpStatusCode.NotFound:
+                        return HandleNotFoundResponse(userType);
 
-                case HttpStatusCode.BadRequest:
-                    return HandleBadRequestResponse(userType);
+                    case HttpStatusCode.BadRequest:
+                        return HandleBadRequestResponse(userType);
 
-                default:
-                    return HandleOtherResponse(response, userType);
+                    default:
+                        return HandleOtherResponse(response, userType);
+                }
+            }
+            catch (Exception ex)
+            {
+                string errorMessage = $"An error occurred while handling external service response for {userType} validation.";
+                _logger.LogError(ex, errorMessage);
+                throw new ExternalServiceValidationException(errorMessage, ex);
             }
         }
 
@@ -99,7 +109,7 @@ namespace Maliev.AuthService.Api.Services
         {
             string errorMessage = $"HttpRequestException during {userType} validation: {ex.Message}";
             _logger.LogError(ex, errorMessage);
-            return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = errorMessage };
+            throw new ExternalServiceValidationException(errorMessage, ex);
         }
 
         private ValidationResult HandleGeneralException(
@@ -108,7 +118,7 @@ namespace Maliev.AuthService.Api.Services
         {
             string errorMessage = $"An unexpected error occurred during {userType} validation: {ex.Message}";
             _logger.LogError(ex, errorMessage);
-            return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = errorMessage };
+            throw new ExternalServiceValidationException(errorMessage, ex);
         }
     }
 }

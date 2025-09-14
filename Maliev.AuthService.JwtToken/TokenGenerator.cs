@@ -1,3 +1,4 @@
+using Maliev.AuthService.Common.Exceptions;
 using Maliev.AuthService.JwtToken.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -46,36 +47,45 @@ namespace Maliev.AuthService.JwtToken
         /// <returns>
         ///   <see cref="string" />.
         /// </returns>
+        /// <exception cref="TokenGenerationException">Thrown when token generation fails.</exception>
         public string GenerateJwtToken(string userName, List<string> roles, int? expiresInMinutes = null)
         {
             _logger.LogInformation("Generating JWT token for user: {UserName}, roles: {Roles}", userName, string.Join(", ", roles));
 
-            var claimData = new List<Claim>
+            try
             {
-                new Claim(ClaimTypes.Name, userName),
-                new Claim(ClaimTypes.Email, userName),
-            };
+                var claimData = new List<Claim>
+                {
+                    new Claim(ClaimTypes.Name, userName),
+                    new Claim(ClaimTypes.Email, userName),
+                };
 
-            // Add roles as claims
-            foreach (var role in roles)
-            {
-                claimData.Add(new Claim(ClaimTypes.Role, role));
+                // Add roles as claims
+                foreach (var role in roles)
+                {
+                    claimData.Add(new Claim(ClaimTypes.Role, role));
+                }
+
+                SigningCredentials credential = new SigningCredentials(_key, SecurityAlgorithms.HmacSha256Signature);
+
+                var expires = expiresInMinutes.HasValue ? DateTime.UtcNow.AddMinutes(expiresInMinutes.Value) : DateTime.UtcNow.AddMinutes(30);
+
+                JwtSecurityToken token = new JwtSecurityToken(
+                    issuer: _jwtOptions.Issuer,
+                    audience: _jwtOptions.Audience,
+                    expires: expires,
+                    claims: claimData,
+                    signingCredentials: credential);
+
+                var tokenString = _tokenHandler.WriteToken(token);
+                _logger.LogInformation("Generated JWT token: {Token}", TruncateToken(tokenString));
+                return tokenString;
             }
-
-            SigningCredentials credential = new SigningCredentials(_key, SecurityAlgorithms.HmacSha256Signature);
-
-            var expires = expiresInMinutes.HasValue ? DateTime.UtcNow.AddMinutes(expiresInMinutes.Value) : DateTime.UtcNow.AddMinutes(30);
-
-            JwtSecurityToken token = new JwtSecurityToken(
-                issuer: _jwtOptions.Issuer,
-                audience: _jwtOptions.Audience,
-                expires: expires,
-                claims: claimData,
-                signingCredentials: credential);
-
-            var tokenString = _tokenHandler.WriteToken(token);
-            _logger.LogInformation("Generated JWT token: {Token}", TruncateToken(tokenString));
-            return tokenString;
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to generate JWT token for user: {UserName}", userName);
+                throw new TokenGenerationException($"Failed to generate JWT token for user: {userName}", ex);
+            }
         }
 
         /// <summary>
@@ -84,28 +94,47 @@ namespace Maliev.AuthService.JwtToken
         /// <param name="token">The expired JWT token.</param>
         /// <param name="refreshToken">The refresh token.</param>
         /// <returns>A new JWT token and refresh token.</returns>
+        /// <exception cref="TokenGenerationException">Thrown when token refresh fails.</exception>
         public (string accessToken, string refreshToken) RefreshToken(string token, string refreshToken)
         {
             _logger.LogInformation("Refreshing token. Expired Token: {ExpiredToken}, Refresh Token: {RefreshToken}", TruncateToken(token), TruncateToken(refreshToken));
 
-            var jwtSecurityToken = _tokenHandler.ReadToken(token) as JwtSecurityToken;
-            var username = jwtSecurityToken.Claims.First(claim => claim.Type == ClaimTypes.Name).Value;
-            var roles = jwtSecurityToken.Claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).ToList();
+            try
+            {
+                var jwtSecurityToken = _tokenHandler.ReadToken(token) as JwtSecurityToken;
+                if (jwtSecurityToken == null)
+                {
+                    throw new TokenGenerationException("Invalid JWT token format");
+                }
 
-            _logger.LogInformation("Extracted username: {Username}, roles: {Roles} from expired token.", username, string.Join(", ", roles));
+                var username = jwtSecurityToken.Claims.First(claim => claim.Type == ClaimTypes.Name).Value;
+                var roles = jwtSecurityToken.Claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).ToList();
 
-            // This method will not interact with the database directly.
-            // The AuthenticationController will handle the database operations.
-            // For now, we will just generate new tokens.
-            // The actual validation of the refresh token (e.g., checking if it's active, not revoked)
-            // will be done in the AuthenticationController.
+                _logger.LogInformation("Extracted username: {Username}, roles: {Roles} from expired token.", username, string.Join(", ", roles));
 
-            var newAccessToken = GenerateJwtToken(username, roles);
-            var newRefreshToken = GenerateRefreshTokenString(); // Generate just the string
+                // This method will not interact with the database directly.
+                // The AuthenticationController will handle the database operations.
+                // For now, we will just generate new tokens.
+                // The actual validation of the refresh token (e.g., checking if it's active, not revoked)
+                // will be done in the AuthenticationController.
 
-            _logger.LogInformation("Generated new access token and refresh token.");
+                var newAccessToken = GenerateJwtToken(username, roles);
+                var newRefreshToken = GenerateRefreshTokenString(); // Generate just the string
 
-            return (newAccessToken, newRefreshToken);
+                _logger.LogInformation("Generated new access token and refresh token.");
+
+                return (newAccessToken, newRefreshToken);
+            }
+            catch (TokenGenerationException)
+            {
+                // Re-throw our custom exceptions
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to refresh token");
+                throw new TokenGenerationException("Failed to refresh token", ex);
+            }
         }
 
         public ClaimsPrincipal GetPrincipalFromExpiredToken(string token)
@@ -124,16 +153,29 @@ namespace Maliev.AuthService.JwtToken
                 ClockSkew = TimeSpan.FromMinutes(5)
             };
 
-            var principal = _tokenHandler.ValidateToken(token, tokenValidationParameters, out var securityToken);
-
-            if (securityToken is not JwtSecurityToken jwtSecurityToken || !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256Signature, StringComparison.InvariantCultureIgnoreCase))
+            try
             {
-                _logger.LogWarning("Invalid token. Token is null or algorithm is not HmacSha256.");
-                throw new SecurityTokenException("Invalid token");
-            }
-            _logger.LogInformation("Successfully validated JWT token.");
+                var principal = _tokenHandler.ValidateToken(token, tokenValidationParameters, out var securityToken);
 
-            return principal;
+                if (securityToken is not JwtSecurityToken jwtSecurityToken || !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256Signature, StringComparison.InvariantCultureIgnoreCase))
+                {
+                    _logger.LogWarning("Invalid token. Token is null or algorithm is not HmacSha256.");
+                    throw new SecurityTokenException("Invalid token");
+                }
+                _logger.LogInformation("Successfully validated JWT token.");
+
+                return principal;
+            }
+            catch (SecurityTokenException)
+            {
+                // Re-throw security token exceptions
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to validate expired token");
+                throw new TokenGenerationException("Failed to validate expired token", ex);
+            }
         }
 
         /// <summary>

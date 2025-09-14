@@ -1,3 +1,4 @@
+using Maliev.AuthService.Common.Exceptions;
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -31,29 +32,50 @@ namespace Maliev.AuthService.Api.Services
             }
             catch (InvalidOperationException)
             {
-                // Fall back to traditional approach for providers that don't support ExecuteDeleteAsync (like InMemory)
-                var tokensToClean = await _dbContext.RefreshTokens
-                    .Where(rt => rt.Expires < DateTime.UtcNow && rt.Revoked != null)
-                    .ToListAsync(cancellationToken);
+                try
+                {
+                    // Fall back to traditional approach for providers that don't support ExecuteDeleteAsync (like InMemory)
+                    var tokensToClean = await _dbContext.RefreshTokens
+                        .Where(rt => rt.Expires < DateTime.UtcNow && rt.Revoked != null)
+                        .ToListAsync(cancellationToken);
 
-                if (tokensToClean.Any())
-                {
-                    _dbContext.RefreshTokens.RemoveRange(tokensToClean);
-                    await _dbContext.SaveChangesAsync(cancellationToken);
-                    _logger.LogInformation("Cleaned up {DeletedCount} expired and revoked refresh tokens using traditional approach", tokensToClean.Count);
-                    return tokensToClean.Count;
+                    if (tokensToClean.Any())
+                    {
+                        _dbContext.RefreshTokens.RemoveRange(tokensToClean);
+                        await _dbContext.SaveChangesAsync(cancellationToken);
+                        _logger.LogInformation("Cleaned up {DeletedCount} expired and revoked refresh tokens using traditional approach", tokensToClean.Count);
+                        return tokensToClean.Count;
+                    }
+                    else
+                    {
+                        _logger.LogInformation("No expired and revoked refresh tokens to clean up");
+                        return 0;
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    _logger.LogInformation("No expired and revoked refresh tokens to clean up");
-                    return 0;
+                    _logger.LogError(ex, "Failed to clean expired and revoked tokens using traditional approach");
+                    throw new DatabaseOperationException("Failed to clean expired and revoked tokens", ex);
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to clean expired and revoked tokens using ExecuteDeleteAsync");
+                throw new DatabaseOperationException("Failed to clean expired and revoked tokens", ex);
             }
         }
 
         public async Task<RefreshToken?> GetRefreshTokenByTokenAsync(string token, CancellationToken cancellationToken = default)
         {
-            return await _dbContext.RefreshTokens.SingleOrDefaultAsync(rt => rt.Token == token, cancellationToken);
+            try
+            {
+                return await _dbContext.RefreshTokens.SingleOrDefaultAsync(rt => rt.Token == token, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get refresh token by token: {Token}", token);
+                throw new DatabaseOperationException($"Failed to get refresh token by token: {token}", ex);
+            }
         }
 
         public void AddRefreshToken(RefreshToken refreshToken)
@@ -68,7 +90,15 @@ namespace Maliev.AuthService.Api.Services
 
         public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
-            return await _dbContext.SaveChangesAsync(cancellationToken);
+            try
+            {
+                return await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save changes to database");
+                throw new DatabaseOperationException("Failed to save changes to database", ex);
+            }
         }
     }
 }

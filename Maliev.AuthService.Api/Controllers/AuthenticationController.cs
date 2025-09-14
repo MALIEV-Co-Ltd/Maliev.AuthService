@@ -1,4 +1,5 @@
 using Asp.Versioning;
+using Maliev.AuthService.Common.Exceptions;
 using Maliev.AuthService.Api.Models;
 using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.Data.DbContexts;
@@ -93,38 +94,57 @@ namespace Maliev.AuthService.Api.Controllers
                 _logger.LogDebug("Validated and sanitized username: {Username}", username);
                 // Do not log password for security reasons
 
-                // Validate user against external services
-                var validationResult = await _userValidationService.ValidateUserAsync(
-                    username, 
-                    password, 
-                    _customerServiceOptions, 
-                    _employeeServiceOptions,
-                    cancellationToken);
-
-                if (validationResult.Exists)
+                try
                 {
-                    _logger.LogInformation("User exists. Generating tokens.");
-                    var accessToken = _tokenGenerator.GenerateJwtToken(username, validationResult.Roles);
-                    var refreshTokenString = _tokenGenerator.GenerateRefreshTokenString();
+                    // Validate user against external services
+                    var validationResult = await _userValidationService.ValidateUserAsync(
+                        username, 
+                        password, 
+                        _customerServiceOptions, 
+                        _employeeServiceOptions,
+                        cancellationToken);
 
-                    var refreshToken = new RefreshToken
+                    if (validationResult.Exists)
                     {
-                        Token = refreshTokenString,
-                        Expires = DateTime.UtcNow.AddDays(7),
-                        Created = DateTime.UtcNow,
-                        Username = username,
-                        CreatedByIp = HttpContext.Connection.RemoteIpAddress?.ToString()
-                    };
-                    _refreshTokenRepository.AddRefreshToken(refreshToken);
-                    await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
-                    _logger.LogInformation("Tokens generated and refresh token saved.");
+                        _logger.LogInformation("User exists. Generating tokens.");
+                        var accessToken = _tokenGenerator.GenerateJwtToken(username, validationResult.Roles);
+                        var refreshTokenString = _tokenGenerator.GenerateRefreshTokenString();
 
-                    return Ok(new { AccessToken = accessToken, RefreshToken = refreshTokenString });
+                        var refreshToken = new RefreshToken
+                        {
+                            Token = refreshTokenString,
+                            Expires = DateTime.UtcNow.AddDays(7),
+                            Created = DateTime.UtcNow,
+                            Username = username,
+                            CreatedByIp = HttpContext.Connection.RemoteIpAddress?.ToString()
+                        };
+                        _refreshTokenRepository.AddRefreshToken(refreshToken);
+                        await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
+                        _logger.LogInformation("Tokens generated and refresh token saved.");
+
+                        return Ok(new { AccessToken = accessToken, RefreshToken = refreshTokenString });
+                    }
+                    else
+                    {
+                        _logger.LogWarning("User does not exist or validation failed. Returning Unauthorized. Error: {Error}", validationResult.Error);
+                        return Unauthorized(validationResult.Error ?? "User does not exist or validation failed.");
+                    }
                 }
-                else
+                catch (ExternalServiceValidationException ex)
                 {
-                    _logger.LogWarning("User does not exist or validation failed. Returning Unauthorized. Error: {Error}", validationResult.Error);
-                    return Unauthorized(validationResult.Error ?? "User does not exist or validation failed.");
+                    _logger.LogError(ex, "External service validation failed");
+                    var statusCode = ex.StatusCode ?? (int)HttpStatusCode.InternalServerError;
+                    return StatusCode(statusCode, $"External service validation failed: {ex.Message}");
+                }
+                catch (TokenGenerationException ex)
+                {
+                    _logger.LogError(ex, "Token generation failed");
+                    return StatusCode((int)HttpStatusCode.InternalServerError, $"Token generation failed: {ex.Message}");
+                }
+                catch (DatabaseOperationException ex)
+                {
+                    _logger.LogError(ex, "Database operation failed");
+                    return StatusCode((int)HttpStatusCode.InternalServerError, "A database error occurred while processing your request.");
                 }
             }
             else
@@ -143,7 +163,15 @@ namespace Maliev.AuthService.Api.Controllers
             _logger.LogInformation("Request - RefreshToken: {RefreshToken}", request.RefreshToken.Length > 8 ? request.RefreshToken.Substring(0, 8) + "..." : request.RefreshToken);
 
             // Clean up expired and revoked refresh tokens
-            await _refreshTokenRepository.CleanExpiredAndRevokedTokensAsync(cancellationToken);
+            try
+            {
+                await _refreshTokenRepository.CleanExpiredAndRevokedTokensAsync(cancellationToken);
+            }
+            catch (DatabaseOperationException ex)
+            {
+                _logger.LogError(ex, "Database operation failed during token cleanup");
+                return StatusCode((int)HttpStatusCode.InternalServerError, "A database error occurred while processing your request.");
+            }
 
             if (request == null || string.IsNullOrEmpty(request.AccessToken) || string.IsNullOrEmpty(request.RefreshToken))
             {
@@ -204,6 +232,21 @@ namespace Maliev.AuthService.Api.Controllers
                 _logger.LogInformation("New RefreshToken saved to DB.");
 
                 return Ok(new { AccessToken = newAccessToken, RefreshToken = newRefreshToken.Token });
+            }
+            catch (InvalidRefreshTokenException ex)
+            {
+                _logger.LogError(ex, "Invalid refresh token exception");
+                return Unauthorized(ex.Message);
+            }
+            catch (TokenGenerationException ex)
+            {
+                _logger.LogError(ex, "Token generation failed");
+                return StatusCode((int)HttpStatusCode.InternalServerError, $"Token generation failed: {ex.Message}");
+            }
+            catch (DatabaseOperationException ex)
+            {
+                _logger.LogError(ex, "Database operation failed");
+                return StatusCode((int)HttpStatusCode.InternalServerError, "A database error occurred while processing your request.");
             }
             catch (SecurityTokenException ex)
             {

@@ -1,3 +1,4 @@
+using Maliev.AuthService.Common.Exceptions;
 using Maliev.AuthService.Api.Models;
 using Maliev.AuthService.Api.Services;
 using Microsoft.Extensions.Logging;
@@ -133,43 +134,29 @@ namespace Maliev.AuthService.Tests.Auth
         }
 
         [Fact]
-        public async Task ValidateCredentialsAsync_HttpRequestException_ReturnsExistsFalseAndError()
+        public async Task ValidateCredentialsAsync_HttpRequestException_ThrowsExternalServiceValidationException()
         {
             // Arrange
             var credentials = new UserValidationRequest { Username = "testuser", Password = "password" };
             var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
             SetupHttpClientMock(HttpStatusCode.OK, null, new HttpRequestException("Network error"));
 
-            // Act
-            var result = await _service.ValidateCredentialsAsync("http://customer.service/validate", jsonContent, UserType.Customer);
-
-            // Assert
-            Assert.False(result.Exists);
-            Assert.Equal("Customer", result.UserType);
-            Assert.Empty(result.Roles);
-            Assert.NotNull(result.Error);
-            Assert.Contains("HttpRequestException", result.Error);
-            Assert.Null(result.StatusCode);
+            // Act & Assert
+            await Assert.ThrowsAsync<ExternalServiceValidationException>(() => 
+                _service.ValidateCredentialsAsync("http://customer.service/validate", jsonContent, UserType.Customer));
         }
 
         [Fact]
-        public async Task ValidateCredentialsAsync_GeneralException_ReturnsExistsFalseAndError()
+        public async Task ValidateCredentialsAsync_GeneralException_ThrowsExternalServiceValidationException()
         {
             // Arrange
             var credentials = new UserValidationRequest { Username = "testuser", Password = "password" };
             var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
             SetupHttpClientMock(HttpStatusCode.OK, null, new Exception("Unexpected error"));
 
-            // Act
-            var result = await _service.ValidateCredentialsAsync("http://customer.service/validate", jsonContent, UserType.Customer);
-
-            // Assert
-            Assert.False(result.Exists);
-            Assert.Equal("Customer", result.UserType);
-            Assert.Empty(result.Roles);
-            Assert.NotNull(result.Error);
-            Assert.Contains("An unexpected error occurred", result.Error);
-            Assert.Null(result.StatusCode);
+            // Act & Assert
+            await Assert.ThrowsAsync<ExternalServiceValidationException>(() => 
+                _service.ValidateCredentialsAsync("http://customer.service/validate", jsonContent, UserType.Customer));
         }
     }
 }
