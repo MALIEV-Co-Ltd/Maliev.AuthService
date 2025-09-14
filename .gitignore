@@ -61,6 +61,7 @@ nunit-*.xml
 # Custom
 migration_source
 .gemini/
+.qwen/
 gha-creds-*.json
 secrets.yaml
 .claude/settings.local.json
