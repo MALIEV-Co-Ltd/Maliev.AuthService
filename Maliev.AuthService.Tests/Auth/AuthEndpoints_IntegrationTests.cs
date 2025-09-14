@@ -321,14 +321,14 @@ namespace Maliev.AuthService.Tests.Auth
     // Helper class to deserialize token response
     public class TokenResponse
     {
-        public string AccessToken { get; set; }
-        public string RefreshToken { get; set; }
+        public string? AccessToken { get; set; }
+        public string? RefreshToken { get; set; }
     }
 
     // Helper class for refresh token request
     public class RefreshTokenRequest
     {
-        public string AccessToken { get; set; }
-        public string RefreshToken { get; set; }
+        public string? AccessToken { get; set; }
+        public string? RefreshToken { get; set; }
     }
 }
