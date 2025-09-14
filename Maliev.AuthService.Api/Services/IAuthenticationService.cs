@@ -14,6 +14,7 @@ namespace Maliev.AuthService.Api.Services
         /// <param name="customerServiceOptions">Customer service configuration options.</param>
         /// <param name="employeeServiceOptions">Employee service configuration options.</param>
         /// <param name="clientIpAddress">The IP address of the client making the request.</param>
+        /// <param name="traceId">The trace identifier for the request.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>An IActionResult with the generated tokens or an appropriate error response.</returns>
         Task<IActionResult> GenerateTokensAsync(
@@ -21,6 +22,7 @@ namespace Maliev.AuthService.Api.Services
             CustomerServiceOptions customerServiceOptions,
             EmployeeServiceOptions employeeServiceOptions,
             string? clientIpAddress,
+            string? traceId,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -29,12 +31,14 @@ namespace Maliev.AuthService.Api.Services
         /// <param name="accessToken">The expired access token.</param>
         /// <param name="refreshToken">The refresh token.</param>
         /// <param name="clientIpAddress">The IP address of the client making the request.</param>
+        /// <param name="traceId">The trace identifier for the request.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>An IActionResult with the refreshed tokens or an appropriate error response.</returns>
         Task<IActionResult> RefreshTokensAsync(
             string accessToken,
             string refreshToken,
             string? clientIpAddress,
+            string? traceId,
             CancellationToken cancellationToken = default);
     }
 }

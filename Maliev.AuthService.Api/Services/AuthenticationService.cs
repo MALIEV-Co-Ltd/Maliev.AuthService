@@ -39,107 +39,116 @@ namespace Maliev.AuthService.Api.Services
             CustomerServiceOptions customerServiceOptions,
             EmployeeServiceOptions employeeServiceOptions,
             string? clientIpAddress,
+            string? traceId,
             CancellationToken cancellationToken = default)
         {
-            _logger.LogInformation("Token generation requested.");
-            _logger.LogDebug("Authorization Header: {Header}", authorizationHeader);
-
-            if (System.Net.Http.Headers.AuthenticationHeaderValue.TryParse(authorizationHeader, out var authHeader) && 
-                authHeader.Scheme.Equals("Basic", StringComparison.OrdinalIgnoreCase))
+            using (_logger.BeginScope("TraceId: {TraceId}", traceId))
             {
-                if (authHeader.Parameter == null)
+                _logger.LogInformation("Token generation requested from client IP: {ClientIpAddress}", clientIpAddress);
+                _logger.LogDebug("Authorization Header: {Header}", authorizationHeader);
+
+                if (System.Net.Http.Headers.AuthenticationHeaderValue.TryParse(authorizationHeader, out var authHeader) && 
+                    authHeader.Scheme.Equals("Basic", StringComparison.OrdinalIgnoreCase))
                 {
-                    return new BadRequestObjectResult("Invalid authorization header format");
-                }
-
-                string[] parameter;
-                try
-                {
-                    parameter = Encoding.UTF8.GetString(Convert.FromBase64String(authHeader.Parameter)).Split(':', 2);
-                }
-                catch (FormatException)
-                {
-                    return new BadRequestObjectResult("Invalid Base64 encoding in authorization header");
-                }
-
-                if (parameter.Length != 2)
-                {
-                    return new BadRequestObjectResult("Invalid credential format in authorization header");
-                }
-
-                var rawUsername = parameter[0];
-                var rawPassword = parameter[1];
-
-                // Validate credentials
-                var credentialValidation = _credentialValidationService.ValidateCredentials(rawUsername, rawPassword);
-                if (!credentialValidation.IsValid)
-                {
-                    _logger.LogWarning("Invalid credentials provided: {Errors}", string.Join(", ", credentialValidation.Errors));
-                    return new BadRequestObjectResult($"Invalid credentials: {string.Join(", ", credentialValidation.Errors)}");
-                }
-
-                var username = credentialValidation.SanitizedUsername!;
-                var password = credentialValidation.SanitizedPassword!;
-                _logger.LogDebug("Validated and sanitized username: {Username}", username);
-                // Do not log password for security reasons
-
-                try
-                {
-                    // Validate user against external services
-                    var validationResult = await _userValidationService.ValidateUserAsync(
-                        username,
-                        password,
-                        customerServiceOptions,
-                        employeeServiceOptions,
-                        cancellationToken);
-
-                    if (validationResult.Exists)
+                    if (authHeader.Parameter == null)
                     {
-                        _logger.LogInformation("User exists. Generating tokens.");
-                        var accessToken = _tokenGenerator.GenerateJwtToken(username, validationResult.Roles);
-                        var refreshTokenString = _tokenGenerator.GenerateRefreshTokenString();
+                        _logger.LogWarning("Invalid authorization header format received from client IP: {ClientIpAddress}", clientIpAddress);
+                        return new BadRequestObjectResult("Invalid authorization header format");
+                    }
 
-                        var refreshToken = new RefreshToken
+                    string[] parameter;
+                    try
+                    {
+                        parameter = Encoding.UTF8.GetString(Convert.FromBase64String(authHeader.Parameter)).Split(':', 2);
+                    }
+                    catch (FormatException ex)
+                    {
+                        _logger.LogWarning("Invalid Base64 encoding in authorization header from client IP: {ClientIpAddress}. Error: {ErrorMessage}", clientIpAddress, ex.Message);
+                        return new BadRequestObjectResult("Invalid Base64 encoding in authorization header");
+                    }
+
+                    if (parameter.Length != 2)
+                    {
+                        _logger.LogWarning("Invalid credential format in authorization header from client IP: {ClientIpAddress}", clientIpAddress);
+                        return new BadRequestObjectResult("Invalid credential format in authorization header");
+                    }
+
+                    var rawUsername = parameter[0];
+                    var rawPassword = parameter[1];
+
+                    // Validate credentials
+                    _logger.LogDebug("Validating credentials for username: {Username}", rawUsername);
+                    var credentialValidation = _credentialValidationService.ValidateCredentials(rawUsername, rawPassword);
+                    if (!credentialValidation.IsValid)
+                    {
+                        _logger.LogWarning("Invalid credentials provided for username {Username}: {Errors}", rawUsername, string.Join(", ", credentialValidation.Errors));
+                        return new BadRequestObjectResult($"Invalid credentials: {string.Join(", ", credentialValidation.Errors)}");
+                    }
+
+                    var username = credentialValidation.SanitizedUsername!;
+                    var password = credentialValidation.SanitizedPassword!;
+                    _logger.LogDebug("Validated and sanitized username: {Username}", username);
+                    // Do not log password for security reasons
+
+                    try
+                    {
+                        // Validate user against external services
+                        _logger.LogInformation("Validating user {Username} against external services", username);
+                        var validationResult = await _userValidationService.ValidateUserAsync(
+                            username,
+                            password,
+                            customerServiceOptions,
+                            employeeServiceOptions,
+                            cancellationToken);
+
+                        if (validationResult.Exists)
                         {
-                            Token = refreshTokenString,
-                            Expires = DateTime.UtcNow.AddDays(7),
-                            Created = DateTime.UtcNow,
-                            Username = username,
-                            CreatedByIp = clientIpAddress
-                        };
-                        _refreshTokenRepository.AddRefreshToken(refreshToken);
-                        await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
-                        _logger.LogInformation("Tokens generated and refresh token saved.");
+                            _logger.LogInformation("User {Username} exists in external service. Generating tokens.", username);
+                            var accessToken = _tokenGenerator.GenerateJwtToken(username, validationResult.Roles);
+                            var refreshTokenString = _tokenGenerator.GenerateRefreshTokenString();
 
-                        return new OkObjectResult(new { AccessToken = accessToken, RefreshToken = refreshTokenString });
+                            var refreshToken = new RefreshToken
+                            {
+                                Token = refreshTokenString,
+                                Expires = DateTime.UtcNow.AddDays(7),
+                                Created = DateTime.UtcNow,
+                                Username = username,
+                                CreatedByIp = clientIpAddress
+                            };
+                            _refreshTokenRepository.AddRefreshToken(refreshToken);
+                            await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
+                            _logger.LogInformation("Tokens generated and refresh token saved for user {Username}.", username);
+
+                            return new OkObjectResult(new { AccessToken = accessToken, RefreshToken = refreshTokenString });
+                        }
+                        else
+                        {
+                            _logger.LogWarning("User {Username} does not exist or validation failed. Returning Unauthorized. Error: {Error}", username, validationResult.Error);
+                            return new UnauthorizedObjectResult(validationResult.Error ?? "User does not exist or validation failed.");
+                        }
                     }
-                    else
+                    catch (ExternalServiceValidationException ex)
                     {
-                        _logger.LogWarning("User does not exist or validation failed. Returning Unauthorized. Error: {Error}", validationResult.Error);
-                        return new UnauthorizedObjectResult(validationResult.Error ?? "User does not exist or validation failed.");
+                        _logger.LogError(ex, "External service validation failed for user {Username} from client IP: {ClientIpAddress}", username, clientIpAddress);
+                        var statusCode = ex.StatusCode ?? (int)HttpStatusCode.InternalServerError;
+                        return new ObjectResult($"External service validation failed: {ex.Message}") { StatusCode = statusCode };
+                    }
+                    catch (TokenGenerationException ex)
+                    {
+                        _logger.LogError(ex, "Token generation failed for user {Username} from client IP: {ClientIpAddress}", username, clientIpAddress);
+                        return new ObjectResult($"Token generation failed: {ex.Message}") { StatusCode = (int)HttpStatusCode.InternalServerError };
+                    }
+                    catch (DatabaseOperationException ex)
+                    {
+                        _logger.LogError(ex, "Database operation failed for user {Username} from client IP: {ClientIpAddress}", username, clientIpAddress);
+                        return new ObjectResult("A database error occurred while processing your request.") { StatusCode = (int)HttpStatusCode.InternalServerError };
                     }
                 }
-                catch (ExternalServiceValidationException ex)
+                else
                 {
-                    _logger.LogError(ex, "External service validation failed");
-                    var statusCode = ex.StatusCode ?? (int)HttpStatusCode.InternalServerError;
-                    return new ObjectResult($"External service validation failed: {ex.Message}") { StatusCode = statusCode };
+                    _logger.LogWarning("Authorization header is missing or not in Basic format from client IP: {ClientIpAddress}. Returning BadRequest.", clientIpAddress);
+                    return new BadRequestResult();
                 }
-                catch (TokenGenerationException ex)
-                {
-                    _logger.LogError(ex, "Token generation failed");
-                    return new ObjectResult($"Token generation failed: {ex.Message}") { StatusCode = (int)HttpStatusCode.InternalServerError };
-                }
-                catch (DatabaseOperationException ex)
-                {
-                    _logger.LogError(ex, "Database operation failed");
-                    return new ObjectResult("A database error occurred while processing your request.") { StatusCode = (int)HttpStatusCode.InternalServerError };
-                }
-            }
-            else
-            {
-                _logger.LogWarning("Authorization header is missing or not in Basic format. Returning BadRequest.");
-                return new BadRequestResult();
             }
         }
 
@@ -147,107 +156,119 @@ namespace Maliev.AuthService.Api.Services
             string accessToken,
             string refreshToken,
             string? clientIpAddress,
+            string? traceId,
             CancellationToken cancellationToken = default)
         {
-            _logger.LogInformation("Token refresh requested.");
-            _logger.LogInformation("Request - AccessToken: {AccessToken}", accessToken.Length > 8 ? accessToken.Substring(0, 8) + "..." : accessToken);
-            _logger.LogInformation("Request - RefreshToken: {RefreshToken}", refreshToken.Length > 8 ? refreshToken.Substring(0, 8) + "..." : refreshToken);
-
-            // Clean up expired and revoked refresh tokens
-            try
+            using (_logger.BeginScope("TraceId: {TraceId}", traceId))
             {
-                await _refreshTokenRepository.CleanExpiredAndRevokedTokensAsync(cancellationToken);
-            }
-            catch (DatabaseOperationException ex)
-            {
-                _logger.LogError(ex, "Database operation failed during token cleanup");
-                return new ObjectResult("A database error occurred while processing your request.") { StatusCode = (int)HttpStatusCode.InternalServerError };
-            }
+                _logger.LogInformation("Token refresh requested from client IP: {ClientIpAddress}", clientIpAddress);
+                _logger.LogInformation("Request - AccessToken: {AccessToken}", accessToken.Length > 8 ? accessToken.Substring(0, 8) + "..." : accessToken);
+                _logger.LogInformation("Request - RefreshToken: {RefreshToken}", refreshToken.Length > 8 ? refreshToken.Substring(0, 8) + "..." : refreshToken);
 
-            if (string.IsNullOrEmpty(accessToken) || string.IsNullOrEmpty(refreshToken))
-            {
-                _logger.LogWarning("Invalid client request: AccessToken or RefreshToken is null or empty.");
-                return new BadRequestObjectResult("Invalid client request");
-            }
-
-            try
-            {
-                var savedRefreshToken = await _refreshTokenRepository.GetRefreshTokenByTokenAsync(refreshToken, cancellationToken);
-                _logger.LogInformation("Saved RefreshToken from DB - Token: {Token}", savedRefreshToken?.Token != null && savedRefreshToken.Token.Length > 8 ? savedRefreshToken.Token.Substring(0, 8) + "..." : savedRefreshToken?.Token);
-                _logger.LogInformation("Saved RefreshToken from DB - Username: {Username}", savedRefreshToken?.Username);
-                _logger.LogInformation("Saved RefreshToken from DB - IsActive: {IsActive}", savedRefreshToken?.IsActive);
-
-                if (savedRefreshToken == null)
+                // Clean up expired and revoked refresh tokens
+                try
                 {
-                    _logger.LogWarning("Invalid refresh token: Not found in DB.");
-                    return new UnauthorizedObjectResult("Invalid refresh token");
+                    _logger.LogDebug("Cleaning up expired and revoked refresh tokens");
+                    var cleanedCount = await _refreshTokenRepository.CleanExpiredAndRevokedTokensAsync(cancellationToken);
+                    _logger.LogDebug("Cleaned up {CleanedCount} expired and revoked refresh tokens", cleanedCount);
+                }
+                catch (DatabaseOperationException ex)
+                {
+                    _logger.LogError(ex, "Database operation failed during token cleanup from client IP: {ClientIpAddress}", clientIpAddress);
+                    return new ObjectResult("A database error occurred while processing your request.") { StatusCode = (int)HttpStatusCode.InternalServerError };
                 }
 
-                if (savedRefreshToken.IsActive == false)
+                if (string.IsNullOrEmpty(accessToken) || string.IsNullOrEmpty(refreshToken))
                 {
-                    _logger.LogWarning("Invalid refresh token: Not active.");
-                    return new UnauthorizedObjectResult("Invalid refresh token");
+                    _logger.LogWarning("Invalid client request: AccessToken or RefreshToken is null or empty from client IP: {ClientIpAddress}", clientIpAddress);
+                    return new BadRequestObjectResult("Invalid client request");
                 }
 
-                var principal = _tokenGenerator.GetPrincipalFromExpiredToken(accessToken);
-                var username = principal.Identity?.Name;
-
-                if (savedRefreshToken.Username != username)
+                try
                 {
-                    _logger.LogWarning("Invalid refresh token: Username mismatch. Saved: {SavedUsername}, From Token/Request: {UsernameFromToken}", savedRefreshToken.Username, username);
-                    return new UnauthorizedObjectResult("Invalid refresh token");
+                    _logger.LogDebug("Retrieving refresh token from database: {RefreshToken}", refreshToken.Length > 8 ? refreshToken.Substring(0, 8) + "..." : refreshToken);
+                    var savedRefreshToken = await _refreshTokenRepository.GetRefreshTokenByTokenAsync(refreshToken, cancellationToken);
+                    _logger.LogInformation("Saved RefreshToken from DB - Token: {Token}", savedRefreshToken?.Token != null && savedRefreshToken.Token.Length > 8 ? savedRefreshToken.Token.Substring(0, 8) + "..." : savedRefreshToken?.Token);
+                    _logger.LogInformation("Saved RefreshToken from DB - Username: {Username}", savedRefreshToken?.Username);
+                    _logger.LogInformation("Saved RefreshToken from DB - IsActive: {IsActive}", savedRefreshToken?.IsActive);
+
+                    if (savedRefreshToken == null)
+                    {
+                        _logger.LogWarning("Invalid refresh token: Not found in DB from client IP: {ClientIpAddress}", clientIpAddress);
+                        return new UnauthorizedObjectResult("Invalid refresh token");
+                    }
+
+                    if (savedRefreshToken.IsActive == false)
+                    {
+                        _logger.LogWarning("Invalid refresh token: Not active for client IP: {ClientIpAddress}", clientIpAddress);
+                        return new UnauthorizedObjectResult("Invalid refresh token");
+                    }
+
+                    _logger.LogDebug("Validating expired access token for user: {Username}", savedRefreshToken.Username);
+                    var principal = _tokenGenerator.GetPrincipalFromExpiredToken(accessToken);
+                    var username = principal.Identity?.Name;
+
+                    if (savedRefreshToken.Username != username)
+                    {
+                        _logger.LogWarning("Invalid refresh token: Username mismatch. Saved: {SavedUsername}, From Token/Request: {UsernameFromToken} from client IP: {ClientIpAddress}", savedRefreshToken.Username, username, clientIpAddress);
+                        return new UnauthorizedObjectResult("Invalid refresh token");
+                    }
+
+                    _logger.LogInformation("Refreshing tokens for user: {Username}", username);
+                    var (newAccessToken, newRefreshTokenString) = _tokenGenerator.RefreshToken(accessToken, refreshToken);
+                    _logger.LogInformation("New AccessToken generated for user: {Username}", username);
+                    _logger.LogInformation("New RefreshToken generated for user: {Username}", username);
+
+                    // Revoke old refresh token
+                    savedRefreshToken.Revoked = DateTime.UtcNow;
+                    _refreshTokenRepository.UpdateRefreshToken(savedRefreshToken);
+                    await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
+                    _logger.LogInformation("Old RefreshToken {OldTokenId} revoked and saved to DB.", 
+                        savedRefreshToken.Token.Length > 8 ? savedRefreshToken.Token.Substring(0, 8) + "..." : savedRefreshToken.Token);
+
+                    // Save new refresh token to database
+                    var newRefreshToken = new RefreshToken
+                    {
+                        Token = newRefreshTokenString,
+                        Expires = DateTime.UtcNow.AddDays(7),
+                        Created = DateTime.UtcNow,
+                        Username = username,
+                        CreatedByIp = clientIpAddress,
+                        ReplacedByToken = refreshToken
+                    };
+                    _refreshTokenRepository.AddRefreshToken(newRefreshToken);
+                    await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
+                    _logger.LogInformation("New RefreshToken {NewTokenId} saved to DB. Replaces old token {OldTokenId}.", 
+                        newRefreshToken.Token.Length > 8 ? newRefreshToken.Token.Substring(0, 8) + "..." : newRefreshToken.Token,
+                        savedRefreshToken.Token.Length > 8 ? savedRefreshToken.Token.Substring(0, 8) + "..." : savedRefreshToken.Token);
+
+                    return new OkObjectResult(new { AccessToken = newAccessToken, RefreshToken = newRefreshToken.Token });
                 }
-
-                var (newAccessToken, newRefreshTokenString) = _tokenGenerator.RefreshToken(accessToken, refreshToken);
-                _logger.LogInformation("New AccessToken generated.");
-                _logger.LogInformation("New RefreshToken generated.");
-
-                // Revoke old refresh token
-                savedRefreshToken.Revoked = DateTime.UtcNow;
-                _refreshTokenRepository.UpdateRefreshToken(savedRefreshToken);
-                await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
-                _logger.LogInformation("Old RefreshToken revoked and saved to DB.");
-
-                // Save new refresh token to database
-                var newRefreshToken = new RefreshToken
+                catch (InvalidRefreshTokenException ex)
                 {
-                    Token = newRefreshTokenString,
-                    Expires = DateTime.UtcNow.AddDays(7),
-                    Created = DateTime.UtcNow,
-                    Username = username,
-                    CreatedByIp = clientIpAddress,
-                    ReplacedByToken = refreshToken
-                };
-                _refreshTokenRepository.AddRefreshToken(newRefreshToken);
-                await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
-                _logger.LogInformation("New RefreshToken saved to DB.");
-
-                return new OkObjectResult(new { AccessToken = newAccessToken, RefreshToken = newRefreshToken.Token });
-            }
-            catch (InvalidRefreshTokenException ex)
-            {
-                _logger.LogError(ex, "Invalid refresh token exception");
-                return new UnauthorizedObjectResult(ex.Message);
-            }
-            catch (TokenGenerationException ex)
-            {
-                _logger.LogError(ex, "Token generation failed");
-                return new ObjectResult($"Token generation failed: {ex.Message}") { StatusCode = (int)HttpStatusCode.InternalServerError };
-            }
-            catch (DatabaseOperationException ex)
-            {
-                _logger.LogError(ex, "Database operation failed");
-                return new ObjectResult("A database error occurred while processing your request.") { StatusCode = (int)HttpStatusCode.InternalServerError };
-            }
-            catch (SecurityTokenException ex)
-            {
-                _logger.LogError(ex, "SecurityTokenException: {Message}", ex.Message);
-                return new UnauthorizedObjectResult(ex.Message);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "General Exception: {Message}", ex.Message);
-                return new ObjectResult($"An error occurred during token refresh: {ex.Message}") { StatusCode = (int)HttpStatusCode.InternalServerError };
+                    _logger.LogError(ex, "Invalid refresh token exception for client IP: {ClientIpAddress}", clientIpAddress);
+                    return new UnauthorizedObjectResult(ex.Message);
+                }
+                catch (TokenGenerationException ex)
+                {
+                    _logger.LogError(ex, "Token generation failed for client IP: {ClientIpAddress}", clientIpAddress);
+                    return new ObjectResult($"Token generation failed: {ex.Message}") { StatusCode = (int)HttpStatusCode.InternalServerError };
+                }
+                catch (DatabaseOperationException ex)
+                {
+                    _logger.LogError(ex, "Database operation failed for client IP: {ClientIpAddress}", clientIpAddress);
+                    return new ObjectResult("A database error occurred while processing your request.") { StatusCode = (int)HttpStatusCode.InternalServerError };
+                }
+                catch (SecurityTokenException ex)
+                {
+                    _logger.LogError(ex, "SecurityTokenException for client IP: {ClientIpAddress}: {Message}", clientIpAddress, ex.Message);
+                    return new UnauthorizedObjectResult(ex.Message);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "General Exception for client IP: {ClientIpAddress}: {Message}", clientIpAddress, ex.Message);
+                    return new ObjectResult($"An error occurred during token refresh: {ex.Message}") { StatusCode = (int)HttpStatusCode.InternalServerError };
+                }
             }
         }
     }

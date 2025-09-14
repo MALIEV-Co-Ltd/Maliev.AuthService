@@ -45,12 +45,14 @@ namespace Maliev.AuthService.Api.Controllers
         {
             _logger.LogInformation("Token endpoint called.");
             var header = Request.Headers["Authorization"].ToString();
+            var traceId = HttpContext.TraceIdentifier;
             
             var result = await _authenticationService.GenerateTokensAsync(
                 header,
                 _customerServiceOptions,
                 _employeeServiceOptions,
                 HttpContext.Connection.RemoteIpAddress?.ToString(),
+                traceId,
                 cancellationToken);
                 
             return result;
@@ -68,10 +70,12 @@ namespace Maliev.AuthService.Api.Controllers
                 return BadRequest("Invalid client request");
             }
             
+            var traceId = HttpContext.TraceIdentifier;
             var result = await _authenticationService.RefreshTokensAsync(
                 request.AccessToken,
                 request.RefreshToken,
                 HttpContext.Connection.RemoteIpAddress?.ToString(),
+                traceId,
                 cancellationToken);
                 
             return result;

@@ -24,13 +24,13 @@ Refactor and improve the Maliev Authentication Service to enhance code quality, 
 4. [DONE] Addressed build issues by removing obsolete test files and updating project references
 5. [DONE] Fixed Issue #30: Added CancellationToken support to async methods to improve application responsiveness and prevent resource leaks
 6. [DONE] Fixed Issue #29: Implemented more specific exception types for better error handling and debugging
+7. [DONE] Fixed Issue #20: Extracted authentication logic into service layer for better separation of concerns
 
 ## Current Plan
-1. [IN PROGRESS] Working on Issue #20: Extract authentication logic into service layer for better separation of concerns
-2. [TODO] Address Issue #27: Add more specific and structured logging for better traceability and debugging
-3. [TODO] Address Issue #7: Improve Basic Authentication credential handling using ASP.NET Core built-in features
+1. [IN PROGRESS] Working on Issue #27: Add more specific and structured logging for better traceability and debugging
+2. [TODO] Address Issue #7: Improve Basic Authentication credential handling using ASP.NET Core built-in features
 
 ---
 
 ## Summary Metadata
-**Update time**: 2025-09-14T12:30:00.000Z 
+**Update time**: 2025-09-14T13:15:00.000Z 
