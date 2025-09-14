@@ -35,7 +35,7 @@ namespace Maliev.AuthService.Api.Services
         }
 
         public async Task<IActionResult> GenerateTokensAsync(
-            string authorizationHeader,
+            LoginRequest loginRequest,
             CustomerServiceOptions customerServiceOptions,
             EmployeeServiceOptions employeeServiceOptions,
             string? clientIpAddress,
@@ -45,109 +45,74 @@ namespace Maliev.AuthService.Api.Services
             using (_logger.BeginScope("TraceId: {TraceId}", traceId))
             {
                 _logger.LogInformation("Token generation requested from client IP: {ClientIpAddress}", clientIpAddress);
-                _logger.LogDebug("Authorization Header: {Header}", authorizationHeader);
+                _logger.LogDebug("Login request for username: {Username}", loginRequest.Username);
 
-                if (System.Net.Http.Headers.AuthenticationHeaderValue.TryParse(authorizationHeader, out var authHeader) && 
-                    authHeader.Scheme.Equals("Basic", StringComparison.OrdinalIgnoreCase))
+                // Validate credentials
+                _logger.LogDebug("Validating credentials for username: {Username}", loginRequest.Username);
+                var credentialValidation = _credentialValidationService.ValidateCredentials(loginRequest.Username, loginRequest.Password);
+                if (!credentialValidation.IsValid)
                 {
-                    if (authHeader.Parameter == null)
+                    _logger.LogWarning("Invalid credentials provided for username {Username}: {Errors}", loginRequest.Username, string.Join(", ", credentialValidation.Errors));
+                    return new BadRequestObjectResult($"Invalid credentials: {string.Join(", ", credentialValidation.Errors)}");
+                }
+
+                var username = credentialValidation.SanitizedUsername!;
+                var password = credentialValidation.SanitizedPassword!;
+                _logger.LogDebug("Validated and sanitized username: {Username}", username);
+                // Do not log password for security reasons
+
+                try
+                {
+                    // Validate user against external services
+                    _logger.LogInformation("Validating user {Username} against external services", username);
+                    var validationResult = await _userValidationService.ValidateUserAsync(
+                        username,
+                        password,
+                        customerServiceOptions,
+                        employeeServiceOptions,
+                        cancellationToken);
+
+                    if (validationResult.Exists)
                     {
-                        _logger.LogWarning("Invalid authorization header format received from client IP: {ClientIpAddress}", clientIpAddress);
-                        return new BadRequestObjectResult("Invalid authorization header format");
-                    }
+                        _logger.LogInformation("User {Username} exists in external service. Generating tokens.", username);
+                        var accessToken = _tokenGenerator.GenerateJwtToken(username, validationResult.Roles);
+                        var refreshTokenString = _tokenGenerator.GenerateRefreshTokenString();
 
-                    string[] parameter;
-                    try
-                    {
-                        parameter = Encoding.UTF8.GetString(Convert.FromBase64String(authHeader.Parameter)).Split(':', 2);
-                    }
-                    catch (FormatException ex)
-                    {
-                        _logger.LogWarning("Invalid Base64 encoding in authorization header from client IP: {ClientIpAddress}. Error: {ErrorMessage}", clientIpAddress, ex.Message);
-                        return new BadRequestObjectResult("Invalid Base64 encoding in authorization header");
-                    }
-
-                    if (parameter.Length != 2)
-                    {
-                        _logger.LogWarning("Invalid credential format in authorization header from client IP: {ClientIpAddress}", clientIpAddress);
-                        return new BadRequestObjectResult("Invalid credential format in authorization header");
-                    }
-
-                    var rawUsername = parameter[0];
-                    var rawPassword = parameter[1];
-
-                    // Validate credentials
-                    _logger.LogDebug("Validating credentials for username: {Username}", rawUsername);
-                    var credentialValidation = _credentialValidationService.ValidateCredentials(rawUsername, rawPassword);
-                    if (!credentialValidation.IsValid)
-                    {
-                        _logger.LogWarning("Invalid credentials provided for username {Username}: {Errors}", rawUsername, string.Join(", ", credentialValidation.Errors));
-                        return new BadRequestObjectResult($"Invalid credentials: {string.Join(", ", credentialValidation.Errors)}");
-                    }
-
-                    var username = credentialValidation.SanitizedUsername!;
-                    var password = credentialValidation.SanitizedPassword!;
-                    _logger.LogDebug("Validated and sanitized username: {Username}", username);
-                    // Do not log password for security reasons
-
-                    try
-                    {
-                        // Validate user against external services
-                        _logger.LogInformation("Validating user {Username} against external services", username);
-                        var validationResult = await _userValidationService.ValidateUserAsync(
-                            username,
-                            password,
-                            customerServiceOptions,
-                            employeeServiceOptions,
-                            cancellationToken);
-
-                        if (validationResult.Exists)
+                        var refreshToken = new RefreshToken
                         {
-                            _logger.LogInformation("User {Username} exists in external service. Generating tokens.", username);
-                            var accessToken = _tokenGenerator.GenerateJwtToken(username, validationResult.Roles);
-                            var refreshTokenString = _tokenGenerator.GenerateRefreshTokenString();
+                            Token = refreshTokenString,
+                            Expires = DateTime.UtcNow.AddDays(7),
+                            Created = DateTime.UtcNow,
+                            Username = username,
+                            CreatedByIp = clientIpAddress
+                        };
+                        _refreshTokenRepository.AddRefreshToken(refreshToken);
+                        await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
+                        _logger.LogInformation("Tokens generated and refresh token saved for user {Username}.", username);
 
-                            var refreshToken = new RefreshToken
-                            {
-                                Token = refreshTokenString,
-                                Expires = DateTime.UtcNow.AddDays(7),
-                                Created = DateTime.UtcNow,
-                                Username = username,
-                                CreatedByIp = clientIpAddress
-                            };
-                            _refreshTokenRepository.AddRefreshToken(refreshToken);
-                            await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
-                            _logger.LogInformation("Tokens generated and refresh token saved for user {Username}.", username);
-
-                            return new OkObjectResult(new { AccessToken = accessToken, RefreshToken = refreshTokenString });
-                        }
-                        else
-                        {
-                            _logger.LogWarning("User {Username} does not exist or validation failed. Returning Unauthorized. Error: {Error}", username, validationResult.Error);
-                            return new UnauthorizedObjectResult(validationResult.Error ?? "User does not exist or validation failed.");
-                        }
+                        return new OkObjectResult(new { AccessToken = accessToken, RefreshToken = refreshTokenString });
                     }
-                    catch (ExternalServiceValidationException ex)
+                    else
                     {
-                        _logger.LogError(ex, "External service validation failed for user {Username} from client IP: {ClientIpAddress}", username, clientIpAddress);
-                        var statusCode = ex.StatusCode ?? (int)HttpStatusCode.InternalServerError;
-                        return new ObjectResult($"External service validation failed: {ex.Message}") { StatusCode = statusCode };
-                    }
-                    catch (TokenGenerationException ex)
-                    {
-                        _logger.LogError(ex, "Token generation failed for user {Username} from client IP: {ClientIpAddress}", username, clientIpAddress);
-                        return new ObjectResult($"Token generation failed: {ex.Message}") { StatusCode = (int)HttpStatusCode.InternalServerError };
-                    }
-                    catch (DatabaseOperationException ex)
-                    {
-                        _logger.LogError(ex, "Database operation failed for user {Username} from client IP: {ClientIpAddress}", username, clientIpAddress);
-                        return new ObjectResult("A database error occurred while processing your request.") { StatusCode = (int)HttpStatusCode.InternalServerError };
+                        _logger.LogWarning("User {Username} does not exist or validation failed. Returning Unauthorized. Error: {Error}", username, validationResult.Error);
+                        return new UnauthorizedObjectResult(validationResult.Error ?? "User does not exist or validation failed.");
                     }
                 }
-                else
+                catch (ExternalServiceValidationException ex)
                 {
-                    _logger.LogWarning("Authorization header is missing or not in Basic format from client IP: {ClientIpAddress}. Returning BadRequest.", clientIpAddress);
-                    return new BadRequestResult();
+                    _logger.LogError(ex, "External service validation failed for user {Username} from client IP: {ClientIpAddress}", username, clientIpAddress);
+                    var statusCode = ex.StatusCode ?? (int)HttpStatusCode.InternalServerError;
+                    return new ObjectResult($"External service validation failed: {ex.Message}") { StatusCode = statusCode };
+                }
+                catch (TokenGenerationException ex)
+                {
+                    _logger.LogError(ex, "Token generation failed for user {Username} from client IP: {ClientIpAddress}", username, clientIpAddress);
+                    return new ObjectResult($"Token generation failed: {ex.Message}") { StatusCode = (int)HttpStatusCode.InternalServerError };
+                }
+                catch (DatabaseOperationException ex)
+                {
+                    _logger.LogError(ex, "Database operation failed for user {Username} from client IP: {ClientIpAddress}", username, clientIpAddress);
+                    return new ObjectResult("A database error occurred while processing your request.") { StatusCode = (int)HttpStatusCode.InternalServerError };
                 }
             }
         }

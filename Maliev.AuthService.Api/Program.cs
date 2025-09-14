@@ -163,7 +163,7 @@ try
     builder.Services.AddScoped<IUserValidationService, UserValidationService>();
 
     // Register Authentication Service
-    builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
+    builder.Services.AddScoped<Maliev.AuthService.Api.Services.IAuthenticationService, Maliev.AuthService.Api.Services.AuthenticationService>();
 
     // Register Metrics Service
     builder.Services.AddSingleton<IMetricsService, MetricsService>();
@@ -244,7 +244,8 @@ try
     {
         options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
         options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-    }).AddJwtBearer(options =>
+    })
+    .AddJwtBearer(options =>
     {
         var jwtOptions = new JwtOptions();
         builder.Configuration.GetSection("Jwt").Bind(jwtOptions);

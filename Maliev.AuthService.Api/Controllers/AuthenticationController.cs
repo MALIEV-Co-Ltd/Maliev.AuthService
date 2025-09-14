@@ -5,6 +5,7 @@ using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 using Maliev.AuthService.JwtToken;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -22,13 +23,13 @@ namespace Maliev.AuthService.Api.Controllers
     [ApiVersion("1.0")]
     public class AuthenticationController : ControllerBase
     {
-        private readonly IAuthenticationService _authenticationService;
+        private readonly Maliev.AuthService.Api.Services.IAuthenticationService _authenticationService;
         private readonly ILogger<AuthenticationController> _logger;
         private readonly CustomerServiceOptions _customerServiceOptions;
         private readonly EmployeeServiceOptions _employeeServiceOptions;
 
         public AuthenticationController(
-            IAuthenticationService authenticationService,
+            Maliev.AuthService.Api.Services.IAuthenticationService authenticationService,
             ILogger<AuthenticationController> logger,
             IOptions<CustomerServiceOptions> customerServiceOptions,
             IOptions<EmployeeServiceOptions> employeeServiceOptions)
@@ -44,18 +45,69 @@ namespace Maliev.AuthService.Api.Controllers
         public async Task<IActionResult> Token(CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("Token endpoint called.");
-            var header = Request.Headers["Authorization"].ToString();
-            var traceId = HttpContext.TraceIdentifier;
+
+            // Manually authenticate using our custom authentication handler logic
+            var authHeader = Request.Headers["Authorization"].ToString();
             
-            var result = await _authenticationService.GenerateTokensAsync(
-                header,
-                _customerServiceOptions,
-                _employeeServiceOptions,
-                HttpContext.Connection.RemoteIpAddress?.ToString(),
-                traceId,
-                cancellationToken);
+            // Check if the Authorization header is present
+            if (string.IsNullOrEmpty(authHeader))
+            {
+                _logger.LogWarning("Authorization header is missing. Returning BadRequest.");
+                return BadRequest();
+            }
+            
+            // Check if the header starts with "Basic "
+            if (!authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Authorization header is not in Basic format. Returning BadRequest.");
+                return BadRequest();
+            }
+
+            // Extract and decode the credentials
+            try
+            {
+                var encodedCredentials = authHeader.Substring("Basic ".Length).Trim();
+                var decodedCredentials = Encoding.UTF8.GetString(Convert.FromBase64String(encodedCredentials));
+                var credentials = decodedCredentials.Split(':', 2);
+
+                // Validate credentials format
+                if (credentials.Length != 2)
+                {
+                    _logger.LogWarning("Invalid credential format in authorization header. Returning BadRequest.");
+                    return BadRequest("Invalid credential format in authorization header");
+                }
+
+                var username = credentials[0];
+                var password = credentials[1];
+
+                var loginRequest = new LoginRequest
+                {
+                    Username = username,
+                    Password = password
+                };
+
+                var traceId = HttpContext.TraceIdentifier;
                 
-            return result;
+                var result = await _authenticationService.GenerateTokensAsync(
+                    loginRequest,
+                    _customerServiceOptions,
+                    _employeeServiceOptions,
+                    HttpContext.Connection.RemoteIpAddress?.ToString(),
+                    traceId,
+                    cancellationToken);
+                    
+                return result;
+            }
+            catch (FormatException)
+            {
+                _logger.LogWarning("Invalid Base64 encoding in authorization header. Returning BadRequest.");
+                return BadRequest("Invalid Base64 encoding in authorization header");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error occurred while processing Basic Authentication");
+                return BadRequest("Error occurred while processing authentication");
+            }
         }
 
         [HttpPost("token/refresh")]

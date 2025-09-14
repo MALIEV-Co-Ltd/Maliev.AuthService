@@ -10,7 +10,7 @@ namespace Maliev.AuthService.Api.Services
         /// <summary>
         /// Generates authentication tokens for a user based on Basic Authentication credentials.
         /// </summary>
-        /// <param name="authorizationHeader">The Authorization header value.</param>
+        /// <param name="loginRequest">The login request containing username and password.</param>
         /// <param name="customerServiceOptions">Customer service configuration options.</param>
         /// <param name="employeeServiceOptions">Employee service configuration options.</param>
         /// <param name="clientIpAddress">The IP address of the client making the request.</param>
@@ -18,7 +18,7 @@ namespace Maliev.AuthService.Api.Services
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>An IActionResult with the generated tokens or an appropriate error response.</returns>
         Task<IActionResult> GenerateTokensAsync(
-            string authorizationHeader,
+            LoginRequest loginRequest,
             CustomerServiceOptions customerServiceOptions,
             EmployeeServiceOptions employeeServiceOptions,
             string? clientIpAddress,
