@@ -22,31 +22,28 @@ namespace Maliev.AuthService.Api.Controllers
     public class AuthenticationController : ControllerBase
     {
         private readonly ITokenGenerator _tokenGenerator;
-        private readonly ExternalAuthServiceHttpClient _externalAuthServiceHttpClient;
-        private readonly RefreshTokenDbContext _dbContext;
         private readonly ILogger<AuthenticationController> _logger;
         private readonly CustomerServiceOptions _customerServiceOptions;
         private readonly EmployeeServiceOptions _employeeServiceOptions;
-        private readonly IValidationCacheService _validationCacheService;
+        private readonly IUserValidationService _userValidationService;
+        private readonly IRefreshTokenRepository _refreshTokenRepository;
         private readonly ICredentialValidationService _credentialValidationService;
 
         public AuthenticationController(
             ITokenGenerator tokenGenerator,
-            ExternalAuthServiceHttpClient externalAuthServiceHttpClient,
-            RefreshTokenDbContext dbContext,
             ILogger<AuthenticationController> logger,
             IOptions<CustomerServiceOptions> customerServiceOptions,
             IOptions<EmployeeServiceOptions> employeeServiceOptions,
-            IValidationCacheService validationCacheService,
+            IUserValidationService userValidationService,
+            IRefreshTokenRepository refreshTokenRepository,
             ICredentialValidationService credentialValidationService)
         {
             _tokenGenerator = tokenGenerator;
-            _externalAuthServiceHttpClient = externalAuthServiceHttpClient;
-            _dbContext = dbContext;
             _logger = logger;
             _customerServiceOptions = customerServiceOptions.Value;
             _employeeServiceOptions = employeeServiceOptions.Value;
-            _validationCacheService = validationCacheService;
+            _userValidationService = userValidationService;
+            _refreshTokenRepository = refreshTokenRepository;
             _credentialValidationService = credentialValidationService;
         }
 
@@ -96,54 +93,12 @@ namespace Maliev.AuthService.Api.Controllers
                 _logger.LogDebug("Validated and sanitized username: {Username}", username);
                 // Do not log password for security reasons
 
-                var userValidationRequest = new UserValidationRequest { Username = username, Password = password };
-                var jsonContent = new StringContent(JsonSerializer.Serialize(userValidationRequest), Encoding.UTF8, System.Net.Mime.MediaTypeNames.Application.Json);
-
-                Maliev.AuthService.Api.Models.ValidationResult validationResult = new Maliev.AuthService.Api.Models.ValidationResult { Exists = false };
-
-                // Try validating with CustomerService (check cache first)
-                if (!string.IsNullOrEmpty(_customerServiceOptions.ValidationEndpoint))
-                {
-                    _logger.LogDebug("Attempting to validate with CustomerService at {Endpoint}", _customerServiceOptions.ValidationEndpoint);
-
-                    // Check cache first
-                    var cachedResult = await _validationCacheService.GetValidationResultAsync(username, "Customer");
-                    if (cachedResult != null)
-                    {
-                        validationResult = cachedResult;
-                        _logger.LogDebug("CustomerService validation result from cache: Exists={Exists}, Type={Type}", validationResult.Exists, validationResult.UserType);
-                    }
-                    else
-                    {
-                        validationResult = await ValidateCredentials(_customerServiceOptions.ValidationEndpoint, jsonContent, UserType.Customer);
-                        _logger.LogDebug("CustomerService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
-
-                        // Cache the result
-                        await _validationCacheService.SetValidationResultAsync(username, "Customer", validationResult);
-                    }
-                }
-
-                // If not found in CustomerService, try EmployeeService (check cache first)
-                if (!validationResult.Exists && !string.IsNullOrEmpty(_employeeServiceOptions.ValidationEndpoint))
-                {
-                    _logger.LogDebug("Attempting to validate with EmployeeService at {Endpoint}", _employeeServiceOptions.ValidationEndpoint);
-
-                    // Check cache first
-                    var cachedResult = await _validationCacheService.GetValidationResultAsync(username, "Employee");
-                    if (cachedResult != null)
-                    {
-                        validationResult = cachedResult;
-                        _logger.LogDebug("EmployeeService validation result from cache: Exists={Exists}, Type={Type}", validationResult.Exists, validationResult.UserType);
-                    }
-                    else
-                    {
-                        validationResult = await ValidateCredentials(_employeeServiceOptions.ValidationEndpoint, jsonContent, UserType.Employee);
-                        _logger.LogDebug("EmployeeService validation result: Exists={Exists}, Type={Type}, Error={Error}", validationResult.Exists, validationResult.UserType, validationResult.Error);
-
-                        // Cache the result
-                        await _validationCacheService.SetValidationResultAsync(username, "Employee", validationResult);
-                    }
-                }
+                // Validate user against external services
+                var validationResult = await _userValidationService.ValidateUserAsync(
+                    username, 
+                    password, 
+                    _customerServiceOptions, 
+                    _employeeServiceOptions);
 
                 if (validationResult.Exists)
                 {
@@ -159,8 +114,8 @@ namespace Maliev.AuthService.Api.Controllers
                         Username = username,
                         CreatedByIp = HttpContext.Connection.RemoteIpAddress?.ToString()
                     };
-                    _dbContext.RefreshTokens.Add(refreshToken);
-                    await _dbContext.SaveChangesAsync();
+                    _refreshTokenRepository.AddRefreshToken(refreshToken);
+                    await _refreshTokenRepository.SaveChangesAsync();
                     _logger.LogInformation("Tokens generated and refresh token saved.");
 
                     return Ok(new { AccessToken = accessToken, RefreshToken = refreshTokenString });
@@ -187,7 +142,7 @@ namespace Maliev.AuthService.Api.Controllers
             _logger.LogInformation("Request - RefreshToken: {RefreshToken}", request.RefreshToken.Length > 8 ? request.RefreshToken.Substring(0, 8) + "..." : request.RefreshToken);
 
             // Clean up expired and revoked refresh tokens
-            await _dbContext.CleanExpiredAndRevokedTokensAsync();
+            await _refreshTokenRepository.CleanExpiredAndRevokedTokensAsync();
 
             if (request == null || string.IsNullOrEmpty(request.AccessToken) || string.IsNullOrEmpty(request.RefreshToken))
             {
@@ -197,7 +152,7 @@ namespace Maliev.AuthService.Api.Controllers
 
             try
             {
-                var savedRefreshToken = await _dbContext.RefreshTokens.SingleOrDefaultAsync(rt => rt.Token == request.RefreshToken);
+                var savedRefreshToken = await _refreshTokenRepository.GetRefreshTokenByTokenAsync(request.RefreshToken);
                 _logger.LogInformation("Saved RefreshToken from DB - Token: {Token}", savedRefreshToken?.Token != null && savedRefreshToken.Token.Length > 8 ? savedRefreshToken.Token.Substring(0, 8) + "..." : savedRefreshToken?.Token);
                 _logger.LogInformation("Saved RefreshToken from DB - Username: {Username}", savedRefreshToken?.Username);
                 _logger.LogInformation("Saved RefreshToken from DB - IsActive: {IsActive}", savedRefreshToken?.IsActive);
@@ -229,8 +184,8 @@ namespace Maliev.AuthService.Api.Controllers
 
                 // Revoke old refresh token
                 savedRefreshToken.Revoked = DateTime.UtcNow;
-                _dbContext.RefreshTokens.Update(savedRefreshToken);
-                await _dbContext.SaveChangesAsync();
+                _refreshTokenRepository.UpdateRefreshToken(savedRefreshToken);
+                await _refreshTokenRepository.SaveChangesAsync();
                 _logger.LogInformation("Old RefreshToken revoked and saved to DB.");
 
                 // Save new refresh token to database
@@ -243,8 +198,8 @@ namespace Maliev.AuthService.Api.Controllers
                     CreatedByIp = HttpContext.Connection.RemoteIpAddress?.ToString(),
                     ReplacedByToken = request.RefreshToken
                 };
-                _dbContext.RefreshTokens.Add(newRefreshToken);
-                await _dbContext.SaveChangesAsync();
+                _refreshTokenRepository.AddRefreshToken(newRefreshToken);
+                await _refreshTokenRepository.SaveChangesAsync();
                 _logger.LogInformation("New RefreshToken saved to DB.");
 
                 return Ok(new { AccessToken = newAccessToken, RefreshToken = newRefreshToken.Token });
@@ -259,128 +214,6 @@ namespace Maliev.AuthService.Api.Controllers
                 _logger.LogError(ex, "General Exception: {Message}", ex.Message);
                 return StatusCode((int)HttpStatusCode.InternalServerError, $"An error occurred during token refresh: {ex.Message}");
             }
-        }
-
-        /// <summary>
-        /// Validates user credentials with external ASP.NET Identity services
-        /// </summary>
-        /// <param name="validationEndpoint">The validation endpoint URL configured via CustomerServiceOptions or EmployeeServiceOptions</param>
-        /// <param name="jsonContent">JSON payload containing username and password: {"Username": "user123", "Password": "pass123"}</param>
-        /// <param name="userType">Type of user</param>
-        /// <returns>ValidationResult indicating if user exists in ASP.NET Identity database and their roles</returns>
-        /// <remarks>
-        /// Validation endpoints are configured via external configuration (secrets/environment variables):
-        /// - CustomerService:ValidationEndpoint for customer validation
-        /// - EmployeeService:ValidationEndpoint for employee validation
-        ///
-        /// Expected request format: POST to validation endpoint with JSON body:
-        /// {
-        ///   "Username": "user123",
-        ///   "Password": "pass123"
-        /// }
-        ///
-        /// Expected response codes:
-        /// - 200 OK: Valid credentials, user exists
-        /// - 404 NOT FOUND: User does not exist
-        /// - 400 BAD REQUEST: Invalid request format or credentials
-        /// - Other status codes: Service error
-        ///
-        /// The validation endpoints should validate the user credentials against the respective ASP.NET Identity database
-        /// and return appropriate HTTP status codes to indicate the validation result.
-        ///
-        /// No JSON response body is expected, only HTTP status codes are used for validation results.
-        /// </remarks>
-        [ApiExplorerSettings(IgnoreApi = true)]
-        public async Task<Maliev.AuthService.Api.Models.ValidationResult> ValidateCredentials(
-            string validationEndpoint,
-            StringContent jsonContent,
-            UserType userType)
-        {
-            try
-            {
-                var request = new HttpRequestMessage(HttpMethod.Post, validationEndpoint) { Content = jsonContent };
-                var response = await _externalAuthServiceHttpClient.Client.SendAsync(request);
-
-                return HandleExternalServiceResponse(response, userType);
-            }
-            catch (HttpRequestException ex)
-            {
-                return HandleHttpRequestException(ex, userType);
-            }
-            catch (Exception ex)
-            {
-                return HandleGeneralException(ex, userType);
-            }
-        }
-
-        private Maliev.AuthService.Api.Models.ValidationResult HandleExternalServiceResponse(
-            HttpResponseMessage response,
-            UserType userType)
-        {
-            switch (response.StatusCode)
-            {
-                case HttpStatusCode.OK:
-                    return HandleSuccessResponse(userType);
-
-                case HttpStatusCode.NotFound:
-                    return HandleNotFoundResponse(userType);
-
-                case HttpStatusCode.BadRequest:
-                    return HandleBadRequestResponse(userType);
-
-                default:
-                    return HandleOtherResponse(response, userType);
-            }
-        }
-
-        private Maliev.AuthService.Api.Models.ValidationResult HandleSuccessResponse(UserType userType)
-        {
-            // 200 OK: Valid credentials, user exists
-            _logger.LogDebug("{UserType} validation successful: User exists and credentials are valid", userType);
-            var roles = new List<string> { userType.ToString() }; // Default role
-            return new ValidationResult { Exists = true, UserType = userType.ToString(), Roles = roles };
-        }
-
-        private Maliev.AuthService.Api.Models.ValidationResult HandleNotFoundResponse(UserType userType)
-        {
-            // 404 NOT FOUND: User does not exist
-            _logger.LogDebug("{UserType} validation: User not found", userType);
-            return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = $"User not found in {userType} service." };
-        }
-
-        private Maliev.AuthService.Api.Models.ValidationResult HandleBadRequestResponse(UserType userType)
-        {
-            // 400 BAD REQUEST: Invalid request format or credentials
-            _logger.LogWarning("{UserType} validation: Bad request - invalid credentials or request format", userType);
-            return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = $"Invalid credentials for {userType} service." };
-        }
-
-        private Maliev.AuthService.Api.Models.ValidationResult HandleOtherResponse(
-            HttpResponseMessage response,
-            UserType userType)
-        {
-            // Other status codes: Service error
-            string errorMessage = $"External authentication service returned {response.StatusCode} for {userType} validation.";
-            _logger.LogWarning(errorMessage);
-            return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = errorMessage, StatusCode = (int)response.StatusCode };
-        }
-
-        private Maliev.AuthService.Api.Models.ValidationResult HandleHttpRequestException(
-            HttpRequestException ex,
-            UserType userType)
-        {
-            string errorMessage = $"HttpRequestException during {userType} validation: {ex.Message}";
-            _logger.LogError(ex, errorMessage);
-            return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = errorMessage };
-        }
-
-        private Maliev.AuthService.Api.Models.ValidationResult HandleGeneralException(
-            Exception ex,
-            UserType userType)
-        {
-            string errorMessage = $"An unexpected error occurred during {userType} validation: {ex.Message}";
-            _logger.LogError(ex, errorMessage);
-            return new ValidationResult { Exists = false, UserType = userType.ToString(), Error = errorMessage };
         }
 
         private string? GetUsernameFromToken(string token)

@@ -153,6 +153,15 @@ try
     // Register Credential Validation Service
     builder.Services.AddScoped<ICredentialValidationService, CredentialValidationService>();
 
+    // Register Refresh Token Repository
+    builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+
+    // Register External Authentication Service
+    builder.Services.AddScoped<IExternalAuthenticationService, ExternalAuthenticationService>();
+
+    // Register User Validation Service
+    builder.Services.AddScoped<IUserValidationService, UserValidationService>();
+
     // Register Metrics Service
     builder.Services.AddSingleton<IMetricsService, MetricsService>();
 
