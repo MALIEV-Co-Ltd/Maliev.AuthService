@@ -35,11 +35,6 @@ Log.Logger = new LoggerConfiguration()
         path.StartsWith("/health") || path.StartsWith("/metrics")))
     .WriteTo.Console(outputTemplate:
         "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {CorrelationId} {SourceContext} {Message:lj}{NewLine}{Exception}")
-    .WriteTo.File(
-        path: "logs/auth-service-.txt",
-        rollingInterval: RollingInterval.Day,
-        retainedFileCountLimit: 31,
-        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {CorrelationId} {SourceContext} {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 
 builder.Host.UseSerilog();

@@ -507,10 +507,7 @@ Enable debug logging:
 }
 ```
 
-Check correlation IDs in logs for request tracing:
-```bash
-grep "req-12345" logs/auth-service-*.txt
-```
+Check correlation IDs in logs for request tracing in your logging platform.
 
 ## 🤝 Contributing
 
