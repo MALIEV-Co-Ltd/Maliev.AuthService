@@ -11,7 +11,7 @@
 .PARAMETER LocalPort
     Local port for port forwarding (default: 5432)
 .EXAMPLE
-    .\deploy-migration-v2.ps1 -ServiceName country -Environment staging -LocalPort 5433
+    .\deploy-migration-v2.ps1 -ServiceName country -Environment staging -LocalPort 5432
 .EXAMPLE
     .\deploy-migration-v2.ps1  # Will prompt for all values
 #>
@@ -133,7 +133,7 @@ function Get-UserInput {
 
     # Prompt for LocalPort if not provided
     if (-not $LocalPort) {
-        $LocalPort = Read-Host "`nEnter local port for connection (e.g., 5432, 5433)"
+        $LocalPort = Read-Host "`nEnter local port for connection (e.g., 5432)"
         if (-not $LocalPort) {
             $LocalPort = 5432
             Write-Host "Using default port: 5432" -ForegroundColor Yellow
