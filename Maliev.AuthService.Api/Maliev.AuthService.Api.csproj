@@ -40,7 +40,6 @@
     <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="9.0.0" />
 
-    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
 
   </ItemGroup>
 
