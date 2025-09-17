@@ -23,6 +23,7 @@
 **/obj
 **/secrets.dev.yaml
 **/values.dev.yaml
+**/scripts
 LICENSE
 README.md
 !**/.gitignore

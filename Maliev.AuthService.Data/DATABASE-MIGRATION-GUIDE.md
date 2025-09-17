@@ -4,6 +4,21 @@
 
 This guide explains how to set up and run Entity Framework migrations for Maliev microservices using CloudNative-PG PostgreSQL clusters.
 
+**Note**: This guide shows examples for AuthService. When adapting for other services, replace:
+- `RefreshTokenDbContext` with your service's DbContext name
+- `ConnectionStrings__RefreshTokenDbContext` with your service's connection string name
+- `auth_app_db` with your service's database name
+
+## Service-Specific Connection Strings
+
+Each service uses its own connection string environment variable:
+- **AuthService**: `ConnectionStrings__RefreshTokenDbContext`
+- **CountryService**: `ConnectionStrings__CountryDbContext`
+- **OrderService**: `ConnectionStrings__OrderDbContext`
+- **CurrencyService**: `ConnectionStrings__CurrencyDbContext`
+- **MaterialService**: `ConnectionStrings__MaterialDbContext`
+- etc.
+
 ## Database Architecture
 
 **One Database Per Service**: Each microservice gets its own isolated database within a shared PostgreSQL cluster.
@@ -45,19 +60,19 @@ In your service's `.Data` project, create `DesignTimeDbContextFactory.cs`:
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
-using YourService.Data.DbContexts;
+using Maliev.AuthService.Data.DbContexts;
 
-namespace YourService.Data
+namespace Maliev.AuthService.Data
 {
-    public class YourDbContextFactory : IDesignTimeDbContextFactory<YourDbContext>
+    public class RefreshTokenDbContextFactory : IDesignTimeDbContextFactory<RefreshTokenDbContext>
     {
-        public YourDbContext CreateDbContext(string[] args)
+        public RefreshTokenDbContext CreateDbContext(string[] args)
         {
-            var optionsBuilder = new DbContextOptionsBuilder<YourDbContext>();
+            var optionsBuilder = new DbContextOptionsBuilder<RefreshTokenDbContext>();
             
-            // Use universal environment variable for connection string during design time
-            // This allows the same migration script to work across all services
-            var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Default");
+            // Use service-specific connection string environment variable
+            // Each service should use its own connection string name
+            var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__RefreshTokenDbContext");
             
             if (string.IsNullOrEmpty(connectionString))
             {
@@ -67,16 +82,20 @@ namespace YourService.Data
             
             optionsBuilder.UseNpgsql(connectionString);
             
-            return new YourDbContext(optionsBuilder.Options);
+            return new RefreshTokenDbContext(optionsBuilder.Options);
         }
     }
 }
 ```
 
 **Key Points:**
-- Uses generic `ConnectionStrings__Default` environment variable
-- Same pattern works for ALL services
-- Migration script sets this variable automatically
+- Uses service-specific connection string environment variable (e.g., `ConnectionStrings__RefreshTokenDbContext`)
+- Each service has its own connection string name for isolation
+- Replace the connection string name based on your service:
+  - AuthService: `ConnectionStrings__RefreshTokenDbContext`
+  - CountryService: `ConnectionStrings__CountryDbContext`
+  - OrderService: `ConnectionStrings__OrderDbContext`
+  - etc.
 - Fallback uses superuser (`postgres`) for database creation privileges
 
 ### 2. Copy Migration Script
@@ -111,7 +130,7 @@ Run the migration script with your service name:
 
 ✅ **Same script for all services** - No service-specific modifications needed
 ✅ **Automatic database naming** - `[service]_app_db` pattern enforced
-✅ **Universal environment variable** - `ConnectionStrings__Default` works everywhere
+✅ **Service-specific environment variable** - Each service uses its own connection string name for proper isolation
 ✅ **Input validation** - Prevents database naming errors
 ✅ **Superuser privileges** - Can create/delete databases as needed
 
