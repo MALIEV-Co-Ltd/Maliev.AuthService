@@ -3,17 +3,8 @@
 .SYNOPSIS
     Universal database migration script for Maliev microservices
 .DESCRIPTION
-    Applies EF Core migrations using standard workflow. All service-specific variables are configurable.
-.PARAMETER ServiceName
-    Name of the service (e.g., "auth", "country", "order")
-.PARAMETER Environment
-    Target environment: dev, staging, prod (default: staging)
-.PARAMETER LocalPort
-    Local port for port forwarding (default: 5432)
-.EXAMPLE
-    .\deploy-migration-v2.ps1 -ServiceName country -Environment staging -LocalPort 5432
-.EXAMPLE
-    .\deploy-migration-v2.ps1  # Will prompt for all values
+    Applies EF Core migrations using standard workflow. Automatically port-forwards
+    into the PostgreSQL pod before running migrations.
 #>
 
 [CmdletBinding()]
@@ -29,239 +20,152 @@ param(
     [int]$LocalPort
 )
 
-# ===================================================================
-# SERVICE CONFIGURATION - CUSTOMIZE THESE FOR EACH SERVICE
-# ===================================================================
-
-# Service-specific configuration mapping
+# --- Service Config ---
 $ServiceConfig = @{
-    "auth" = @{
-        DatabaseName = "auth_app_db"
-        ConnectionStringName = "ConnectionStrings__RefreshTokenDbContext"
-        DisplayName = "AuthService"
-    }
-    "country" = @{
-        DatabaseName = "country_app_db"
-        ConnectionStringName = "ConnectionStrings__CountryDbContext"
-        DisplayName = "CountryService"
-    }
-    "order" = @{
-        DatabaseName = "order_app_db"
-        ConnectionStringName = "ConnectionStrings__OrderDbContext"
-        DisplayName = "OrderService"
-    }
-    "currency" = @{
-        DatabaseName = "currency_app_db"
-        ConnectionStringName = "ConnectionStrings__CurrencyDbContext"
-        DisplayName = "CurrencyService"
-    }
-    "material" = @{
-        DatabaseName = "material_app_db"
-        ConnectionStringName = "ConnectionStrings__MaterialDbContext"
-        DisplayName = "MaterialService"
-    }
-    "customer" = @{
-        DatabaseName = "customer_app_db"
-        ConnectionStringName = "ConnectionStrings__CustomerDbContext"
-        DisplayName = "CustomerService"
-    }
-    "supplier" = @{
-        DatabaseName = "supplier_app_db"
-        ConnectionStringName = "ConnectionStrings__SupplierDbContext"
-        DisplayName = "SupplierService"
-    }
-    "upload" = @{
-        DatabaseName = "upload_app_db"
-        ConnectionStringName = "ConnectionStrings__UploadDbContext"
-        DisplayName = "UploadService"
-    }
+    "auth"   = @{ DatabaseName="auth_app_db"; ConnectionStringName="ConnectionStrings__RefreshTokenDbContext"; DisplayName="AuthService" }
 }
 
-# Environment Configuration
+# --- Environment Config ---
 $EnvironmentConfig = @{
-    "dev" = @{
-        Namespace = "maliev-dev"
-        DisplayName = "Development"
-        RequireConfirmation = $false
-    }
-    "staging" = @{
-        Namespace = "maliev-staging"
-        DisplayName = "Staging"
-        RequireConfirmation = $false
-    }
-    "prod" = @{
-        Namespace = "maliev-prod"
-        DisplayName = "Production"
-        RequireConfirmation = $true
-    }
+    "dev"     = @{ Namespace="maliev-dev";     DisplayName="Development"; RequireConfirmation=$false }
+    "staging" = @{ Namespace="maliev-staging"; DisplayName="Staging";     RequireConfirmation=$false }
+    "prod"    = @{ Namespace="maliev-prod";    DisplayName="Production";  RequireConfirmation=$true  }
 }
-
-# ===================================================================
-# INTERACTIVE PROMPTS FOR MISSING PARAMETERS
-# ===================================================================
-
-function Get-UserInput {
-    # Prompt for ServiceName if not provided
-    if (-not $ServiceName) {
-        Write-Host "`nAvailable services:" -ForegroundColor Yellow
-        $ServiceConfig.Keys | Sort-Object | ForEach-Object {
-            Write-Host "  - $_" -ForegroundColor Cyan
-        }
-
-        do {
-            $ServiceName = Read-Host "`nEnter service name"
-            if (-not $ServiceConfig.ContainsKey($ServiceName)) {
-                Write-Host "Invalid service name. Please choose from the list above." -ForegroundColor Red
-            }
-        } while (-not $ServiceConfig.ContainsKey($ServiceName))
-    }
-
-    # Prompt for Environment if not provided
-    if (-not $Environment) {
-        Write-Host "`nAvailable environments:" -ForegroundColor Yellow
-        $EnvironmentConfig.Keys | Sort-Object | ForEach-Object {
-            Write-Host "  - $_" -ForegroundColor Cyan
-        }
-
-        do {
-            $Environment = Read-Host "`nEnter environment (dev/staging/prod)"
-            if (-not $EnvironmentConfig.ContainsKey($Environment)) {
-                Write-Host "Invalid environment. Please choose: dev, staging, or prod" -ForegroundColor Red
-            }
-        } while (-not $EnvironmentConfig.ContainsKey($Environment))
-    }
-
-    # Prompt for LocalPort if not provided
-    if (-not $LocalPort) {
-        $LocalPort = Read-Host "`nEnter local port for connection (e.g., 5432)"
-        if (-not $LocalPort) {
-            $LocalPort = 5432
-            Write-Host "Using default port: 5432" -ForegroundColor Yellow
-        }
-    }
-
-    return @{
-        ServiceName = $ServiceName
-        Environment = $Environment
-        LocalPort = [int]$LocalPort
-    }
-}
-
-# ===================================================================
-# LOGGING AND UTILITY FUNCTIONS
-# ===================================================================
 
 function Write-Log {
-    param(
-        [string]$Message,
-        [ValidateSet("INFO", "SUCCESS", "WARNING", "ERROR")]
-        [string]$Level = "INFO"
-    )
-
+    param([string]$Message, [ValidateSet("INFO","SUCCESS","WARNING","ERROR")][string]$Level="INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $color = switch ($Level) {
-        "SUCCESS" { "Green" }
-        "WARNING" { "Yellow" }
-        "ERROR" { "Red" }
-        default { "Cyan" }
-    }
-
+    $color = switch ($Level) { "SUCCESS"{"Green"} "WARNING"{"Yellow"} "ERROR"{"Red"} default{"Cyan"} }
     Write-Host "[$timestamp] [$Level] $Message" -ForegroundColor $color
 }
 
 function Get-DatabaseCredentials {
-    # Try environment variable first
     $envPassword = [System.Environment]::GetEnvironmentVariable("PGPASSWORD")
-    if ($envPassword) {
-        Write-Log "Using password from environment variable: PGPASSWORD" "INFO"
-        return $envPassword
-    }
-
-    # Fall back to prompting
-    Write-Log "No password found in environment variable PGPASSWORD" "WARNING"
+    if ($envPassword) { Write-Log "Using PGPASSWORD from environment" "INFO"; return $envPassword }
     $securePassword = Read-Host "Enter PostgreSQL password" -AsSecureString
     $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
     return [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
 }
 
-# ===================================================================
-# MAIN EXECUTION
-# ===================================================================
+function Get-UserInput {
+    if (-not $ServiceName) {
+        Write-Host "`nAvailable services:" -ForegroundColor Yellow
+        $ServiceConfig.Keys | Sort-Object | ForEach-Object { Write-Host "  - $_" -ForegroundColor Cyan }
+        do { $ServiceName = Read-Host "`nEnter service name" } while (-not $ServiceConfig.ContainsKey($ServiceName))
+    }
+    if (-not $Environment) {
+        Write-Host "`nAvailable environments:" -ForegroundColor Yellow
+        $EnvironmentConfig.Keys | Sort-Object | ForEach-Object { Write-Host "  - $_" -ForegroundColor Cyan }
+        do { $Environment = Read-Host "`nEnter environment (dev/staging/prod)" } while (-not $EnvironmentConfig.ContainsKey($Environment))
+    }
+    if (-not $LocalPort) { $LocalPort = 5432 }
+    return @{ ServiceName=$ServiceName; Environment=$Environment; LocalPort=[int]$LocalPort }
+}
 
+function Find-PostgresPod {
+    param($Namespace)
+
+    # Try common CNPG label first
+    $pod = (& kubectl get pod -n $Namespace -l cnpg.io/cluster=postgres-cluster -o jsonpath="{.items[*].metadata.name}" 2>$null).Trim()
+    if ($pod) { return ($pod -split '\s+')[0] }
+
+    # Fallback: list pod names and choose first that starts with postgres-cluster
+    $all = (& kubectl get pods -n $Namespace -o jsonpath="{.items[*].metadata.name}" 2>$null).Trim()
+    if ($all) {
+        foreach ($name in $all -split '\s+') {
+            if ($name -like "postgres-cluster*") { return $name }
+        }
+    }
+
+    # Last resort: if single pod exists return it
+    $first = (& kubectl get pods -n $Namespace -o jsonpath="{.items[0].metadata.name}" 2>$null).Trim()
+    if ($first) { return $first }
+
+    return $null
+}
+
+function Wait-ForLocalPort {
+    param($DbHost, $Port, $TimeoutSec = 20)
+    $end = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $end) {
+        try {
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            $iar = $tcp.BeginConnect($DbHost, $Port, $null, $null)
+            $wait = $iar.AsyncWaitHandle.WaitOne(1000)
+            if ($wait -and $tcp.Connected) { $tcp.EndConnect($iar); $tcp.Close(); return $true }
+            $tcp.Close()
+        } catch { }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
+# --- MAIN ---
+$pfProcess = $null
 try {
-    # Get user input for missing parameters
-    $userInput = Get-UserInput
+    $userInput   = Get-UserInput
     $ServiceName = $userInput.ServiceName
     $Environment = $userInput.Environment
-    $LocalPort = $userInput.LocalPort
+    $LocalPort   = $userInput.LocalPort
 
-    # Get configuration
     $serviceConfig = $ServiceConfig[$ServiceName]
+    if (-not $serviceConfig) { throw "Unknown service: $ServiceName" }
+
     $envConfig = $EnvironmentConfig[$Environment]
+    if (-not $envConfig) { throw "Unknown environment: $Environment" }
 
     Write-Log "=== Universal Maliev Database Migration ===" "INFO"
     Write-Log "Service: $($serviceConfig.DisplayName)" "INFO"
     Write-Log "Environment: $($envConfig.DisplayName) ($($envConfig.Namespace))" "INFO"
     Write-Log "Database: $($serviceConfig.DatabaseName)" "INFO"
-    Write-Log "Connection String: $($serviceConfig.ConnectionStringName)" "INFO"
     Write-Log "Local Port: $LocalPort" "INFO"
 
-    # Production Safety Check
     if ($envConfig.RequireConfirmation) {
-        Write-Log "=== PRODUCTION DEPLOYMENT WARNING ===" "WARNING"
-        Write-Log "You are about to deploy to PRODUCTION environment!" "WARNING"
-        Write-Log "Service: $($serviceConfig.DisplayName)" "WARNING"
-        Write-Log "Environment: $($envConfig.DisplayName)" "WARNING"
-        Write-Log "Namespace: $($envConfig.Namespace)" "WARNING"
-        Write-Log "Database: $($serviceConfig.DatabaseName)" "WARNING"
-        Write-Log "" "WARNING"
-
         $confirmation = Read-Host "Type 'DEPLOY' to confirm production deployment"
-        if ($confirmation -ne "DEPLOY") {
-            Write-Log "Production deployment cancelled by user" "WARNING"
-            exit 1
-        }
+        if ($confirmation -ne "DEPLOY") { Write-Log "Cancelled by user" "WARNING"; exit 1 }
     }
 
-    # Get database password
+    Write-Log "Searching for PostgreSQL pod..." "INFO"
+    $postgresPod = Find-PostgresPod -Namespace $envConfig.Namespace
+    if (-not $postgresPod) { throw "No postgres pod found in namespace $($envConfig.Namespace)" }
+
+    Write-Log "Starting port-forward to pod: $postgresPod" "INFO"
+    $portForwardArgs = "port-forward", "-n", $envConfig.Namespace, $postgresPod, "$LocalPort`:5432"
+    $pfProcess = Start-Process -FilePath "kubectl" -ArgumentList $portForwardArgs -WindowStyle Hidden -PassThru
+
+    # Wait until localhost:$LocalPort accepts connections
+    Write-Log "Waiting for localhost:$LocalPort to be ready (timeout 30s)..." "INFO"
+    if (-not (Wait-ForLocalPort -DbHost "localhost" -Port $LocalPort -TimeoutSec 30)) {
+        throw "Port-forward did not open localhost:$LocalPort within timeout."
+    }
+
+    # Get DB password and build connection string
     $DatabasePassword = Get-DatabaseCredentials
+    $connectionString = 'Host=localhost;Port={0};Database={1};Username=postgres;Password={2};Pooling=true;' -f $LocalPort, $serviceConfig.DatabaseName, $DatabasePassword
 
-    # Build connection string
-    $connectionString = "Server=localhost;Port=$LocalPort;Database=$($serviceConfig.DatabaseName);User Id=postgres;Password=$DatabasePassword;"
+    # Optional: also set env var for local processes (keeps original behavior)
+    Set-Item -Path "env:$($serviceConfig.ConnectionStringName)" -Value $connectionString -ErrorAction SilentlyContinue
+    Write-Log "Connection string configured in environment variable $($serviceConfig.ConnectionStringName)" "INFO"
 
-    # Set environment variable for EF Core (using service-specific name)
-    $connectionStringEnvVar = $serviceConfig.ConnectionStringName
-    Set-Item -Path "env:$connectionStringEnvVar" -Value $connectionString
-
-    Write-Log "Connection string configured for $connectionStringEnvVar" "INFO"
     Write-Log "Applying EF Core migrations..." "INFO"
-
-    # Run EF Core migration (standard workflow)
-    $migrationOutput = dotnet ef database update 2>&1
+    # Use explicit --connection so design-time resolves the correct DB
+    & dotnet ef database update --connection "$connectionString" --verbose
 
     if ($LASTEXITCODE -eq 0) {
         Write-Log "=== MIGRATION SUCCESSFUL ===" "SUCCESS"
-        Write-Log "Service: $($serviceConfig.DisplayName)" "SUCCESS"
-        Write-Log "Database: $($serviceConfig.DatabaseName)" "SUCCESS"
-        Write-Log "Environment: $($envConfig.DisplayName)" "SUCCESS"
-
-        # Show migration output
-        Write-Log "Migration Details:" "INFO"
-        Write-Host $migrationOutput -ForegroundColor Gray
     } else {
-        Write-Log "=== MIGRATION FAILED ===" "ERROR"
-        Write-Log "Error Details:" "ERROR"
-        Write-Host $migrationOutput -ForegroundColor Red
-        exit 1
+        throw "EF Core migration failed"
     }
 
 } catch {
     Write-Log "Migration failed with exception: $($_.Exception.Message)" "ERROR"
     exit 1
 } finally {
-    # Clean up environment variables (dynamically)
     if ($serviceConfig -and $serviceConfig.ConnectionStringName) {
-        $connectionStringEnvVar = $serviceConfig.ConnectionStringName
-        Remove-Item "env:$connectionStringEnvVar" -ErrorAction SilentlyContinue
+        Remove-Item "env:$($serviceConfig.ConnectionStringName)" -ErrorAction SilentlyContinue
+    }
+    if ($pfProcess -and $pfProcess.Id) {
+        Write-Log "Stopping port-forward (PID $($pfProcess.Id))..." "INFO"
+        try { Stop-Process -Id $pfProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
     }
 }
