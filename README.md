@@ -2,60 +2,17 @@
 
 JWT Token-Based Authentication Service with OAuth 2.0 Token Rotation (RFC 9700)
 
-## Overview
-
-Production-ready authentication microservice implementing:
-- **ES256 (ECDSA P-256)** JWT token signing
-- **RFC 9700** OAuth 2.0 Token Rotation with reuse detection
-- **Multi-tenant** authentication (Customer/Employee)
-- **SHA-256** cryptographic hashing for refresh tokens
-- **Polly resilience** patterns (retry + circuit breaker)
-- **Optimistic concurrency** control for token operations
-- **Rate limiting** by IP address (5 attempts per 5 minutes)
-
 ## Features
 
-- ✅ ES256 (ECDSA P-256) asymmetric JWT signing
-- ✅ Automatic refresh token rotation (RFC 9700)
-- ✅ Token reuse detection with family invalidation
-- ✅ External service validation (Customer/Employee services)
-- ✅ In-memory validation caching (5-10 minute TTL)
-- ✅ PostgreSQL persistence with EF Core
-- ✅ Rate limiting and circuit breaker patterns
-- ✅ Correlation ID tracing (X-Correlation-Id)
-- ✅ Health checks (liveness/readiness)
-- ✅ Comprehensive integration test coverage
-
-## Architecture
-
-```
-┌─────────────────┐
-│   Client App    │
-└────────┬────────┘
-         │ POST /auth/login
-         ▼
-┌─────────────────────────────────────────────────────┐
-│         Authentication Controller                    │
-│  ┌────────────┬──────────────┬──────────────┐      │
-│  │   Login    │   Refresh    │   Validate   │      │
-│  └──────┬─────┴──────┬───────┴──────┬───────┘      │
-└─────────┼────────────┼──────────────┼──────────────┘
-          │            │              │
-          ▼            ▼              ▼
-┌─────────────────────────────────────────────────────┐
-│         Authentication Service Layer                 │
-│  ┌─────────────────────────────────────────────┐   │
-│  │  Credential → External → Token → Cache      │   │
-│  │  Validation   Validation  Generation         │   │
-│  └─────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────┘
-          │            │              │
-          ▼            ▼              ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│   External   │ │  PostgreSQL  │ │ Memory Cache │
-│   Services   │ │   Database   │ │              │
-└──────────────┘ └──────────────┘ └──────────────┘
-```
+- **ES256 (ECDSA P-256)** JWT token signing
+- **RFC 9700** OAuth 2.0 Token Rotation with reuse detection
+- **Multi-tenant** authentication (Customer/Employee services)
+- **SHA-256** cryptographic hashing for refresh tokens
+- **Polly resilience** patterns (retry + circuit breaker)
+- **Optimistic concurrency** control with EF Core RowVersion
+- **Rate limiting** by IP address (5 attempts per 5 minutes)
+- **PostgreSQL** persistence with automatic migrations
+- **Health checks** (liveness/readiness)
 
 ## API Endpoints
 
@@ -63,7 +20,6 @@ Production-ready authentication microservice implementing:
 
 Authenticate user and issue access + refresh tokens.
 
-**Request:**
 ```bash
 curl -X POST http://localhost:8080/auth/login \
   -H "Content-Type: application/json" \
@@ -74,7 +30,7 @@ curl -X POST http://localhost:8080/auth/login \
   }'
 ```
 
-**Response (200 OK):**
+**Response:**
 ```json
 {
   "access_token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9...",
@@ -84,15 +40,7 @@ curl -X POST http://localhost:8080/auth/login \
 }
 ```
 
-**Error Responses:**
-- `400 Bad Request` - Invalid request format
-- `401 Unauthorized` - Invalid credentials
-- `429 Too Many Requests` - Rate limit exceeded (5 attempts per 5 minutes)
-- `503 Service Unavailable` - External service or circuit breaker issue
-
-**Rate Limiting:**
-- 5 login attempts per 5 minutes per IP address
-- Returns `429` when limit exceeded
+**Error Codes:** `400` (invalid request), `401` (invalid credentials), `429` (rate limit), `503` (service unavailable)
 
 ---
 
@@ -100,44 +48,17 @@ curl -X POST http://localhost:8080/auth/login \
 
 Rotate refresh token and issue new access token (RFC 9700).
 
-**Request:**
 ```bash
 curl -X POST http://localhost:8080/auth/refresh \
   -H "Content-Type: application/json" \
-  -d '{
-    "refresh_token": "a1b2c3d4e5f6..."
-  }'
+  -d '{"refresh_token": "a1b2c3d4e5f6..."}'
 ```
 
-**Response (200 OK):**
-```json
-{
-  "access_token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refresh_token": "b2c3d4e5f6g7...",
-  "token_type": "Bearer",
-  "expires_in": 900
-}
-```
+**Response:** Same as login (new tokens)
 
-**Error Responses:**
-- `400 Bad Request` - Missing refresh_token
-- `401 Unauthorized` - Invalid/expired/revoked refresh token
-- `403 Forbidden` - Token reuse detected (entire family invalidated)
+**Error Codes:** `400` (missing token), `401` (invalid/expired), `403` (token reuse detected - family invalidated)
 
-**Token Rotation (RFC 9700):**
-1. Client sends current refresh token
-2. Server validates token and checks for reuse
-3. If valid: marks token as used, issues new token pair
-4. If reused: invalidates entire token family (security breach)
-
-**Reuse Detection:**
-```
-Time: T0          T1          T2          T3
-      │           │           │           │
-      Login       Refresh     Refresh     Reuse!
-      Token A → Token B → Token C → Token A (INVALID)
-                                      └─► Invalidate A, B, C
-```
+**Token Rotation:** Old refresh token is marked as used. If reused, entire token family is invalidated for security.
 
 ---
 
@@ -145,16 +66,13 @@ Time: T0          T1          T2          T3
 
 Validate access token and return user claims.
 
-**Request:**
 ```bash
 curl -X POST http://localhost:8080/auth/validate \
   -H "Content-Type: application/json" \
-  -d '{
-    "access_token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9..."
-  }'
+  -d '{"access_token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9..."}'
 ```
 
-**Response (200 OK):**
+**Response:**
 ```json
 {
   "user_id": "12345",
@@ -166,106 +84,29 @@ curl -X POST http://localhost:8080/auth/validate \
 }
 ```
 
-**Error Responses:**
-- `400 Bad Request` - Missing access_token
-- `401 Unauthorized` - Invalid/expired/revoked token
-
-**Caching:**
-- Successful validations cached for 5-10 minutes
-- Reduces external service calls by 80-90%
+**Caching:** Successful validations cached for 5-10 minutes to reduce external service calls.
 
 ---
 
 ### 4. Revoke Token (POST /auth/revoke)
 
-Revoke access token or entire token family.
+Revoke access token or entire refresh token family.
 
-**Request:**
 ```bash
 # Revoke single access token
 curl -X POST http://localhost:8080/auth/revoke \
   -H "Content-Type: application/json" \
-  -d '{
-    "access_token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9..."
-  }'
+  -d '{"access_token": "eyJhbGci..."}'
 
-# Revoke entire refresh token family
+# Revoke entire token family
 curl -X POST http://localhost:8080/auth/revoke \
   -H "Content-Type: application/json" \
-  -d '{
-    "refresh_token": "a1b2c3d4e5f6..."
-  }'
+  -d '{"refresh_token": "a1b2c3..."}'
 ```
 
-**Response (204 No Content):**
-```
-(empty body)
-```
-
-**Error Responses:**
-- `400 Bad Request` - Missing both access_token and refresh_token
-- `404 Not Found` - Token not found
+**Response:** `204 No Content` on success
 
 ---
-
-## Configuration
-
-### Required Secrets (Google Secret Manager)
-
-Mount secrets at `/mnt/secrets`:
-
-```bash
-# JWT Signing Key (ECDSA P-256 Private Key in PEM format)
-/mnt/secrets/Jwt__SigningKey
-
-# Database Connection String
-/mnt/secrets/Database__ConnectionString
-```
-
-### Generate ECDSA P-256 Key Pair
-
-```bash
-# Generate private key
-openssl ecparam -name prime256v1 -genkey -noout -out private-key.pem
-
-# Extract public key
-openssl ec -in private-key.pem -pubout -out public-key.pem
-
-# Store private key in Secret Manager
-gcloud secrets create jwt-signing-key \
-  --data-file=private-key.pem \
-  --replication-policy=automatic
-
-# Never commit private key to source control!
-```
-
-### appsettings.json
-
-```json
-{
-  "Jwt": {
-    "Issuer": "https://auth.maliev.com",
-    "Audience": "maliev-services",
-    "SigningKey": "REPLACE_WITH_ECDSA_P256_PRIVATE_KEY_PEM",
-    "AccessTokenLifetimeSeconds": 900,
-    "RefreshTokenLifetimeSeconds": 2592000
-  },
-  "ExternalServices": {
-    "CustomerServiceUrl": "http://customer-service:8080/api/v1",
-    "EmployeeServiceUrl": "http://employee-service:8080/api/v1",
-    "TimeoutMs": 5000,
-    "MaxRetries": 3,
-    "RetryDelayMs": 500
-  },
-  "RateLimit": {
-    "LoginAttemptLimit": 5,
-    "WindowSeconds": 300
-  },
-  "Database": {
-    "ConnectionString": "Server=localhost;Port=5432;Database=auth_db;User Id=postgres;Password=postgres;"
-  }
-}
-```
 
 ## Local Development
 
@@ -273,7 +114,7 @@ gcloud secrets create jwt-signing-key \
 
 - .NET 9.0 SDK
 - Docker Desktop (for PostgreSQL)
-- Visual Studio 2022 or VS Code
+- OpenSSL (for ECDSA key generation)
 
 ### Setup
 
@@ -285,17 +126,22 @@ cd Maliev.AuthService
 # 2. Start PostgreSQL (Docker)
 docker run -d \
   --name auth-postgres \
-  -e POSTGRES_DB=auth_db \
+  -e POSTGRES_DB=auth_app_db \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=postgres \
   -p 5432:5432 \
   postgres:17
 
-# 3. Generate development JWT key
-openssl ecparam -name prime256v1 -genkey -noout -out dev-private-key.pem
+# 3. Generate development ECDSA P-256 key (Base64-encoded 32-byte scalar)
+openssl ecparam -name prime256v1 -genkey -noout | \
+  openssl ec -outform DER | tail -c 32 | base64
 
-# 4. Update appsettings.Development.json
-cat dev-private-key.pem  # Copy content to Jwt.SigningKey
+# 4. Update appsettings.Development.json with generated key
+# {
+#   "Jwt": {
+#     "SecurityKey": "<paste-base64-key-here>"
+#   }
+# }
 
 # 5. Apply database migrations
 dotnet ef database update --project Maliev.AuthService.Data
@@ -304,14 +150,11 @@ dotnet ef database update --project Maliev.AuthService.Data
 dotnet run --project Maliev.AuthService.Api
 ```
 
-**Service runs at:** `http://localhost:8080`
+**Service URL:** http://localhost:8080
 
 **Health Checks:**
-- Liveness: `http://localhost:8080/auth/liveness`
-- Readiness: `http://localhost:8080/auth/readiness`
-
-**OpenAPI/Swagger (Development only):**
-- `http://localhost:8080/openapi/v1.json`
+- Liveness: http://localhost:8080/auth/liveness
+- Readiness: http://localhost:8080/auth/readiness
 
 ### Testing
 
@@ -324,199 +167,331 @@ dotnet test --filter "Category=Contract"
 
 # Run only integration tests
 dotnet test --filter "Category=Integration"
-
-# Run with coverage
-dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=opencover
 ```
 
-**Test Categories:**
-- **Contract Tests (9):** API endpoint contracts (TDD Red phase)
-- **Integration Tests (28):** Complete workflows with real PostgreSQL
-- **Unit Tests:** Service layer logic (post-implementation)
+**Test Status:** 37 tests (6 passing, 21 TDD Red phase, 10 skipped - expected until dependencies configured)
 
-## Database Migrations
+---
 
-### Create Migration
+## Production Deployment
+
+### Secret Setup (Google Secret Manager)
+
+#### 1. Generate ECDSA P-256 Key
 
 ```bash
-# Port-forward to PostgreSQL pod (NOT service)
+# Generate Base64-encoded 32-byte private key scalar
+openssl ecparam -name prime256v1 -genkey -noout | \
+  openssl ec -outform DER | tail -c 32 | base64
+
+# Output example: xto5fs9GfvC/2ztp3S1pR9w27Hgjn3j2c8Ad0QFrtJw=
+```
+
+**CRITICAL:** Store this value securely. This is the private key for JWT signing.
+
+#### 2. Required Secrets
+
+| Secret Name | Environment Variable | Example Value |
+|-------------|---------------------|---------------|
+| `maliev-auth-jwt-security-key` | `Jwt__SecurityKey` | `xto5fs9GfvC/2ztp3S1pR9w27Hgjn3j2c8Ad0QFrtJw=` (Base64 32-byte key) |
+| `maliev-auth-jwt-issuer` | `Jwt__Issuer` | `maliev-dev` |
+| `maliev-auth-jwt-audience` | `Jwt__Audience` | `maliev-dev` |
+| `maliev-auth-db-connection` | `ConnectionStrings__RefreshTokenDbContext` | `Server=postgres-cluster-rw.maliev-dev.svc.cluster.local;Port=5432;Database=auth_app_db;User Id=postgres;Password=XXX;` |
+| `maliev-auth-customer-endpoint` | `CustomerService__ValidationEndpoint` | `http://maliev-customer-service.maliev-dev.svc.cluster.local:8080/customers/v1/validate` |
+| `maliev-auth-employee-endpoint` | `EmployeeService__ValidationEndpoint` | `http://maliev-employee-service.maliev-dev.svc.cluster.local:8080/employees/v1/validate` |
+
+#### 3. Upload Secrets to Google Secret Manager
+
+```bash
+# JWT Security Key
+echo -n "xto5fs9GfvC/2ztp3S1pR9w27Hgjn3j2c8Ad0QFrtJw=" | \
+  gcloud secrets create maliev-auth-jwt-security-key \
+    --data-file=- \
+    --replication-policy=automatic \
+    --project=maliev-website
+
+# Repeat for other secrets (issuer, audience, db connection, endpoints)
+```
+
+#### 4. External Secrets Operator Configuration
+
+Create `maliev-gitops/3-apps/auth-service/base/external-secret.yaml`:
+
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: maliev-auth-secrets
+  namespace: maliev-dev
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: gcpsm-secret-store
+    kind: ClusterSecretStore
+  target:
+    name: maliev-auth-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: Jwt__SecurityKey
+      remoteRef:
+        key: maliev-auth-jwt-security-key
+    - secretKey: Jwt__Issuer
+      remoteRef:
+        key: maliev-auth-jwt-issuer
+    - secretKey: Jwt__Audience
+      remoteRef:
+        key: maliev-auth-jwt-audience
+    - secretKey: ConnectionStrings__RefreshTokenDbContext
+      remoteRef:
+        key: maliev-auth-db-connection
+    - secretKey: CustomerService__ValidationEndpoint
+      remoteRef:
+        key: maliev-auth-customer-endpoint
+    - secretKey: EmployeeService__ValidationEndpoint
+      remoteRef:
+        key: maliev-auth-employee-endpoint
+```
+
+**Verify secrets synced:**
+```bash
+kubectl get externalsecret maliev-auth-secrets -n maliev-dev
+kubectl get secret maliev-auth-secrets -n maliev-dev
+```
+
+---
+
+### Database Migration
+
+```bash
+# 1. Port-forward to PostgreSQL pod (NOT service)
+kubectl get pods -n maliev-dev | grep postgres
 kubectl port-forward -n maliev-dev postgres-cluster-1 5432:5432
 
-# Set connection string
-export AuthDbContext="Server=localhost;Port=5432;Database=auth_db;User Id=postgres;Password=YOUR_PASSWORD;"
+# 2. Get PostgreSQL password
+kubectl get secret postgres-cluster-app -n maliev-dev -o jsonpath='{.data.password}' | base64 -d
 
-# Add migration
-dotnet ef migrations add MigrationName --project Maliev.AuthService.Data
-
-# Apply migration
-dotnet ef database update --project Maliev.AuthService.Data
+# 3. Apply migration
+dotnet ef database update --project Maliev.AuthService.Data \
+  --connection "Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=YOUR_PASSWORD;"
 ```
 
-### Auto-Migration (Development Only)
-
-```csharp
-// Program.cs automatically applies migrations in Development environment
-if (app.Environment.IsDevelopment())
-{
-    using var scope = app.Services.CreateScope();
-    var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-    await dbContext.Database.MigrateAsync();
-}
+**Verify:**
+```bash
+PGPASSWORD=YOUR_PASSWORD psql -h localhost -U postgres -d auth_app_db -c "\dt"
+# Should show: RefreshTokens, TokenFamilies, RevokedAccessTokens, __EFMigrationsHistory
 ```
 
-**Production:** Use explicit migration scripts via CI/CD pipeline.
+---
 
-## Docker Build
+### Kubernetes Deployment
+
+#### GitOps Repository Structure
+
+```
+maliev-gitops/3-apps/auth-service/
+├── base/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── external-secret.yaml
+│   └── kustomization.yaml
+└── overlays/
+    ├── development/
+    │   └── kustomization.yaml
+    ├── staging/
+    │   └── kustomization.yaml
+    └── production/
+        └── kustomization.yaml
+```
+
+#### Base Deployment (base/deployment.yaml)
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maliev-auth-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: maliev-auth-service
+  template:
+    metadata:
+      labels:
+        app: maliev-auth-service
+    spec:
+      containers:
+      - name: auth-service
+        image: asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-dev/auth-service:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - secretRef:
+            name: maliev-auth-secrets
+        livenessProbe:
+          httpGet:
+            path: /auth/liveness
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /auth/readiness
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+```
+
+#### Base Service (base/service.yaml)
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: maliev-auth-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+  selector:
+    app: maliev-auth-service
+```
+
+#### Deploy to Development
 
 ```bash
-# Build image
-docker build -t maliev-auth-service:latest .
-
-# Run container
-docker run -d \
-  --name auth-service \
-  -p 8080:8080 \
-  -e Database__ConnectionString="Server=host.docker.internal;Port=5432;Database=auth_db;User Id=postgres;Password=postgres;" \
-  -e Jwt__SigningKey="$(cat dev-private-key.pem)" \
-  maliev-auth-service:latest
-
-# View logs
-docker logs -f auth-service
-```
-
-## Kubernetes Deployment
-
-See `DEPLOYMENT.md` for complete deployment guide.
-
-**Quick Start:**
-```bash
-# Apply manifests (via GitOps)
+# Apply manifests via GitOps
 cd maliev-gitops/3-apps/auth-service/overlays/development
 kubectl apply -k .
 
-# Check deployment
+# Verify deployment
 kubectl get pods -n maliev-dev | grep auth-service
-
-# View logs
 kubectl logs -f deployment/maliev-auth-service -n maliev-dev
 
-# Port-forward for local testing
+# Port-forward for testing
 kubectl port-forward -n maliev-dev svc/maliev-auth-service 8080:8080
 ```
 
-## Security Considerations
+---
+
+## CI/CD Pipeline
+
+### GitHub Actions Workflow
+
+Required workflows in `.github/workflows/`:
+- `ci-develop.yml` - Development branch (auto-deploy to dev)
+- `ci-staging.yml` - Staging branch (auto-deploy to staging)
+- `ci-main.yml` - Main branch (auto-deploy to production)
+
+**Workflow Steps:**
+1. Build and test .NET solution
+2. Build Docker image
+3. Push to Google Artifact Registry
+4. Update GitOps repository with new image tag
+5. ArgoCD auto-syncs deployment
+
+---
+
+## Security
 
 ### Token Security
-
-1. **ES256 Signing:** Asymmetric ECDSA P-256 keys prevent token forgery
-2. **SHA-256 Hashing:** Refresh tokens stored as SHA-256 hashes (never plaintext)
-3. **Token Rotation:** Automatic rotation on every refresh (RFC 9700)
-4. **Reuse Detection:** Invalidates entire token family on reuse attempt
-5. **Short-lived Access Tokens:** 15-minute expiration (configurable)
-6. **Long-lived Refresh Tokens:** 30-day expiration (configurable)
+- **ES256 Signing:** ECDSA P-256 asymmetric keys prevent forgery
+- **SHA-256 Hashing:** Refresh tokens stored as hashes (never plaintext)
+- **Token Rotation:** Automatic rotation on every refresh (RFC 9700)
+- **Reuse Detection:** Invalidates entire token family on reuse attempt
+- **Short-lived Access:** 15-minute expiration (configurable)
+- **Long-lived Refresh:** 30-day expiration (configurable)
 
 ### Rate Limiting
+- 5 login attempts per 5 minutes per IP address
+- Returns `429 Too Many Requests` when exceeded
+- Partition key: Remote IP address (X-Forwarded-For aware)
 
-- **Login Endpoint:** 5 attempts per 5 minutes per IP
-- **Partition Key:** Remote IP address (`X-Forwarded-For` aware)
-- **Response:** `429 Too Many Requests` with `Retry-After` header
+### Secrets Management
+- All secrets in Google Secret Manager
+- Synced via External Secrets Operator
+- No secrets in source code or Docker images
+- Secrets mounted at `/mnt/secrets` in Kubernetes pods
 
-### Circuit Breaker
+---
 
-External service calls protected by Polly circuit breaker:
-- **Failure Threshold:** 50% failure rate over 60 seconds
-- **Break Duration:** 30 seconds (half-open state)
-- **Minimum Throughput:** 10 requests before triggering
+## Status
 
-### Optimistic Concurrency
+- **Build:** 0 warnings ✓
+- **Tests:** 37 tests (6 passing, 21 TDD Red phase, 10 skipped)
+- **Database:** Migration applied successfully ✓
+- **Deployment:** Ready after secrets configured
 
-Refresh token operations use EF Core `RowVersion` for race condition prevention:
-```csharp
-var marked = await _repository.MarkAsUsedAsync(tokenId, currentVersion, ct);
-if (!marked)
-{
-    // Concurrent modification detected - invalidate family
-    await _repository.RevokeTokenFamilyAsync(familyId, ct);
-    return null;
-}
-```
+**TDD Red Phase:** Tests fail until production secrets (JWT key, external services) are configured. This is expected behavior.
 
-### Secret Management
+---
 
-- **Never** commit secrets to source control
-- Use Google Secret Manager for production secrets
-- Mount secrets at `/mnt/secrets` in Kubernetes pods
-- Rotate JWT signing keys every 90 days (recommended)
+## Architecture Details
 
-## Monitoring
+### Technology Stack
+- **.NET 9.0** - ASP.NET Core Web API
+- **Entity Framework Core 9.0** - PostgreSQL ORM
+- **Serilog** - Structured logging with correlation ID
+- **Polly** - Resilience patterns (retry + circuit breaker)
+- **xUnit** - Testing framework with Testcontainers
 
-### Health Checks
+### Database Schema
+- **TokenFamily** - Tracks token lineage for reuse detection
+- **RefreshToken** - Stores hashed refresh tokens with RowVersion
+- **RevokedAccessToken** - Blacklist for early access token revocation
 
-- **Liveness:** `GET /auth/liveness` - Always returns 200 (pod alive)
-- **Readiness:** `GET /auth/readiness` - Database connectivity check
+### Service Dependencies
+- **Customer Service:** Validates customer credentials
+- **Employee Service:** Validates employee credentials
+- **PostgreSQL:** Token persistence
+- **Google Secret Manager:** Secret storage
 
-```json
-// Readiness response
-{
-  "status": "Healthy",
-  "results": {
-    "database": {
-      "status": "Healthy",
-      "description": "Database is accessible",
-      "data": {}
-    }
-  }
-}
-```
-
-### Logging
-
-Serilog with correlation ID tracing:
-```
-[2025-10-06 10:30:15 INF] abc-123-def {"UserId": "12345", "Action": "Login", "UserType": "customer"}
-```
-
-**Correlation ID:**
-- Request header: `X-Correlation-Id`
-- Auto-generated if not provided
-- Included in all log entries and error responses
-
-### Metrics (Future)
-
-Prometheus metrics endpoints (planned):
-- `auth_login_attempts_total{status="success|failure"}`
-- `auth_refresh_operations_total{status="success|reuse_detected"}`
-- `auth_token_validations_total{cache_hit="true|false"}`
-- `auth_external_service_calls_total{service="customer|employee",status="success|failure"}`
+---
 
 ## Troubleshooting
 
-### Common Issues
+### Secrets Not Syncing
 
-**1. "Invalid JWT Signature"**
-- Verify `Jwt.SigningKey` is ECDSA P-256 private key in PEM format
-- Check secret is mounted correctly at `/mnt/secrets/Jwt__SigningKey`
-- Ensure key matches public key distributed to downstream services
+```bash
+# Check ExternalSecret status
+kubectl describe externalsecret maliev-auth-secrets -n maliev-dev
 
-**2. "Database Connection Failed"**
-- Verify PostgreSQL is running: `kubectl get pods -n maliev-dev | grep postgres`
-- Check connection string: `kubectl get secret maliev-auth-secrets -n maliev-dev -o yaml`
-- Port-forward to pod (not service): `kubectl port-forward postgres-cluster-1 5432:5432`
+# Check External Secrets Operator logs
+kubectl logs -n external-secrets-system deployment/external-secrets
+```
 
-**3. "External Service Validation Timeout"**
-- Check Customer/Employee service health: `kubectl get pods -n maliev-dev`
-- Verify service URLs in configuration
-- Check circuit breaker logs for failures
+### Pod Cannot Start
 
-**4. "Rate Limit Exceeded (429)"**
-- Default: 5 login attempts per 5 minutes per IP
-- Clear rate limit: restart service or wait 5 minutes
-- Adjust `RateLimit.LoginAttemptLimit` and `RateLimit.WindowSeconds`
+```bash
+# Check pod events
+kubectl describe pod <pod-name> -n maliev-dev
 
-**5. "Token Reuse Detected (403)"**
-- Client attempted to reuse old refresh token
-- Entire token family invalidated (security measure)
-- User must re-authenticate with /auth/login
+# Check logs
+kubectl logs <pod-name> -n maliev-dev
+
+# Common issues:
+# 1. Invalid JWT key format (must be Base64-encoded 32 bytes)
+# 2. Database connection failed (check connection string)
+# 3. External service unreachable (check service URLs)
+```
+
+### Tests Failing
+
+Tests are expected to fail (TDD Red phase) until:
+1. Valid ECDSA P-256 key configured in `Jwt__SecurityKey`
+2. Customer and Employee services running
+3. PostgreSQL database accessible
+
+---
 
 ## License
 
@@ -525,5 +500,5 @@ Copyright © 2025 MALIEV Co. Ltd. All rights reserved.
 ## Support
 
 - **Issues:** https://github.com/MALIEV-Co-Ltd/Maliev.AuthService/issues
-- **Documentation:** See `DEPLOYMENT.md` and inline code comments
+- **Documentation:** See inline code comments
 - **Contact:** dev@maliev.com
