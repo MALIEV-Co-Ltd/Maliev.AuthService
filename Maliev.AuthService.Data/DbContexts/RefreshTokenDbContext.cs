@@ -8,9 +8,9 @@ namespace Maliev.AuthService.Data.DbContexts;
 /// Database context for the authentication service.
 /// Manages refresh tokens, token families, and revoked access tokens.
 /// </summary>
-public class AuthDbContext : DbContext
+public class RefreshTokenDbContext : DbContext
 {
-    public AuthDbContext(DbContextOptions<AuthDbContext> options) : base(options)
+    public RefreshTokenDbContext(DbContextOptions<RefreshTokenDbContext> options) : base(options)
     {
     }
 

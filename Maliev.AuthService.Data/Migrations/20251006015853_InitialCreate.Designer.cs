@@ -11,7 +11,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace Maliev.AuthService.Data.Migrations
 {
-    [DbContext(typeof(AuthDbContext))]
+    [DbContext(typeof(RefreshTokenDbContext))]
     [Migration("20251006015853_InitialCreate")]
     partial class InitialCreate
     {

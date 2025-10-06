@@ -29,20 +29,19 @@ if (Directory.Exists(secretsPath))
 
 // **Options Configuration**
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
-builder.Services.Configure<ExternalServiceOptions>(builder.Configuration.GetSection(ExternalServiceOptions.SectionName));
+builder.Services.Configure<CustomerServiceOptions>(builder.Configuration.GetSection(CustomerServiceOptions.SectionName));
+builder.Services.Configure<EmployeeServiceOptions>(builder.Configuration.GetSection(EmployeeServiceOptions.SectionName));
 builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection(RateLimitOptions.SectionName));
 builder.Services.Configure<CircuitBreakerOptions>(builder.Configuration.GetSection(CircuitBreakerOptions.SectionName));
 builder.Services.Configure<CacheOptions>(builder.Configuration.GetSection(CacheOptions.SectionName));
 builder.Services.Configure<CorrelationIdOptions>(builder.Configuration.GetSection(CorrelationIdOptions.SectionName));
-builder.Services.Configure<DatabaseOptions>(builder.Configuration.GetSection(DatabaseOptions.SectionName));
 builder.Services.Configure<HealthCheckConfiguration>(builder.Configuration.GetSection(HealthCheckConfiguration.SectionName));
 
 // **Database Configuration**
-var connectionString = builder.Configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>()?.ConnectionString
-    ?? builder.Configuration.GetConnectionString("AuthDbContext")
+var connectionString = builder.Configuration.GetConnectionString("RefreshTokenDbContext")
     ?? "Server=localhost;Port=5432;Database=auth_db;User Id=postgres;Password=postgres;";
 
-builder.Services.AddDbContext<AuthDbContext>(options =>
+builder.Services.AddDbContext<RefreshTokenDbContext>(options =>
 {
     options.UseNpgsql(connectionString, npgsqlOptions =>
     {
@@ -103,7 +102,7 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
-    var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+    var dbContext = scope.ServiceProvider.GetRequiredService<RefreshTokenDbContext>();
     await dbContext.Database.MigrateAsync();
 }
 

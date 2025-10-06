@@ -20,9 +20,9 @@ public class JwtOptions
 
     /// <summary>
     /// ECDSA P-256 private key for ES256 signing (PEM format).
-    /// Should be loaded from Google Secret Manager in production.
+    /// Should be loaded from Google Secret Manager in production (Jwt__SecurityKey).
     /// </summary>
-    public required string SigningKey { get; set; }
+    public required string SecurityKey { get; set; }
 
     /// <summary>
     /// Access token lifetime in seconds. Default: 900 (15 minutes).
@@ -35,7 +35,7 @@ public class JwtOptions
     public int RefreshTokenLifetimeSeconds { get; set; } = 2592000;
 
     /// <summary>
-    /// Algorithm for signing JWTs. Fixed to ES256 (ECDSA P-256) per spec.
+    /// Algorithm for signing JWTs. Fixed to ES256 (ECDSA P-256).
     /// </summary>
     public string Algorithm => "ES256";
 }

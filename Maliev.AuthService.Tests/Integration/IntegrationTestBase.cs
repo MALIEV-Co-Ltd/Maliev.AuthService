@@ -42,10 +42,10 @@ public class IntegrationTestBase : IAsyncLifetime
                 builder.ConfigureTestServices(services =>
                 {
                     // Remove existing DbContext configuration
-                    services.RemoveAll(typeof(DbContextOptions<Data.DbContexts.AuthDbContext>));
+                    services.RemoveAll(typeof(DbContextOptions<Data.DbContexts.RefreshTokenDbContext>));
 
                     // Add test database configuration
-                    services.AddDbContext<Data.DbContexts.AuthDbContext>(options =>
+                    services.AddDbContext<Data.DbContexts.RefreshTokenDbContext>(options =>
                     {
                         options.UseNpgsql(ConnectionString);
                     });
@@ -53,7 +53,7 @@ public class IntegrationTestBase : IAsyncLifetime
                     // Build service provider and ensure database is created
                     var serviceProvider = services.BuildServiceProvider();
                     using var scope = serviceProvider.CreateScope();
-                    var dbContext = scope.ServiceProvider.GetRequiredService<Data.DbContexts.AuthDbContext>();
+                    var dbContext = scope.ServiceProvider.GetRequiredService<Data.DbContexts.RefreshTokenDbContext>();
                     dbContext.Database.EnsureCreated();
                 });
 
@@ -82,7 +82,7 @@ public class IntegrationTestBase : IAsyncLifetime
         if (Factory == null) return;
 
         using var scope = Factory.Services.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<Data.DbContexts.AuthDbContext>();
+        var dbContext = scope.ServiceProvider.GetRequiredService<Data.DbContexts.RefreshTokenDbContext>();
 
         dbContext.RefreshTokens.RemoveRange(dbContext.RefreshTokens);
         dbContext.TokenFamilies.RemoveRange(dbContext.TokenFamilies);

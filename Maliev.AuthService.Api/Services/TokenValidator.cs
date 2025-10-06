@@ -22,9 +22,9 @@ public class TokenValidator : ITokenValidator
         _jwtOptions = jwtOptions.Value;
         _tokenHandler = new JwtSecurityTokenHandler();
 
-        // Load ECDSA P-256 public key from PEM format
+        // Load ECDSA P-256 private key from PEM format (contains public key)
         _ecdsaKey = ECDsa.Create();
-        _ecdsaKey.ImportFromPem(_jwtOptions.SigningKey);
+        _ecdsaKey.ImportFromPem(_jwtOptions.SecurityKey);
 
         var securityKey = new ECDsaSecurityKey(_ecdsaKey);
 

@@ -9,9 +9,9 @@ namespace Maliev.AuthService.Data.Repositories;
 /// </summary>
 public class RevokedAccessTokenRepository : IRevokedAccessTokenRepository
 {
-    private readonly AuthDbContext _context;
+    private readonly RefreshTokenDbContext _context;
 
-    public RevokedAccessTokenRepository(AuthDbContext context)
+    public RevokedAccessTokenRepository(RefreshTokenDbContext context)
     {
         _context = context;
     }

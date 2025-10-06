@@ -9,9 +9,9 @@ namespace Maliev.AuthService.Data.Repositories;
 /// </summary>
 public class TokenFamilyRepository : ITokenFamilyRepository
 {
-    private readonly AuthDbContext _context;
+    private readonly RefreshTokenDbContext _context;
 
-    public TokenFamilyRepository(AuthDbContext context)
+    public TokenFamilyRepository(RefreshTokenDbContext context)
     {
         _context = context;
     }

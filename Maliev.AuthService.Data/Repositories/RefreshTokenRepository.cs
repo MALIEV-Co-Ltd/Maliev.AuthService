@@ -9,9 +9,9 @@ namespace Maliev.AuthService.Data.Repositories;
 /// </summary>
 public class RefreshTokenRepository : IRefreshTokenRepository
 {
-    private readonly AuthDbContext _context;
+    private readonly RefreshTokenDbContext _context;
 
-    public RefreshTokenRepository(AuthDbContext context)
+    public RefreshTokenRepository(RefreshTokenDbContext context)
     {
         _context = context;
     }

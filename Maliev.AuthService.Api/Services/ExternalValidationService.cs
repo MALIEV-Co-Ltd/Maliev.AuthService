@@ -15,26 +15,30 @@ namespace Maliev.AuthService.Api.Services;
 public class ExternalValidationService : IExternalValidationService
 {
     private readonly HttpClient _httpClient;
-    private readonly ExternalServiceOptions _options;
+    private readonly CustomerServiceOptions _customerOptions;
+    private readonly EmployeeServiceOptions _employeeOptions;
     private readonly ILogger<ExternalValidationService> _logger;
     private readonly ResiliencePipeline<HttpResponseMessage> _resiliencePipeline;
 
     public ExternalValidationService(
         HttpClient httpClient,
-        IOptions<ExternalServiceOptions> options,
+        IOptions<CustomerServiceOptions> customerOptions,
+        IOptions<EmployeeServiceOptions> employeeOptions,
         IOptions<CircuitBreakerOptions> circuitBreakerOptions,
         ILogger<ExternalValidationService> logger)
     {
         _httpClient = httpClient;
-        _options = options.Value;
+        _customerOptions = customerOptions.Value;
+        _employeeOptions = employeeOptions.Value;
         _logger = logger;
 
         // Configure resilience pipeline with retry + circuit breaker
+        // Use customer service retry settings (both services should have same config)
         _resiliencePipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
             .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
             {
-                MaxRetryAttempts = _options.MaxRetries,
-                Delay = TimeSpan.FromMilliseconds(_options.RetryDelayMs),
+                MaxRetryAttempts = _customerOptions.MaxRetries,
+                Delay = TimeSpan.FromMilliseconds(_customerOptions.RetryDelayMs),
                 BackoffType = DelayBackoffType.Exponential,
                 ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
                     .Handle<HttpRequestException>()
@@ -55,16 +59,16 @@ public class ExternalValidationService : IExternalValidationService
 
     public async Task<ExternalValidationResult?> ValidateCustomerAsync(string username, string password, CancellationToken cancellationToken = default)
     {
-        return await ValidateAsync(_options.CustomerServiceUrl, "customer", username, password, cancellationToken);
+        return await ValidateAsync(_customerOptions.ValidationEndpoint, "customer", username, password, cancellationToken);
     }
 
     public async Task<ExternalValidationResult?> ValidateEmployeeAsync(string username, string password, CancellationToken cancellationToken = default)
     {
-        return await ValidateAsync(_options.EmployeeServiceUrl, "employee", username, password, cancellationToken);
+        return await ValidateAsync(_employeeOptions.ValidationEndpoint, "employee", username, password, cancellationToken);
     }
 
     private async Task<ExternalValidationResult?> ValidateAsync(
-        string baseUrl,
+        string validationEndpoint,
         string userType,
         string username,
         string password,
@@ -73,12 +77,12 @@ public class ExternalValidationService : IExternalValidationService
         try
         {
             var request = new { username, password };
-            var requestMessage = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/validate")
+            var requestMessage = new HttpRequestMessage(HttpMethod.Post, validationEndpoint)
             {
                 Content = JsonContent.Create(request)
             };
 
-            requestMessage.Headers.Add("X-Request-Timeout", _options.TimeoutMs.ToString());
+            requestMessage.Headers.Add("X-Request-Timeout", _customerOptions.TimeoutMs.ToString());
 
             var response = await _resiliencePipeline.ExecuteAsync(
                 async ct => await _httpClient.SendAsync(requestMessage, ct),

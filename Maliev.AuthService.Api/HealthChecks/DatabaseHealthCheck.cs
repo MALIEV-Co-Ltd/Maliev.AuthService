@@ -9,9 +9,9 @@ namespace Maliev.AuthService.Api.HealthChecks;
 /// </summary>
 public class DatabaseHealthCheck : IHealthCheck
 {
-    private readonly AuthDbContext _dbContext;
+    private readonly RefreshTokenDbContext _dbContext;
 
-    public DatabaseHealthCheck(AuthDbContext dbContext)
+    public DatabaseHealthCheck(RefreshTokenDbContext dbContext)
     {
         _dbContext = dbContext;
     }

@@ -24,7 +24,7 @@ public class TokenGenerator : ITokenGenerator
 
         // Load ECDSA P-256 private key from PEM format
         _ecdsaKey = ECDsa.Create();
-        _ecdsaKey.ImportFromPem(_jwtOptions.SigningKey);
+        _ecdsaKey.ImportFromPem(_jwtOptions.SecurityKey);
     }
 
     public string GenerateAccessToken(IEnumerable<Claim> claims)
