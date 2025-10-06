@@ -19,8 +19,9 @@ public class JwtOptions
     public required string Audience { get; set; }
 
     /// <summary>
-    /// ECDSA P-256 private key for ES256 signing (PEM format).
+    /// ECDSA P-256 private key for ES256 signing (Base64-encoded 32-byte raw scalar).
     /// Should be loaded from Google Secret Manager in production (Jwt__SecurityKey).
+    /// Example format: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" (32 bytes)
     /// </summary>
     public required string SecurityKey { get; set; }
 

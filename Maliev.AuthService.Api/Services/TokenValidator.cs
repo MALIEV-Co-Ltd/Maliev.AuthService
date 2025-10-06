@@ -22,9 +22,15 @@ public class TokenValidator : ITokenValidator
         _jwtOptions = jwtOptions.Value;
         _tokenHandler = new JwtSecurityTokenHandler();
 
-        // Load ECDSA P-256 private key from PEM format (contains public key)
-        _ecdsaKey = ECDsa.Create();
-        _ecdsaKey.ImportFromPem(_jwtOptions.SecurityKey);
+        // Load ECDSA P-256 private key from Base64-encoded raw bytes (32 bytes)
+        // Public key is automatically derived from private key
+        var privateKeyBytes = Convert.FromBase64String(_jwtOptions.SecurityKey);
+
+        _ecdsaKey = ECDsa.Create(new ECParameters
+        {
+            Curve = ECCurve.NamedCurves.nistP256,
+            D = privateKeyBytes
+        });
 
         var securityKey = new ECDsaSecurityKey(_ecdsaKey);
 
