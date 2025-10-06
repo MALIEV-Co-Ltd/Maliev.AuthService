@@ -34,7 +34,8 @@
       "Bash(dotnet add Maliev.AuthService.Api package Microsoft.AspNetCore.Authentication.JwtBearer --version 9.0.8)",
       "Bash(dotnet add:*)",
       "Bash(git rm:*)",
-      "Bash(dotnet sln:*)"
+      "Bash(dotnet sln:*)",
+      "Bash(dotnet ef migrations add:*)"
     ],
     "deny": [],
     "ask": []
