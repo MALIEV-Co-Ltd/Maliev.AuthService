@@ -4,7 +4,7 @@ namespace Maliev.AuthService.Api.Options;
 /// Health check endpoint configuration.
 /// Maps to "HealthChecks" section in appsettings.json.
 /// </summary>
-public class HealthCheckOptions
+public class HealthCheckConfiguration
 {
     public const string SectionName = "HealthChecks";
 

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Maliev.AuthService.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b670425cb087d460f59a72c6d033283ce48514da")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+07d6370d2e32898130b3a3b17b447b3bf3d29e70")]
 [assembly: System.Reflection.AssemblyProductAttribute("Maliev.AuthService.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Maliev.AuthService.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
