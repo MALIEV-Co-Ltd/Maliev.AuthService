@@ -1,32 +1,52 @@
-# See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
-
-# This stage is used when running from VS in fast mode (Default for Debug configuration)
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
-USER $APP_UID
-WORKDIR /app
-EXPOSE 8080
-EXPOSE 8081
-
-
-# This stage is used to build the service project
+# Build stage
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
-ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY ["Maliev.AuthService.Api/Maliev.AuthService.Api.csproj", "Maliev.AuthService.Api/"]
-COPY ["Maliev.AuthService.JwtToken/Maliev.AuthService.JwtToken.csproj", "Maliev.AuthService.JwtToken/"]
-COPY ["Maliev.AuthService.Data/Maliev.AuthService.Data.csproj", "Maliev.AuthService.Data/"]
-RUN dotnet restore "./Maliev.AuthService.Api/Maliev.AuthService.Api.csproj"
-COPY . .
-WORKDIR "/src/Maliev.AuthService.Api"
-RUN dotnet build "./Maliev.AuthService.Api.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
-# This stage is used to publish the service project to be copied to the final stage
+# Copy solution and project files
+COPY Maliev.AuthService.sln ./
+COPY Maliev.AuthService.Api/Maliev.AuthService.Api.csproj ./Maliev.AuthService.Api/
+COPY Maliev.AuthService.Data/Maliev.AuthService.Data.csproj ./Maliev.AuthService.Data/
+
+# Restore dependencies
+RUN dotnet restore Maliev.AuthService.sln
+
+# Copy source code
+COPY Maliev.AuthService.Api/ ./Maliev.AuthService.Api/
+COPY Maliev.AuthService.Data/ ./Maliev.AuthService.Data/
+
+# Build the application
+WORKDIR /src/Maliev.AuthService.Api
+RUN dotnet build -c Release -o /app/build --no-restore
+
+# Publish stage
 FROM build AS publish
-ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./Maliev.AuthService.Api.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+RUN dotnet publish -c Release -o /app/publish --no-build
 
-# This stage is used in production or when running from VS in regular mode (Default when not using the Debug configuration)
-FROM base AS final
+# Runtime stage
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
+
+# Create non-root user
+RUN groupadd -r authservice && useradd -r -g authservice authservice
+
+# Copy published application
 COPY --from=publish /app/publish .
+
+# Set ownership
+RUN chown -R authservice:authservice /app
+
+# Switch to non-root user
+USER authservice
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl --fail http://localhost:8080/auth/liveness || exit 1
+
+# Set environment variables
+ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_ENVIRONMENT=Production
+
 ENTRYPOINT ["dotnet", "Maliev.AuthService.Api.dll"]

@@ -1,0 +1,15 @@
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\bin\Debug\net10.0\Maliev.AuthService.Data.deps.json
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\bin\Debug\net10.0\Maliev.AuthService.Data.runtimeconfig.json
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\bin\Debug\net10.0\Maliev.AuthService.Data.dll
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\bin\Debug\net10.0\Maliev.AuthService.Data.pdb
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\obj\Debug\net10.0\Maliev.AuthService.Data.csproj.AssemblyReference.cache
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\obj\Debug\net10.0\Maliev.AuthService.Data.GeneratedMSBuildEditorConfig.editorconfig
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\obj\Debug\net10.0\Maliev.AuthService.Data.AssemblyInfoInputs.cache
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\obj\Debug\net10.0\Maliev.AuthService.Data.AssemblyInfo.cs
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\obj\Debug\net10.0\Maliev.AuthService.Data.csproj.CoreCompileInputs.cache
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\obj\Debug\net10.0\Maliev.AuthService.Data.sourcelink.json
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\obj\Debug\net10.0\Maliev.AuthService.Data.dll
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\obj\Debug\net10.0\refint\Maliev.AuthService.Data.dll
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\obj\Debug\net10.0\Maliev.AuthService.Data.pdb
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\obj\Debug\net10.0\Maliev.AuthService.Data.genruntimeconfig.cache
+R:\maliev\Maliev.AuthService\Maliev.AuthService.Data\obj\Debug\net10.0\ref\Maliev.AuthService.Data.dll

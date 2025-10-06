@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(gh issue list:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet test:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh issue close:*)",
+      "Bash(gh issue:*)",
+      "Bash(dotnet restore:*)",
+      "Bash(dotnet clean:*)",
+      "Read(//r/maliev/maliev-gitops/**)",
+      "Bash(kubectl get pods:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(kubectl get:*)",
+      "Bash(kubectl describe:*)",
+      "Bash(dotnet new:*)",
+      "Bash(dotnet add package:*)",
+      "Bash(dotnet sln add:*)",
+      "Bash(dotnet add reference:*)",
+      "Bash(find:*)",
+      "Bash(PGPASSWORD:*)",
+      "Bash(kubectl port-forward:*)",
+      "Bash(psql:*)",
+      "Bash(gcloud secrets describe:*)",
+      "Bash(gcloud secrets list:*)",
+      "Bash(kubectl exec:*)",
+      "Bash(powershell:*)",
+      "WebSearch",
+      "Read(//r/maliev/repository/maliev/Maliev.AuthService/specs/001-create-a-jwt/**)",
+      "Bash(dotnet add Maliev.AuthService.Api package Microsoft.AspNetCore.Authentication.JwtBearer --version 9.0.8)",
+      "Bash(dotnet add:*)",
+      "Bash(git rm:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
