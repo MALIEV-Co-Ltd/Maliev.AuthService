@@ -10,8 +10,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 namespace Maliev.AuthService.Data.Migrations
 {
-    [DbContext(typeof(RefreshTokenDbContext))]
-    partial class RefreshTokenDbContextModelSnapshot : ModelSnapshot
+    [DbContext(typeof(AuthDbContext))]
+    partial class AuthDbContextModelSnapshot : ModelSnapshot
     {
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
@@ -22,50 +22,43 @@ namespace Maliev.AuthService.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("Maliev.AuthService.Data.Entities.RefreshToken", b =>
+            modelBuilder.Entity("Maliev.AuthService.Data.Entities.AccountLockout", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("NOW()");
 
-                    b.Property<DateTime>("ExpiresAt")
+                    b.Property<int>("FailedAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("failed_attempts");
+
+                    b.Property<DateTime>("LastAttemptAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("expires_at");
+                        .HasColumnName("last_attempt_at")
+                        .HasDefaultValueSql("NOW()");
 
-                    b.Property<Guid>("FamilyId")
+                    b.Property<DateTime?>("LockedUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("locked_until");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<Guid>("UserId")
                         .HasColumnType("uuid")
-                        .HasColumnName("family_id");
-
-                    b.Property<bool>("IsRevoked")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_revoked");
-
-                    b.Property<bool>("IsUsed")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_used");
-
-                    b.Property<DateTime?>("RevokedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("revoked_at");
-
-                    b.Property<string>("TokenHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("token_hash");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
                         .HasColumnName("user_id");
 
                     b.Property<string>("UserType")
@@ -78,56 +71,325 @@ namespace Maliev.AuthService.Data.Migrations
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("bytea")
-                        .HasColumnName("version");
+                        .HasColumnName("version")
+                        .HasDefaultValueSql("'\\x0000000000000000'::bytea");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ExpiresAt")
-                        .HasDatabaseName("ix_refresh_tokens_expires_at");
+                    b.HasIndex("LockedUntil")
+                        .HasDatabaseName("idx_account_lockouts_locked_until");
 
-                    b.HasIndex("FamilyId")
-                        .HasDatabaseName("ix_refresh_tokens_family_id");
-
-                    b.HasIndex("TokenHash")
+                    b.HasIndex("UserId", "UserType")
                         .IsUnique()
-                        .HasDatabaseName("ix_refresh_tokens_token_hash");
+                        .HasDatabaseName("idx_account_lockouts_user_id_user_type");
 
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("ix_refresh_tokens_user_id");
-
-                    b.ToTable("refresh_tokens", (string)null);
+                    b.ToTable("account_lockouts", (string)null);
                 });
 
-            modelBuilder.Entity("Maliev.AuthService.Data.Entities.RevokedAccessToken", b =>
+            modelBuilder.Entity("Maliev.AuthService.Data.Entities.AuthAuditLog", b =>
                 {
-                    b.Property<string>("Jti")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("jti");
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("action");
+
+                    b.Property<string>("CorrelationId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("correlation_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("failure_reason");
+
+                    b.Property<string>("IpAddress")
+                        .IsRequired()
+                        .HasMaxLength(45)
+                        .HasColumnType("character varying(45)")
+                        .HasColumnName("ip_address");
+
+                    b.Property<bool>("Success")
+                        .HasColumnType("boolean")
+                        .HasColumnName("success");
+
+                    b.Property<string>("UserAgent")
+                        .HasColumnType("text")
+                        .HasColumnName("user_agent");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("UserType")
+                        .HasColumnType("text")
+                        .HasColumnName("user_type");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CorrelationId")
+                        .HasDatabaseName("idx_auth_audit_logs_correlation_id");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("idx_auth_audit_logs_created_at");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("idx_auth_audit_logs_user_id");
+
+                    b.HasIndex("Action", "Success")
+                        .HasDatabaseName("idx_auth_audit_logs_action_success");
+
+                    b.ToTable("auth_audit_logs", (string)null);
+                });
+
+            modelBuilder.Entity("Maliev.AuthService.Data.Entities.IpRateLimit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime?>("BlockedUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("blocked_until");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<int>("FailedAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("failed_attempts");
+
+                    b.Property<string>("IpAddress")
+                        .IsRequired()
+                        .HasMaxLength(45)
+                        .HasColumnType("character varying(45)")
+                        .HasColumnName("ip_address");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<byte[]>("Version")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bytea")
+                        .HasColumnName("version")
+                        .HasDefaultValueSql("'\\x0000000000000000'::bytea");
+
+                    b.Property<DateTime>("WindowStart")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("window_start")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlockedUntil")
+                        .HasDatabaseName("idx_ip_rate_limits_blocked_until");
+
+                    b.HasIndex("IpAddress")
+                        .IsUnique()
+                        .HasDatabaseName("idx_ip_rate_limits_ip_address");
+
+                    b.ToTable("ip_rate_limits", (string)null);
+                });
+
+            modelBuilder.Entity("Maliev.AuthService.Data.Entities.RefreshToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("NOW()");
 
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at");
 
+                    b.Property<Guid>("FamilyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("family_id");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(45)
+                        .HasColumnType("character varying(45)")
+                        .HasColumnName("ip_address");
+
+                    b.Property<bool>("IsUsed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_used");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("token_hash");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("used_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("UserType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_type");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("idx_refresh_tokens_expires_at");
+
+                    b.HasIndex("FamilyId")
+                        .HasDatabaseName("idx_refresh_tokens_family_id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("idx_refresh_tokens_token_hash");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("idx_refresh_tokens_user_id");
+
+                    b.ToTable("refresh_tokens", (string)null);
+                });
+
+            modelBuilder.Entity("Maliev.AuthService.Data.Entities.RevokedToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("Jti")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("jti");
+
                     b.Property<string>("Reason")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("reason");
 
                     b.Property<DateTime>("RevokedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("revoked_at");
+                        .HasColumnName("revoked_at")
+                        .HasDefaultValueSql("NOW()");
 
-                    b.HasKey("Jti");
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("UserType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_type");
+
+                    b.HasKey("Id");
 
                     b.HasIndex("ExpiresAt")
-                        .HasDatabaseName("ix_revoked_access_tokens_expires_at");
+                        .HasDatabaseName("idx_revoked_tokens_expires_at");
 
                     b.HasIndex("Jti")
                         .IsUnique()
-                        .HasDatabaseName("ix_revoked_access_tokens_jti");
+                        .HasDatabaseName("idx_revoked_tokens_jti");
 
-                    b.ToTable("revoked_access_tokens", (string)null);
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("idx_revoked_tokens_user_id");
+
+                    b.ToTable("revoked_tokens", (string)null);
+                });
+
+            modelBuilder.Entity("Maliev.AuthService.Data.Entities.ServiceCredential", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ClientId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("client_id");
+
+                    b.Property<string>("ClientSecretHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("client_secret_hash");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("ServiceName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("service_name");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("NOW()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId")
+                        .IsUnique()
+                        .HasDatabaseName("idx_service_credentials_client_id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("idx_service_credentials_is_active");
+
+                    b.ToTable("service_credentials", (string)null);
                 });
 
             modelBuilder.Entity("Maliev.AuthService.Data.Entities.TokenFamily", b =>
@@ -138,17 +400,19 @@ namespace Maliev.AuthService.Data.Migrations
                         .HasColumnName("family_id");
 
                     b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("NOW()");
 
-                    b.Property<DateTime>("LastUsedAt")
+                    b.Property<DateTime>("LastRefreshAt")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("last_used_at");
+                        .HasColumnName("last_refresh_at")
+                        .HasDefaultValueSql("NOW()");
 
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
                         .HasColumnName("user_id");
 
                     b.Property<string>("UserType")
@@ -158,24 +422,22 @@ namespace Maliev.AuthService.Data.Migrations
 
                     b.HasKey("FamilyId");
 
-                    b.HasIndex("LastUsedAt")
-                        .HasDatabaseName("ix_token_families_last_used_at");
-
                     b.HasIndex("UserId")
-                        .HasDatabaseName("ix_token_families_user_id");
+                        .HasDatabaseName("idx_token_families_user_id");
 
                     b.ToTable("token_families", (string)null);
                 });
 
             modelBuilder.Entity("Maliev.AuthService.Data.Entities.RefreshToken", b =>
                 {
-                    b.HasOne("Maliev.AuthService.Data.Entities.TokenFamily", "TokenFamily")
+                    b.HasOne("Maliev.AuthService.Data.Entities.TokenFamily", "Family")
                         .WithMany("RefreshTokens")
                         .HasForeignKey("FamilyId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("fk_refresh_tokens_token_families");
 
-                    b.Navigation("TokenFamily");
+                    b.Navigation("Family");
                 });
 
             modelBuilder.Entity("Maliev.AuthService.Data.Entities.TokenFamily", b =>

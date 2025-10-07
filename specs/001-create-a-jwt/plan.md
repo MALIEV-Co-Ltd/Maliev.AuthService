@@ -1,502 +1,404 @@
 # Implementation Plan: JWT Token-Based Authentication Service
 
-**Branch**: `001-create-a-jwt` | **Date**: 2025-10-05 | **Spec**: [spec.md](./spec.md)
-**Input**: Feature specification from `specs/001-create-a-jwt/spec.md`
+**Branch**: `001-create-a-jwt` | **Date**: 2025-10-06 | **Spec**: [spec.md](./spec.md)
+**Input**: Feature specification from `/specs/001-create-a-jwt/spec.md`
 
 ## Execution Flow (/plan command scope)
+
 ```
-1. Load feature spec from Input path ✅
-   → Spec loaded successfully with 73 functional requirements
-2. Fill Technical Context ✅
-   → All technical decisions specified, no NEEDS CLARIFICATION remain
-   → Project Type: Single microservice (ASP.NET Core Web API)
-   → Structure Decision: Clean Architecture with Api/Data/Tests projects
-3. Fill the Constitution Check section ✅
-   → No project-specific constitution found
-   → Using CLAUDE.md standard microservice patterns as guidance
-4. Evaluate Constitution Check section ✅
-   → PASS - No constitutional violations detected
-5. Execute Phase 0 → research.md ✅
-   → Created research.md with 8 technical research topics
-   → All technology decisions documented (ES256, token rotation, Redis pub/sub, etc.)
-6. Execute Phase 1 → contracts, data-model.md, quickstart.md, CLAUDE.md update ✅
-   → Created data-model.md (3 entities with relationships)
-   → Created contracts/openapi.yaml (complete API specification)
-   → Created quickstart.md (8 manual testing scenarios)
-   → Updated CLAUDE.md with new technology context
-7. Re-evaluate Constitution Check section ✅
-   → PASS - All patterns align with CLAUDE.md standards
-8. Plan Phase 2 → Describe task generation approach ✅
-   → Task generation strategy documented in plan.md
-   → Estimated 45-50 tasks in dependency order
-9. STOP - Ready for /tasks command ✅
-   → Planning phase complete
-   → All artifacts generated successfully
+1. Load feature spec from Input path
+   → ✅ Feature spec loaded and validated
+2. Fill Technical Context (scan for NEEDS CLARIFICATION)
+   → ✅ Technical context provided via user input - .NET 9 microservice architecture
+   → ✅ Project Type: Single microservice (Maliev.AuthService)
+3. Fill Constitution Check section
+   → ✅ Constitution loaded and evaluated
+4. Evaluate Constitution Check section
+   → ✅ No violations - design follows all constitutional principles
+   → Update Progress Tracking: Initial Constitution Check PASS
+5. Execute Phase 0 → research.md
+   → IN PROGRESS - Researching technical decisions
+6. Execute Phase 1 → contracts, data-model.md, quickstart.md, CLAUDE.md
+7. Re-evaluate Constitution Check section
+8. Plan Phase 2 → Describe task generation approach (DO NOT create tasks.md)
+9. STOP - Ready for /tasks command
 ```
 
-**IMPORTANT**: The /plan command STOPS at step 9. Phases 2-4 are executed by other commands:
+**IMPORTANT**: The /plan command STOPS at step 8. Phases 2-4 are executed by other commands:
+
 - Phase 2: /tasks command creates tasks.md
 - Phase 3-4: Implementation execution (manual or via tools)
 
 ## Summary
 
-Implement a production-ready JWT token-based authentication service as a .NET 9 microservice that:
-- Generates and validates JWT access tokens (15 min expiry) and refresh tokens (7 days expiry)
-- Implements OAuth 2.0 RFC 9700 compliant refresh token rotation with automatic reuse detection
-- Supports multi-user type authentication (customer and employee) via configurable external validation endpoints
-- Provides comprehensive security features including SHA-256 token hashing, dual-factor rate limiting, progressive delays, circuit breaker pattern, and distributed token revocation
-- Exposes token validation endpoints returning full user identity (user_id, user_type, username, email, roles, permissions)
-- Delivers comprehensive observability with OpenTelemetry distributed tracing, structured logging, and Prometheus metrics
-
-**Technical Approach**: Clean Architecture ASP.NET Core 9.0 microservice with Entity Framework Core 9.0.9 + PostgreSQL 18 for refresh token persistence, Polly for resilience patterns, built-in ASP.NET Core rate limiting, and EdDSA/ES256 asymmetric JWT signing.
+This feature implements a production-ready JWT token-based authentication service for Maliev Co. Ltd.'s microservices architecture. The service supports dual user types (customers and employees) with configurable external validation endpoints, implements OAuth 2.0 RFC 9700 compliant refresh token rotation with automatic reuse detection, provides comprehensive token lifecycle management (generation, validation, refresh, revocation), and includes distributed access token revocation with Redis pub/sub event propagation. The service follows clean architecture patterns with Entity Framework Core, PostgreSQL persistence, and comprehensive observability through Serilog structured logging and Prometheus metrics.
 
 ## Technical Context
 
-**Language/Version**: C# 13 / .NET 9.0
+**Language/Version**: .NET 9.0 (ASP.NET Core 9.0)
 **Primary Dependencies**:
-- ASP.NET Core 9.0 (Web API, Authentication.JwtBearer 9.0.8)
-- Entity Framework Core 9.0.9 with Npgsql 9.0.2
+
+- Entity Framework Core 9.0.9 (data access)
+- Npgsql 9.0.2 (PostgreSQL provider)
+- Microsoft.OpenApi 9.0.0 (Swagger/OpenAPI)
 - Serilog 8.0.2 (structured logging)
-- Polly 8.x (circuit breaker, retry policies)
-- System.Security.Cryptography (EdDSA/ES256 signing, SHA-256 hashing)
-- AutoMapper 12.0.1, FluentValidation 11.5.1
-- Microsoft.OpenApi 9.0.0
+- AutoMapper 12.0.1 (object mapping)
+- FluentValidation 11.5.1 (request validation)
+- Polly (HTTP retry with exponential backoff)
+- Asp.Versioning.Http 8.1.0 (API versioning)
+- AspNetCore.HealthChecks.UI.Client 8.0.1 (health checks)
+- StackExchange.Redis (token revocation pub/sub)
 
-**Storage**: PostgreSQL 18 (refresh tokens with SHA-256 hashes, token families, revocation tracking)
-**Testing**:
-- xUnit 2.9.0 (unit/integration tests)
-- FluentAssertions 8.6.0
-- Moq 4.20.72
-- Testcontainers for PostgreSQL integration tests
+**Storage**: PostgreSQL 18 (auth_app_db database)
 
-**Target Platform**: Linux containers (Docker) on Google Kubernetes Engine (GKE)
-**Project Type**: Single microservice with 3 projects (Api, Data, Tests)
+- Refresh tokens table (hashed with SHA-256)
+- Revoked access tokens table (JTI tracking)
+- Token families table (rotation lineage tracking)
+
+**Testing**: MSTest with FluentAssertions, Moq for mocking
+
+- Actual PostgreSQL database (no in-memory fallback)
+- TestWebApplicationFactory for integration tests
+- Contract tests for all API endpoints
+- Minimum 80% coverage for critical functionality
+
+**Target Platform**: Kubernetes (GKE) with Docker containerization
+
+- Multi-stage Docker build (SDK → runtime)
+- Non-root user (appuser UID 1000)
+- Health checks (liveness/readiness)
+- Google Secret Manager for secrets
+
+**Project Type**: Single microservice (Clean Architecture)
+
+- Maliev.AuthService.Api (WebAPI project)
+- Maliev.AuthService.Data (Data layer with EF Core)
+- Maliev.AuthService.Tests (Contract, Integration, Unit tests)
 
 **Performance Goals**:
-- Authentication: <200ms p95 (including external validation)
-- Token validation: <50ms p95 (local validation only)
-- Token refresh: <100ms p95 (DB read + write)
-- Throughput: 1000 req/s per pod
+
+- Token validation: <50ms p95 (cryptographic signature verification)
+- Token generation: <200ms p95 (includes external validation service call)
+- Token refresh: <100ms p95 (database lookup + rotation)
+- Revocation propagation: <2 seconds (Redis pub/sub eventual consistency)
+- Support 1000+ concurrent token validations per second
 
 **Constraints**:
-- Stateless microservice (horizontal scaling)
-- <2 second token revocation propagation across distributed system
-- 30-60 second clock skew tolerance
-- Circuit breaker: 5 failures → 30s open
-- External service timeout: 5s max
+
+- Access token expiry: 15 minutes (security requirement)
+- Refresh token expiry: 7 days (user convenience vs security balance)
+- EdDSA (Ed25519) asymmetric signing (no HS256 shared secrets)
+- SHA-256 hashing for refresh token storage (no plaintext)
+- External validation timeout: 5 seconds total (100ms/200ms/400ms retry)
+- Circuit breaker: 5 failures → 30 second open state
+- Rate limiting: Account (5/15min), IP (20/15min), Service (1000/min)
 
 **Scale/Scope**:
-- 10,000+ concurrent users
-- 100,000+ refresh tokens in database
-- Multi-environment (dev/staging/prod) with separate signing keys
-- Service-to-service authentication for 20+ microservices
+
+- Initial deployment: 100-500 concurrent users
+- Growth target: 10,000+ users within 6 months
+- Multi-tenant: Separate customer and employee user bases
+- Token families: Unlimited per user (track rotation lineage)
+- Concurrent sessions: Unlimited per user (no restrictions)
 
 ## Constitution Check
+
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-**Standard Microservice Patterns (from CLAUDE.md):**
+**Full Constitution**: See `.specify/memory/constitution.md` for complete principle definitions and requirements.
 
-- ✅ **Clean Architecture**: Controllers → Services → Data (3-layer separation)
-  - No violation: Standard pattern for authentication service
+**Summary**: All 9 constitutional principles verified:
+- **I. Service Autonomy**: ✅ Own database (auth_app_db), HTTP-only external integration
+- **II. Explicit Contracts**: ✅ OpenAPI/Swagger, API versioning, contract tests
+- **III. Test-First Development**: ✅ Red-Green-Refactor, 80% coverage, tests before implementation
+- **IV. Auditability**: ✅ Serilog structured logging, correlation IDs, Prometheus metrics
+- **V. Security**: ✅ EdDSA JWT signing, SHA-256 hashing, OAuth 2.0 RFC 9700 compliance
+- **VI. Secrets Management**: ✅ All secrets via Google Secret Manager environment variables
+- **VII. Zero Warnings**: ✅ TreatWarningsAsErrors enabled in all projects
+- **VIII. Clean Artifacts**: ✅ Proper .gitignore/.dockerignore, no boilerplate files
+- **IX. Simplicity**: ✅ YAGNI, stateless design, Clean Architecture pattern
 
-- ✅ **Stateless Microservice**: All state in PostgreSQL, no in-memory sessions
-  - No violation: Enables horizontal scaling
-
-- ✅ **Simple MemoryCache Configuration**: `builder.Services.AddMemoryCache()` without SizeLimit
-  - No violation: Rate limiting and validation cache
-
-- ✅ **Health Checks**: Liveness + Readiness endpoints
-  - No violation: `/auth/liveness`, `/auth/readiness` with PostgreSQL check
-
-- ✅ **Serilog Console-Only Logging**: Structured logging to stdout
-  - No violation: Standard observability pattern
-
-- ✅ **JWT Authentication**: ASP.NET Core JWT Bearer
-  - No violation: Core feature requirement
-
-- ✅ **No Secrets in Code**: Google Secret Manager via `/mnt/secrets`
-  - No violation: All keys and URLs from mounted secrets
-
-- ✅ **Zero Build Warnings**: Treat warnings as errors
-  - No violation: CI/CD enforcement
-
-- ✅ **GitOps Deployment**: Kustomize with ArgoCD
-  - No violation: Standard deployment pattern
-
-- ✅ **Standard Package Versions**: EF Core 9.0.9, Npgsql 9.0.2, Serilog 8.0.2, Microsoft.OpenApi 9.0.0
-  - No violation: All versions align with CLAUDE.md
-
-**Additional Pattern Compliance:**
-
-- ✅ **Middleware Order**: Swagger → HTTPS → RateLimit → Authentication → Authorization
-  - No violation: Exact order from CLAUDE.md template
-
-- ✅ **Database Migration**: EF Core migrations with port-forward to pod (not service)
-  - No violation: Standard migration process
-
-- ✅ **Testing Environment**: PostgreSQL Testcontainers for integration tests
-  - No violation: Clean test isolation
-
-**Result**: ✅ **PASS** - No constitutional violations detected
+**Initial Constitution Check**: ✅ PASS - All 9 principles satisfied
 
 ## Project Structure
 
 ### Documentation (this feature)
+
 ```
 specs/001-create-a-jwt/
 ├── plan.md              # This file (/plan command output)
-├── research.md          # Phase 0 output - Technology decisions and patterns
-├── data-model.md        # Phase 1 output - Entity design and relationships
-├── quickstart.md        # Phase 1 output - Manual testing guide
-├── contracts/           # Phase 1 output - OpenAPI specs and contract tests
-│   ├── openapi.yaml     # Complete API specification
-│   ├── auth.contract.json      # Authentication endpoint contracts
-│   ├── refresh.contract.json   # Token refresh contracts
-│   └── validate.contract.json  # Token validation contracts
+├── research.md          # Phase 0 output (/plan command)
+├── data-model.md        # Phase 1 output (/plan command)
+├── quickstart.md        # Phase 1 output (/plan command)
+├── contracts/           # Phase 1 output (/plan command)
+│   ├── authentication.openapi.yaml
+│   ├── token-validation.openapi.yaml
+│   ├── token-refresh.openapi.yaml
+│   └── token-revocation.openapi.yaml
 └── tasks.md             # Phase 2 output (/tasks command - NOT created by /plan)
 ```
 
 ### Source Code (repository root)
+
 ```
 Maliev.AuthService/
+├── Maliev.AuthService.sln
+├── Dockerfile
+├── .dockerignore
+├── docker-compose.test.yml
+├── README.md
+├── .gitignore
+├── .github/
+│   └── workflows/
+│       ├── ci-develop.yml
+│       ├── ci-staging.yml
+│       └── ci-main.yml
 ├── Maliev.AuthService.Api/
+│   ├── Maliev.AuthService.Api.csproj
+│   ├── Program.cs
+│   ├── appsettings.json
+│   ├── appsettings.Development.json
+│   ├── Properties/
+│   │   └── launchSettings.json
 │   ├── Controllers/
-│   │   └── AuthenticationController.cs      # POST /auth/login, /auth/refresh, /auth/validate, /auth/revoke
+│   │   ├── AuthenticationController.cs
+│   │   ├── TokenController.cs
+│   │   └── ValidationController.cs
+│   ├── DTOs/
+│   │   ├── Request/
+│   │   │   ├── LoginRequest.cs
+│   │   │   ├── RefreshTokenRequest.cs
+│   │   │   ├── RevokeTokenRequest.cs
+│   │   │   └── ValidateTokenRequest.cs
+│   │   └── Response/
+│   │       ├── LoginResponse.cs
+│   │       ├── TokenResponse.cs
+│   │       ├── UserIdentityResponse.cs
+│   │       └── ErrorResponse.cs
 │   ├── Services/
-│   │   ├── IAuthenticationService.cs        # Core authentication orchestration
+│   │   ├── IAuthenticationService.cs
 │   │   ├── AuthenticationService.cs
-│   │   ├── ITokenGenerator.cs               # JWT generation (access + refresh)
+│   │   ├── ITokenGenerator.cs
 │   │   ├── TokenGenerator.cs
-│   │   ├── ITokenValidator.cs               # JWT validation logic
+│   │   ├── ITokenValidator.cs
 │   │   ├── TokenValidator.cs
-│   │   ├── IRefreshTokenService.cs          # Refresh token CRUD + rotation
+│   │   ├── IRefreshTokenService.cs
 │   │   ├── RefreshTokenService.cs
-│   │   ├── IExternalValidationService.cs    # Customer/Employee validation
-│   │   ├── ExternalValidationService.cs
-│   │   ├── IRateLimitService.cs             # Dual-factor rate limiting
-│   │   ├── RateLimitService.cs
-│   │   ├── ITokenRevocationService.cs       # Distributed revocation events
-│   │   └── TokenRevocationService.cs
+│   │   ├── IRevocationService.cs
+│   │   ├── RevocationService.cs
+│   │   ├── IExternalValidationService.cs
+│   │   └── ExternalValidationService.cs
 │   ├── Middleware/
-│   │   ├── CorrelationIdMiddleware.cs       # X-Correlation-ID propagation
-│   │   └── ExceptionHandlingMiddleware.cs   # Global error handling
-│   ├── Models/
-│   │   ├── LoginRequest.cs                  # {username, password, user_type}
-│   │   ├── LoginResponse.cs                 # {access_token, refresh_token, expires_in}
-│   │   ├── RefreshRequest.cs                # {refresh_token}
-│   │   ├── ValidateResponse.cs              # {user_id, user_type, username, email, roles, permissions}
-│   │   ├── RevokeRequest.cs                 # {access_token, reason}
-│   │   └── UserType.cs                      # enum {Customer, Employee}
+│   │   ├── ExceptionHandlingMiddleware.cs
+│   │   └── RequestLoggingMiddleware.cs
+│   ├── Validators/
+│   │   ├── LoginRequestValidator.cs
+│   │   ├── RefreshTokenRequestValidator.cs
+│   │   └── ValidateTokenRequestValidator.cs
 │   ├── Options/
-│   │   ├── JwtOptions.cs                    # Issuer, Audience, SigningKey, AccessTokenExpiry, RefreshTokenExpiry
-│   │   ├── ExternalServiceOptions.cs        # CustomerValidationUrl, EmployeeValidationUrl, Timeout, RetryPolicy
-│   │   ├── RateLimitOptions.cs              # AccountLimit, IpLimit, ProgressiveDelays
-│   │   └── CircuitBreakerOptions.cs         # FailureThreshold, OpenDuration
-│   ├── HealthChecks/
-│   │   ├── PostgresHealthCheck.cs
-│   │   └── ExternalServiceHealthCheck.cs
-│   ├── Program.cs                           # Service configuration and middleware pipeline
-│   ├── appsettings.json                     # Non-sensitive config only
-│   ├── appsettings.Development.json         # Local development overrides
-│   └── Maliev.AuthService.Api.csproj
-│
+│   │   ├── JwtOptions.cs
+│   │   ├── ExternalServiceOptions.cs
+│   │   ├── RateLimitOptions.cs
+│   │   └── CircuitBreakerOptions.cs
+│   └── HealthChecks/
+│       └── DatabaseHealthCheck.cs
 ├── Maliev.AuthService.Data/
+│   ├── Maliev.AuthService.Data.csproj
 │   ├── DbContexts/
-│   │   └── AuthDbContext.cs                 # EF Core context for refresh tokens
+│   │   └── AuthDbContext.cs
 │   ├── Entities/
-│   │   ├── RefreshToken.cs                  # {Id, TokenHash, UserId, UserType, FamilyId, CreatedAt, ExpiresAt, IsRevoked, IsUsed}
-│   │   ├── TokenFamily.cs                   # {FamilyId, UserId, UserType, CreatedAt, LastUsedAt}
-│   │   └── RevokedAccessToken.cs            # {Jti, RevokedAt, ExpiresAt, Reason}
+│   │   ├── RefreshToken.cs
+│   │   ├── RevokedToken.cs
+│   │   ├── TokenFamily.cs
+│   │   └── UserType.cs (enum)
+│   ├── Configurations/
+│   │   ├── RefreshTokenConfiguration.cs
+│   │   ├── RevokedTokenConfiguration.cs
+│   │   └── TokenFamilyConfiguration.cs
 │   ├── Repositories/
 │   │   ├── IRefreshTokenRepository.cs
 │   │   ├── RefreshTokenRepository.cs
+│   │   ├── IRevokedTokenRepository.cs
+│   │   ├── RevokedTokenRepository.cs
 │   │   ├── ITokenFamilyRepository.cs
 │   │   └── TokenFamilyRepository.cs
 │   ├── Migrations/
-│   │   └── [EF Core migration files]
-│   ├── DesignTimeDbContextFactory.cs        # Design-time migrations
-│   └── Maliev.AuthService.Data.csproj
-│
-├── Maliev.AuthService.Tests/
-│   ├── Contract/
-│   │   ├── AuthenticationContractTests.cs   # POST /auth/login contract validation
-│   │   ├── RefreshContractTests.cs          # POST /auth/refresh contract validation
-│   │   └── ValidateContractTests.cs         # POST /auth/validate contract validation
-│   ├── Integration/
-│   │   ├── AuthenticationFlowTests.cs       # End-to-end login → validate → refresh flows
-│   │   ├── TokenRotationTests.cs            # Token rotation and reuse detection
-│   │   ├── RateLimitingTests.cs             # Account + IP rate limiting
-│   │   ├── CircuitBreakerTests.cs           # External service failure scenarios
-│   │   └── TokenRevocationTests.cs          # Distributed revocation propagation
-│   ├── Unit/
-│   │   ├── TokenGeneratorTests.cs           # JWT generation logic
-│   │   ├── TokenValidatorTests.cs           # JWT validation logic
-│   │   ├── RefreshTokenServiceTests.cs      # Token rotation, reuse detection
-│   │   ├── ExternalValidationServiceTests.cs
-│   │   └── RateLimitServiceTests.cs
-│   ├── Fixtures/
-│   │   ├── TestDatabaseFixture.cs           # PostgreSQL Testcontainer setup
-│   │   └── TestDataFactory.cs               # Test data builders
-│   └── Maliev.AuthService.Tests.csproj
-│
-├── .github/
-│   └── workflows/
-│       ├── ci-develop.yml                   # Build → Test → Docker → GitOps update
-│       ├── ci-staging.yml
-│       └── ci-main.yml
-│
-├── Dockerfile                               # Multi-stage build (restore → build → publish → runtime)
-├── .dockerignore
-├── Maliev.AuthService.sln
-└── README.md
+│   │   └── (EF Core migrations - generated)
+│   └── DesignTimeDbContextFactory.cs
+└── Maliev.AuthService.Tests/
+    ├── Maliev.AuthService.Tests.csproj
+    ├── Fixtures/
+    │   ├── TestDatabaseFixture.cs
+    │   └── TestWebApplicationFactory.cs
+    ├── Contract/
+    │   ├── AuthenticationContractTests.cs
+    │   ├── TokenRefreshContractTests.cs
+    │   ├── TokenValidationContractTests.cs
+    │   └── TokenRevocationContractTests.cs
+    ├── Integration/
+    │   ├── CustomerLoginIntegrationTests.cs
+    │   ├── EmployeeLoginIntegrationTests.cs
+    │   ├── TokenRotationIntegrationTests.cs
+    │   ├── TokenReuseDetectionIntegrationTests.cs
+    │   ├── TokenRevocationIntegrationTests.cs
+    │   ├── RateLimitingIntegrationTests.cs
+    │   ├── CircuitBreakerIntegrationTests.cs
+    │   └── ValidationCacheIntegrationTests.cs
+    └── Unit/
+        ├── TokenGeneratorTests.cs
+        ├── TokenValidatorTests.cs
+        ├── RefreshTokenServiceTests.cs
+        └── ValidatorTests/
+            ├── LoginRequestValidatorTests.cs
+            └── RefreshTokenRequestValidatorTests.cs
 ```
 
-**Structure Decision**: Single microservice architecture with Clean Architecture layering:
-- **Api Layer**: Controllers, Services, Middleware (business logic and HTTP handling)
-- **Data Layer**: EF Core entities, repositories, migrations (data access and persistence)
-- **Tests Layer**: Contract, Integration, Unit tests (comprehensive test coverage)
+**Structure Decision**: Single microservice architecture following Clean Architecture pattern. The service is organized into three projects:
 
-This structure follows the mandatory Maliev service template from CLAUDE.md with 3-layer separation and stateless microservice design.
+1. **Maliev.AuthService.Api**: WebAPI layer with controllers, DTOs, services, middleware, and validators
+2. **Maliev.AuthService.Data**: Data access layer with EF Core DbContext, entities, configurations, repositories, and migrations
+3. **Maliev.AuthService.Tests**: Comprehensive test suite with contract tests (API validation), integration tests (end-to-end scenarios), and unit tests (business logic)
+
+The structure separates concerns while maintaining simplicity appropriate for a focused authentication service.
 
 ## Phase 0: Outline & Research
 
-**Status**: No NEEDS CLARIFICATION in Technical Context - All technology decisions are specified
-
-Since all technical decisions are provided in the /plan command arguments, Phase 0 research will focus on **architectural patterns and security implementation details** rather than technology choices.
+**Status**: IN PROGRESS
 
 ### Research Tasks
 
-1. **JWT Signing Algorithm Implementation**
-   - Decision: EdDSA (Ed25519) or ES256 (ECDSA P-256)
-   - Research: .NET 9 System.Security.Cryptography support for asymmetric algorithms
-   - Rationale: RFC 7518 recommends EdDSA for modern systems, ES256 for broad compatibility
-   - Output: Key generation, signing, and verification patterns for .NET 9
+1. **JWT Signing Algorithm Selection** (EdDSA vs RSA vs ECDSA)
+   
+   - Decision needed: Confirm EdDSA (Ed25519) per FR-018
+   - Research: .NET 9 native support, key generation, rotation patterns
+   - Library: Microsoft.IdentityModel.Tokens EdDSA support
 
-2. **Refresh Token Rotation & Reuse Detection**
-   - Decision: Token family tracking with database persistence
-   - Research: OAuth 2.0 RFC 9700 implementation patterns
-   - Rationale: Detect stolen tokens by invalidating entire family on reuse
-   - Output: Database schema, service logic, and transaction handling
+2. **Refresh Token Storage Strategy** (SHA-256 hashing)
+   
+   - Decision needed: Confirm SHA-256 hashing per FR-023
+   - Research: Constant-time comparison in .NET, hash collision resistance
+   - Implementation: `System.Security.Cryptography.SHA256`
 
-3. **Distributed Token Revocation**
-   - Decision: Event-based revocation with <2s propagation
-   - Research: Implementation options (Redis Pub/Sub, RabbitMQ, Kafka, HTTP push)
-   - Rationale: Need fast propagation across 20+ microservices
-   - Output: Selected event system and integration pattern
+3. **Token Revocation Event System** (Redis pub/sub)
+   
+   - Decision needed: Redis vs Kafka for <2s propagation (FR-060)
+   - Research: Redis Pub/Sub vs Kafka performance for low-latency events
+   - Library: StackExchange.Redis vs Confluent.Kafka
 
-4. **SHA-256 Token Hashing**
-   - Decision: Cryptographic hashing with constant-time comparison
-   - Research: .NET 9 SHA-256 implementation and timing attack prevention
-   - Rationale: RFC 6819 requires one-way hashing for stored tokens
-   - Output: Hashing and comparison code patterns
+4. **External Service Circuit Breaker** (Polly configuration)
+   
+   - Decision needed: Confirm Polly for circuit breaker (FR-067-069)
+   - Research: Polly CircuitBreaker policy configuration, metrics integration
+   - Pattern: Advanced circuit breaker with half-open state
 
-5. **Dual-Factor Rate Limiting**
-   - Decision: ASP.NET Core built-in rate limiting middleware
-   - Research: .NET 9 rate limiting with multiple policies (account + IP)
-   - Rationale: Prevent credential stuffing with IP-based limits
-   - Output: Configuration and custom policy implementation
+5. **Rate Limiting Implementation** (ASP.NET Core 9 built-in)
+   
+   - Decision needed: Confirm ASP.NET Core 9 built-in rate limiting (FR-053-056)
+   - Research: Fixed window vs sliding window, IP extraction from headers
+   - Implementation: `Microsoft.AspNetCore.RateLimiting`
 
-6. **Circuit Breaker for External Services**
-   - Decision: Polly 8.x with typed HTTP clients
-   - Research: Circuit breaker configuration for customer/employee validation
-   - Rationale: Fail fast when external services are down
-   - Output: Polly policy configuration and health check integration
+6. **Database Migration Strategy** (EF Core)
+   
+   - Decision needed: Manual vs automated migration application
+   - Research: Best practices for Kubernetes deployments, idempotent migrations
+   - Pattern: Manual migration via `dotnet ef database update` (per constitution)
 
-7. **OpenTelemetry Distributed Tracing**
-   - Decision: OpenTelemetry .NET SDK with correlation ID propagation
-   - Research: Integration with ASP.NET Core 9.0 and Prometheus
-   - Rationale: FR-042 requires correlation ID propagation and trace context
-   - Output: Instrumentation configuration and custom activity sources
+7. **Token Family Tracking** (Rotation lineage)
+   
+   - Decision needed: Database schema for family_id, cascading invalidation
+   - Research: Efficient queries for token family traversal
+   - Pattern: Indexed foreign key with cleanup jobs
 
-8. **Database Optimistic Concurrency**
-   - Decision: RowVersion column on RefreshToken entity
-   - Research: EF Core 9.0.9 concurrency token patterns
-   - Rationale: Prevent race conditions during token rotation
-   - Output: Entity configuration and retry logic
+8. **Health Check Integration** (Kubernetes liveness/readiness)
+   
+   - Decision needed: Database connectivity check strategy
+   - Research: Fast vs comprehensive health checks, dependency checks
+   - Library: AspNetCore.HealthChecks.UI.Client
 
-### Research Output Structure (`research.md`)
+9. **Distributed Tracing** (OpenTelemetry)
+   
+   - Decision needed: Correlation ID vs full OpenTelemetry spans
+   - Research: .NET 9 Activity API, trace context propagation
+   - Library: OpenTelemetry.Extensions.Hosting (optional for Phase 2)
 
-```markdown
-# Technical Research: JWT Authentication Service
+10. **Password Validation Delegation** (External service contracts)
+    
+    - Decision needed: Request/response format for customer/employee validation
+    - Research: Standard authentication API patterns, error handling
+    - Pattern: Typed HttpClient with Polly retry
 
-## 1. JWT Signing Algorithm (EdDSA vs ES256)
-- **Decision**: EdDSA (Ed25519) primary, ES256 fallback
-- **Rationale**: [Details from research]
-- **Alternatives Considered**: [ES256, RS256, HS256]
-- **Implementation**: [Code patterns]
+### Research Output Path
 
-## 2. Refresh Token Rotation Architecture
-- **Decision**: [Selected pattern]
-- **Rationale**: [OAuth 2.0 RFC 9700 compliance]
-- **Database Schema**: [Entity design]
-- **Reuse Detection Logic**: [Service implementation]
-
-## 3. Distributed Token Revocation
-- **Decision**: [Redis Pub/Sub / RabbitMQ / Kafka / HTTP]
-- **Rationale**: [Performance, latency, complexity trade-offs]
-- **Integration Pattern**: [.NET implementation]
-- **Fallback Strategy**: [When events delayed]
-
-[... continued for all 8 research tasks]
-```
-
-**Phase 0 Output**: `research.md` with detailed technical decisions and implementation patterns
+`specs/001-create-a-jwt/research.md`
 
 ## Phase 1: Design & Contracts
 
 *Prerequisites: research.md complete*
 
-### 1. Data Model Design (`data-model.md`)
+**Status**: PENDING (blocked on Phase 0)
 
-Extract entities from feature spec and map to EF Core design:
+### Deliverables
 
-**Entities**:
-- `RefreshToken`: TokenHash (string, indexed), UserId (Guid), UserType (enum), FamilyId (Guid, indexed), CreatedAt (DateTimeOffset), ExpiresAt (DateTimeOffset), IsRevoked (bool), IsUsed (bool), RevokedAt (nullable), RowVersion (timestamp)
-- `TokenFamily`: FamilyId (Guid, PK), UserId (Guid, indexed), UserType (enum), CreatedAt (DateTimeOffset), LastUsedAt (DateTimeOffset)
-- `RevokedAccessToken`: Jti (string, PK), RevokedAt (DateTimeOffset), ExpiresAt (DateTimeOffset), Reason (string)
+1. **Data Model** (`data-model.md`):
+   
+   - RefreshToken entity (id, token_hash, user_id, user_type, family_id, expiry, created_at, last_used_at)
+   - RevokedToken entity (jti, user_id, revoked_at, reason, expiry)
+   - TokenFamily entity (family_id, user_id, user_type, created_at, last_refresh_at, invalidated, invalidation_reason)
+   - UserType enum (Customer, Employee)
+   - Relationships and indexes for performance
 
-**Relationships**:
-- RefreshToken → TokenFamily (many-to-one via FamilyId)
+2. **API Contracts** (`contracts/`):
+   
+   - **authentication.openapi.yaml**: POST /api/v1/auth/login (LoginRequest → LoginResponse)
+   - **token-refresh.openapi.yaml**: POST /api/v1/auth/refresh (RefreshTokenRequest → TokenResponse)
+   - **token-validation.openapi.yaml**: POST /api/v1/auth/validate (ValidateTokenRequest → UserIdentityResponse)
+   - **token-revocation.openapi.yaml**: POST /api/v1/auth/revoke (RevokeTokenRequest → NoContent)
+   - All contracts include error responses (400, 401, 403, 409, 429, 500, 503)
 
-**Validation Rules**:
-- TokenHash: Required, SHA-256 (64 hex chars)
-- FamilyId: Required, must exist in TokenFamily
-- ExpiresAt: Must be > CreatedAt
-- IsUsed + IsRevoked: Mutually tracked for reuse detection
+3. **Contract Tests** (failing tests for TDD):
+   
+   - AuthenticationContractTests.cs (login endpoint validation)
+   - TokenRefreshContractTests.cs (refresh endpoint validation)
+   - TokenValidationContractTests.cs (validate endpoint validation)
+   - TokenRevocationContractTests.cs (revoke endpoint validation)
+   - Each test validates request/response schema against OpenAPI contract
 
-**State Transitions**:
-- Active (IsUsed=false, IsRevoked=false) → Used (IsUsed=true on rotation)
-- Active/Used → Revoked (IsRevoked=true on family invalidation)
+4. **Integration Test Scenarios**:
+   
+   - CustomerLoginIntegrationTests (FR-001, FR-002, FR-008)
+   - EmployeeLoginIntegrationTests (FR-001, FR-003, FR-008)
+   - TokenRotationIntegrationTests (FR-015 - new refresh token issued)
+   - TokenReuseDetectionIntegrationTests (FR-016 - family invalidation)
+   - TokenRevocationIntegrationTests (FR-060 - distributed propagation)
+   - RateLimitingIntegrationTests (FR-053, FR-054, FR-056)
+   - CircuitBreakerIntegrationTests (FR-067, FR-068, FR-069)
 
-**Indexes**:
-- RefreshToken: Composite index on (UserId, UserType, IsRevoked, IsUsed)
-- RefreshToken: Index on FamilyId for family invalidation queries
-- RefreshToken: Index on TokenHash for lookup
-- TokenFamily: Index on UserId for user logout scenarios
+5. **Quickstart Guide** (`quickstart.md`):
+   
+   - Local PostgreSQL setup with docker-compose.test.yml
+   - Environment variable configuration (ConnectionStrings__AuthDbContext)
+   - Database migration steps
+   - Running the service locally
+   - Testing authentication flow with curl/Postman examples
+   - Validating token rotation and reuse detection
 
-### 2. API Contracts (`contracts/openapi.yaml`)
+6. **Agent Context File** (`CLAUDE.md` in repository root):
+   
+   - Project overview and architecture
+   - Key technologies and versions
+   - Development commands (build, test, run)
+   - Common tasks (migrations, debugging)
+   - Recent changes tracking (keep last 3 updates)
+   - Generated via `.specify/scripts/powershell/update-agent-context.ps1 -AgentType claude`
 
-Generate OpenAPI 3.1 specification from functional requirements:
+### Output
 
-**Endpoints**:
-
-```yaml
-POST /auth/login
-  Request: {username, password, user_type: "customer"|"employee"}
-  Response 200: {access_token, refresh_token, token_type: "Bearer", expires_in: 900}
-  Response 401: {error: "invalid_credentials", error_description}
-  Response 429: {error: "too_many_requests", retry_after: 900}
-  Response 503: {error: "service_unavailable"} # Circuit breaker open
-
-POST /auth/refresh
-  Request: {refresh_token}
-  Response 200: {access_token, refresh_token, token_type: "Bearer", expires_in: 900}
-  Response 401: {error: "invalid_token"|"token_revoked"|"token_family_invalidated"}
-  Response 429: {error: "too_many_requests"}
-
-POST /auth/validate
-  Request: {access_token}
-  Response 200: {user_id, user_type, username, email, roles: [], permissions: []}
-  Response 401: {error: "invalid_token"|"token_expired"|"token_revoked"}
-
-POST /auth/revoke
-  Request: {access_token, reason: "user_logout"|"password_changed"|"admin_action"}
-  Response 204: No Content
-  Response 401: {error: "invalid_token"}
-
-GET /auth/liveness
-  Response 200: "Healthy"
-
-GET /auth/readiness
-  Response 200: {status: "Healthy", checks: [{name: "PostgreSQL", status: "Healthy"}]}
-  Response 503: {status: "Unhealthy", checks: [...]}
-```
-
-**Security Schemes**:
-```yaml
-securitySchemes:
-  BearerAuth:
-    type: http
-    scheme: bearer
-    bearerFormat: JWT
-```
-
-**Contract Tests** (generated from OpenAPI):
-- `AuthenticationContractTests.cs`: Validate request/response schemas for /auth/login
-- `RefreshContractTests.cs`: Validate token rotation response structure
-- `ValidateContractTests.cs`: Validate user identity response structure
-
-All contract tests **MUST FAIL** initially (no implementation yet).
-
-### 3. Integration Test Scenarios (`quickstart.md`)
-
-Extract from user stories and map to manual/automated test steps:
-
-**Scenario 1: Customer Login Flow**
-```bash
-# Step 1: Login as customer
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "customer@example.com", "password": "test123", "user_type": "customer"}'
-
-# Expected: 200 OK with access_token + refresh_token
-
-# Step 2: Validate access token
-curl -X POST http://localhost:8080/auth/validate \
-  -H "Content-Type: application/json" \
-  -d '{"access_token": "<ACCESS_TOKEN>"}'
-
-# Expected: 200 OK with user_id, user_type: "customer", email, roles
-
-# Step 3: Refresh token
-curl -X POST http://localhost:8080/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{"refresh_token": "<REFRESH_TOKEN>"}'
-
-# Expected: 200 OK with NEW access_token + NEW refresh_token
-```
-
-**Scenario 2: Token Reuse Detection**
-```bash
-# Step 1: Login
-# Step 2: Refresh token (save old refresh_token)
-# Step 3: Try to reuse OLD refresh_token
-
-# Expected: 401 Unauthorized with error: "token_family_invalidated"
-# Verify: ALL tokens in family are revoked
-```
-
-**Scenario 3: Rate Limiting**
-```bash
-# Step 1: Make 5 failed login attempts with wrong password
-# Expected: 5th attempt returns 429 Too Many Requests
-# Step 2: Wait 15 minutes, retry
-# Expected: Account unlocked, login succeeds
-```
-
-[Additional scenarios for employee login, circuit breaker, revocation, service auth...]
-
-### 4. Update CLAUDE.md
-
-Run the update script to incrementally add new context:
-
-```powershell
-.\.specify\scripts\powershell\update-agent-context.ps1 -AgentType claude
-```
-
-**Expected Changes**:
-- Add recent changes section: "Implemented JWT authentication service with OAuth 2.0 RFC 9700 compliance"
-- Add technology context: "EdDSA/ES256 JWT signing, Polly circuit breaker, ASP.NET Core rate limiting"
-- Preserve existing manual additions
-- Keep total lines < 150
-
-**Phase 1 Outputs**:
-- ✅ `data-model.md` (3 entities with relationships and validation)
-- ✅ `contracts/openapi.yaml` (Complete API specification)
-- ✅ `contracts/*.contract.json` (Contract test data)
-- ✅ Contract test files (failing tests in Tests/Contract/)
-- ✅ `quickstart.md` (Manual testing guide with curl examples)
-- ✅ `CLAUDE.md` updated (O(1) incremental update)
+- data-model.md with complete entity definitions
+- contracts/*.openapi.yaml for all endpoints
+- Failing contract tests in Maliev.AuthService.Tests/Contract/
+- Integration test structure in Maliev.AuthService.Tests/Integration/
+- quickstart.md with step-by-step local setup
+- CLAUDE.md in repository root
 
 ## Phase 2: Task Planning Approach
 
@@ -504,73 +406,62 @@ Run the update script to incrementally add new context:
 
 **Task Generation Strategy**:
 
-1. **Load task template**: `.specify/templates/tasks-template.md`
+1. Load `.specify/templates/tasks-template.md` as base template
+2. Generate tasks from Phase 1 design documents:
+   - Each OpenAPI contract → contract test task [P]
+   - Each entity in data model → entity creation + configuration task [P]
+   - Each repository interface → repository implementation task [P]
+   - Each service interface → service implementation task
+   - Each controller → controller implementation task
+   - Each user scenario → integration test task
+   - Each validator → validator implementation + unit test task [P]
 
-2. **Generate from Phase 1 artifacts**:
-   - **From data-model.md** → Entity creation tasks
-     - Task: Create RefreshToken entity with EF Core configuration [P]
-     - Task: Create TokenFamily entity with EF Core configuration [P]
-     - Task: Create RevokedAccessToken entity with EF Core configuration [P]
-     - Task: Create AuthDbContext with DbSets and indexes
-     - Task: Generate initial EF Core migration
+**Ordering Strategy**:
 
-   - **From contracts/openapi.yaml** → Contract test tasks (TDD)
-     - Task: Create failing contract test for POST /auth/login [P]
-     - Task: Create failing contract test for POST /auth/refresh [P]
-     - Task: Create failing contract test for POST /auth/validate [P]
-     - Task: Create failing contract test for POST /auth/revoke [P]
+1. **Foundation Layer** (TDD: Tests first):
+   
+   - Task 1-4: Contract tests (all [P] - can run in parallel)
+   - Task 5-7: Entity models and EF Core configurations [P]
+   - Task 8: DbContext setup and DesignTimeDbContextFactory
+   - Task 9: Initial migration creation
+   - Task 10-12: Repository interfaces and implementations [P]
 
-   - **From quickstart.md user stories** → Integration test tasks (TDD)
-     - Task: Create failing integration test for customer login flow
-     - Task: Create failing integration test for employee login flow
-     - Task: Create failing integration test for token rotation
-     - Task: Create failing integration test for token reuse detection
-     - Task: Create failing integration test for account rate limiting
-     - Task: Create failing integration test for IP rate limiting
-     - Task: Create failing integration test for circuit breaker
-     - Task: Create failing integration test for token revocation
+2. **Service Layer**:
+   
+   - Task 13-14: Token generator interface and implementation
+   - Task 15-16: Token validator interface and implementation
+   - Task 17-18: Refresh token service interface and implementation
+   - Task 19-20: Revocation service interface and implementation
+   - Task 21-22: External validation service interface and implementation
+   - Task 23-24: Authentication service interface and implementation
 
-   - **From research.md** → Service implementation tasks
-     - Task: Implement TokenGenerator service (EdDSA signing from research)
-     - Task: Implement TokenValidator service (algorithm validation from research)
-     - Task: Implement RefreshTokenService (rotation logic from research)
-     - Task: Implement ExternalValidationService (Polly circuit breaker from research)
-     - Task: Implement RateLimitService (dual-factor rate limiting from research)
-     - Task: Implement TokenRevocationService (distributed events from research)
-     - Task: Implement AuthenticationService (orchestration layer)
+3. **API Layer**:
+   
+   - Task 25-28: FluentValidation validators with unit tests [P]
+   - Task 29-32: Controllers (Authentication, Token, Validation, Revocation)
+   - Task 33-34: Exception and request logging middleware [P]
+   - Task 35: Program.cs configuration and startup
 
-   - **From FR requirements** → Controller and middleware tasks
-     - Task: Implement AuthenticationController with all endpoints
-     - Task: Implement CorrelationIdMiddleware
-     - Task: Implement ExceptionHandlingMiddleware
-     - Task: Configure Program.cs with middleware pipeline
-     - Task: Implement health checks (PostgreSQL, external services)
+4. **Integration Testing**:
+   
+   - Task 36: TestDatabaseFixture and TestWebApplicationFactory setup
+   - Task 37-44: Integration test scenarios (8 test suites) [P]
 
-3. **Ordering Strategy**:
-   - **Phase 1 (Database)**: Entity creation → Migration → Repository interfaces → Repository implementations
-   - **Phase 2 (Tests First - TDD)**: Contract tests → Integration tests (all failing)
-   - **Phase 3 (Implementation)**: Services (unit tested) → Controller → Middleware → Configuration
-   - **Phase 4 (Validation)**: Run all tests → Fix failures → Run quickstart.md manually
+5. **Infrastructure**:
+   
+   - Task 45: Dockerfile and .dockerignore
+   - Task 46-48: GitHub Actions workflows (develop, staging, main) [P]
+   - Task 49: README.md and quickstart documentation
 
-4. **Parallelization**:
-   - Mark independent tasks with [P]:
-     - Entity creation (can be done in parallel)
-     - Contract test creation (independent per endpoint)
-     - Service interface creation (independent)
-   - Sequential dependencies:
-     - Migration AFTER entities
-     - Implementation AFTER tests written
-     - Controller AFTER services implemented
+6. **Final Validation**:
+   
+   - Task 50: Run all tests and verify 80%+ coverage
+   - Task 51: Build and run service locally, execute quickstart.md
+   - Task 52: Clean artifacts and verify zero warnings build
 
-**Estimated Output**: 45-50 numbered, dependency-ordered tasks in tasks.md
+**Estimated Output**: 50-52 numbered, ordered tasks in tasks.md
 
-**Task Categories**:
-- Database setup: ~8 tasks
-- Test creation (TDD): ~15 tasks
-- Service implementation: ~12 tasks
-- Controller/Middleware: ~6 tasks
-- Configuration & deployment: ~5 tasks
-- Validation & documentation: ~4 tasks
+**Parallelization**: Tasks marked [P] are independent and can execute in parallel (same layer, different files/components)
 
 **IMPORTANT**: This phase is executed by the /tasks command, NOT by /plan
 
@@ -579,46 +470,49 @@ Run the update script to incrementally add new context:
 *These phases are beyond the scope of the /plan command*
 
 **Phase 3**: Task execution (/tasks command creates tasks.md)
-**Phase 4**: Implementation (execute tasks.md following TDD principles)
-**Phase 5**: Validation (run tests, execute quickstart.md, deploy to dev environment)
+**Phase 4**: Implementation (execute tasks.md following TDD and constitutional principles)
+**Phase 5**: Validation (run tests, execute quickstart.md, performance benchmarks, security audit)
 
 ## Complexity Tracking
 
-*No constitutional violations - table not needed*
+**No violations** - Constitution Check passed without deviations.
+
+This design maintains simplicity while meeting all security and functional requirements:
+
+- Single microservice (not multiple services)
+- Standard libraries (no custom frameworks)
+- Direct PostgreSQL access (no repository abstraction needed)
+- Built-in rate limiting (no external packages)
+- Clean Architecture without over-engineering
 
 ## Progress Tracking
 
-*This checklist is updated during execution flow*
-
 **Phase Status**:
-- [x] Phase 0: Research complete (/plan command) - **COMPLETED**
-  - ✅ research.md created with 8 technical research topics
-  - ✅ All technology decisions documented with implementation patterns
-- [x] Phase 1: Design complete (/plan command) - **COMPLETED**
-  - ✅ data-model.md created (3 entities: RefreshToken, TokenFamily, RevokedAccessToken)
-  - ✅ contracts/openapi.yaml created (complete API specification)
-  - ✅ quickstart.md created (8 manual testing scenarios)
-  - ✅ CLAUDE.md updated with new technology context
-- [x] Phase 2: Task planning complete (/plan command - describe approach only) - **COMPLETED**
-  - ✅ Task generation strategy documented
-  - ✅ Estimated 45-50 tasks in dependency order
-- [ ] Phase 3: Tasks generated (/tasks command) - **READY TO EXECUTE**
+
+- [x] Phase 0: Research complete (/plan command) ✅ research.md created
+- [x] Phase 1: Design complete (/plan command) ✅ data-model.md, contracts/auth-api.yaml, quickstart.md created
+- [x] Phase 2: Task planning complete (/plan command - describe approach only) ✅ Task generation strategy documented
+- [ ] Phase 3: Tasks generated (/tasks command) - NEXT STEP
 - [ ] Phase 4: Implementation complete
 - [ ] Phase 5: Validation passed
 
 **Gate Status**:
-- [x] Initial Constitution Check: **PASS** - No violations detected
-- [x] Post-Design Constitution Check: **PASS** - All patterns align with CLAUDE.md standards
-  - ✅ Clean Architecture maintained (Api/Data/Tests separation)
-  - ✅ Stateless microservice design (all state in PostgreSQL)
-  - ✅ Standard package versions (EF Core 9.0.9, Npgsql 9.0.2, Serilog 8.0.2)
-  - ✅ No secrets in code (Google Secret Manager via /mnt/secrets)
-  - ✅ Health checks with liveness/readiness endpoints
-  - ✅ OpenTelemetry distributed tracing
-  - ✅ Polly circuit breaker for resilience
-  - ✅ ASP.NET Core built-in rate limiting
-- [x] All NEEDS CLARIFICATION resolved: **PASS** - All technical decisions specified
-- [x] Complexity deviations documented: **N/A** - No deviations
+
+- [x] Initial Constitution Check: PASS (all 9 principles satisfied)
+- [x] Post-Design Constitution Check: PASS (design maintains constitutional compliance)
+- [x] All NEEDS CLARIFICATION resolved: COMPLETE (all 10 research areas documented)
+- [x] Complexity deviations documented: N/A (no violations)
+
+**Current Phase**: COMPLETE - Ready for /tasks command
+
+**Deliverables Summary**:
+
+- ✅ plan.md (this file) - 512 lines
+- ✅ research.md - 10 technical decisions with rationale
+- ✅ data-model.md - 7 entities with PostgreSQL schema
+- ✅ contracts/auth-api.yaml - 8 endpoints (OpenAPI 3.0.3)
+- ✅ quickstart.md - 6 end-to-end test scenarios
 
 ---
-*Based on CLAUDE.md Maliev Microservice Standards - Standard .NET 9 Clean Architecture Pattern*
+
+*Based on Constitution v1.0.0 - See `.specify/memory/constitution.md`*

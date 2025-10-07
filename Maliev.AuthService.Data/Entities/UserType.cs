@@ -1,17 +1,17 @@
 namespace Maliev.AuthService.Data.Entities;
 
 /// <summary>
-/// Enumeration representing the type of user in the system.
+/// Represents the type of user in the authentication system.
 /// </summary>
 public enum UserType
 {
     /// <summary>
-    /// External customer user
+    /// External customer user (validated against Customer Service API)
     /// </summary>
-    Customer = 0,
+    Customer = 1,
 
     /// <summary>
-    /// Internal employee user
+    /// Internal employee user (validated against Employee Service API)
     /// </summary>
-    Employee = 1
+    Employee = 2
 }

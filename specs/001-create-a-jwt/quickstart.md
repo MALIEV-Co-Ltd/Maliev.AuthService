@@ -1,214 +1,575 @@
-# Quickstart Manual Testing Guide
+# QuickStart Guide: JWT Authentication Service
 
-**Project**: Maliev.AuthService
 **Feature**: 001-create-a-jwt
-**Date**: 2025-10-05
-**Purpose**: Manual testing scenarios for JWT authentication service validation
+**Purpose**: End-to-end validation of authentication service functionality
+**Prerequisites**: Docker, .NET 9 SDK, PostgreSQL client
 
 ---
 
-## Prerequisites
+## Environment Setup
 
-### 1. Service Running Locally
+### 1. Start Test PostgreSQL Database
 
-```bash
-# Terminal 1: Start the authentication service
+```powershell
+# Navigate to repository root
 cd R:\maliev\Maliev.AuthService
-dotnet run --project Maliev.AuthService.Api
 
-# Service should be listening on http://localhost:8080
+# Start PostgreSQL container
+docker-compose -f docker-compose.test.yml up -d
+
+# Wait for health check (10-15 seconds)
+docker-compose -f docker-compose.test.yml ps
+
+# Verify PostgreSQL is running
+docker exec authservice-test-db pg_isready -U postgres
 ```
 
-### 2. Database Running
+### 2. Configure Environment Variables
 
-```bash
-# Terminal 2: Start PostgreSQL (or use existing dev database)
-docker run -d \
-  --name auth-postgres \
-  -e POSTGRES_PASSWORD=test123 \
-  -e POSTGRES_DB=auth_db \
-  -p 5432:5432 \
-  postgres:18
+```powershell
+# Set database connection string
+$env:ConnectionStrings__AuthServiceDbContext="Host=localhost;Port=5432;Database=test_db;Username=postgres;Password=postgres;"
+
+# Set JWT configuration (development keys - NOT for production)
+$env:Jwt__SecurityKey="<dev-jwt-key-min-32-chars-for-hs256-algorithm>"
+$env:Jwt__Issuer="maliev-dev"
+$env:Jwt__Audience="maliev-dev"
+
+# Set external service URLs (mock endpoints for testing)
+$env:ExternalServices__CustomerService__BaseUrl="http://localhost:5001"
+$env:ExternalServices__EmployeeService__BaseUrl="http://localhost:5002"
+
+# Set CORS allowed origins
+$env:CORS_ALLOWED_ORIGINS="https://dev.intranet.maliev.com,https://dev.www.maliev.com"
+```
+
+### 3. Apply Database Migrations
+
+```powershell
+# Navigate to solution root
+cd R:\maliev\Maliev.AuthService
 
 # Apply migrations
-export AuthDbContext="Server=localhost;Port=5432;Database=auth_db;User Id=postgres;Password=test123;"
-dotnet ef database update --project Maliev.AuthService.Data
+dotnet ef database update --project Maliev.AuthService.Data --startup-project Maliev.AuthService.Api
+
+# Verify tables created
+docker exec -it authservice-test-db psql -U postgres -d test_db -c "\dt"
 ```
 
-### 3. External Validation Services (Mock)
+**Expected Tables**:
+- `refresh_tokens`
+- `token_families`
+- `revoked_tokens`
+- `account_lockouts`
+- `ip_rate_limits`
+- `auth_audit_logs`
+- `service_credentials`
 
-For local testing, the service should have development fallbacks or mock external services configured.
+### 4. Start the Application
 
+```powershell
+# Run the API
+dotnet run --project Maliev.AuthService.Api
+
+# Application should start on:
+# https://localhost:7xxx and http://localhost:5xxx
+# Swagger UI auto-opens at /auth/swagger
+```
+
+---
+
+## Scenario 1: Customer Login Flow
+
+### Test Objective
+Validate customer authentication with external customer service validation, token generation, and refresh token rotation.
+
+### Prerequisites
+- Mock customer service running on http://localhost:5001
+- Valid customer credentials: `customer@example.com` / `<password>`
+
+### Steps
+
+**1.1. Customer Login**
+
+```bash
+curl -X POST https://localhost:7xxx/auth/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "customer@example.com",
+    "password": "<password>",
+    "user_type": "customer"
+  }'
+```
+
+**Expected Response** (200 OK):
 ```json
-// appsettings.Development.json
 {
-  "ExternalServices": {
-    "CustomerValidationUrl": "http://localhost:9001",
-    "EmployeeValidationUrl": "http://localhost:9002"
+  "access_token": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "CfDJ8KZx...rT0gg",
+  "token_type": "Bearer",
+  "expires_in": 900,
+  "user": {
+    "user_id": "123e4567-e89b-12d3-a456-426614174000",
+    "user_type": "customer",
+    "username": "john.doe",
+    "email": "customer@example.com",
+    "roles": ["Customer"],
+    "permissions": []
   }
 }
 ```
 
-### 4. Tools
+**Validation Checks**:
+- ✅ Response contains `access_token` and `refresh_token`
+- ✅ `access_token` is valid JWT with EdDSA signature
+- ✅ `user.user_type` equals `"customer"`
+- ✅ Database contains new `refresh_token` record with hashed token
+- ✅ Database contains new `token_family` record
+- ✅ `auth_audit_log` contains successful login event
 
-- **curl** (command line HTTP client)
-- **jq** (JSON processor - optional but recommended)
-- **HTTPie** (alternative to curl - optional)
+**1.2. Validate Access Token**
+
+```bash
+# Extract access_token from previous response
+ACCESS_TOKEN="eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9..."
+
+curl -X POST https://localhost:7xxx/auth/v1/auth/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "access_token": "'"$ACCESS_TOKEN"'"
+  }'
+```
+
+**Expected Response** (200 OK):
+```json
+{
+  "valid": true,
+  "user": {
+    "user_id": "123e4567-e89b-12d3-a456-426614174000",
+    "user_type": "customer",
+    "username": "john.doe",
+    "email": "customer@example.com",
+    "roles": ["Customer"],
+    "permissions": []
+  }
+}
+```
+
+**Validation Checks**:
+- ✅ `valid` equals `true`
+- ✅ User identity matches login response
+
+**1.3. Refresh Access Token**
+
+```bash
+# Extract refresh_token from login response
+REFRESH_TOKEN="CfDJ8KZx...rT0gg"
+
+curl -X POST https://localhost:7xxx/auth/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refresh_token": "'"$REFRESH_TOKEN"'"
+  }'
+```
+
+**Expected Response** (200 OK):
+```json
+{
+  "access_token": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9...[NEW]",
+  "refresh_token": "CfDJ8KZx...[NEW-DIFFERENT]",
+  "token_type": "Bearer",
+  "expires_in": 900
+}
+```
+
+**Validation Checks**:
+- ✅ New `access_token` is different from original
+- ✅ New `refresh_token` is different from original
+- ✅ Database shows old refresh token marked as `is_used = TRUE`
+- ✅ Database contains new refresh token with same `family_id`
+- ✅ Old refresh token cannot be reused (next step)
+
+**1.4. Detect Refresh Token Reuse**
+
+```bash
+# Attempt to reuse OLD refresh token
+curl -X POST https://localhost:7xxx/auth/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refresh_token": "'"$REFRESH_TOKEN"'"
+  }'
+```
+
+**Expected Response** (403 Forbidden):
+```json
+{
+  "error": "token_reuse_detected",
+  "message": "Refresh token reuse detected. All tokens have been invalidated for security.",
+  "action_required": "re_authenticate"
+}
+```
+
+**Validation Checks**:
+- ✅ Response status is 403 Forbidden
+- ✅ Error indicates token reuse detection
+- ✅ Database shows ALL tokens in family marked as invalid
+- ✅ `auth_audit_log` contains reuse detection event
+- ✅ User must re-authenticate (login again)
 
 ---
 
-## Test Scenarios
+## Scenario 2: Employee Login and Token Revocation
 
-### Scenario 1: Customer Login Flow ✅
+### Test Objective
+Validate employee authentication, token validation, and distributed token revocation.
 
-**Objective**: Test complete customer authentication flow from login to token validation
+### Prerequisites
+- Mock employee service running on http://localhost:5002
+- Valid employee credentials: `employee@example.com` / `<password>`
 
-#### Step 1.1: Customer Login (Success)
+### Steps
+
+**2.1. Employee Login**
 
 ```bash
-curl -X POST http://localhost:8080/auth/login \
+curl -X POST https://localhost:7xxx/auth/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "username": "customer@example.com",
-    "password": "test123",
-    "user_type": "customer"
-  }' | jq '.'
+    "username": "employee@example.com",
+    "password": "<password>",
+    "user_type": "employee"
+  }'
 ```
 
 **Expected Response** (200 OK):
 ```json
 {
-  "access_token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refresh_token": "RToyMzQ1Njc4OTBhYmNkZWY=",
+  "access_token": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "CfDJ8KZx...rT0gg",
   "token_type": "Bearer",
-  "expires_in": 900
+  "expires_in": 900,
+  "user": {
+    "user_id": "456e7890-e89b-12d3-a456-426614174000",
+    "user_type": "employee",
+    "username": "jane.smith",
+    "email": "employee@example.com",
+    "roles": ["Employee", "Manager"],
+    "permissions": []
+  }
 }
 ```
 
-**Headers to Check**:
-- `X-Correlation-ID`: Should be present
-- `X-RateLimit-Limit`: 5
-- `X-RateLimit-Remaining`: 4 (decrements on each attempt)
-- `X-RateLimit-Reset`: Unix timestamp
+**Validation Checks**:
+- ✅ `user.user_type` equals `"employee"`
+- ✅ `user.roles` contains employee-specific roles
 
-**Save tokens for next steps**:
-```bash
-export ACCESS_TOKEN="<access_token_from_response>"
-export REFRESH_TOKEN="<refresh_token_from_response>"
-```
-
-#### Step 1.2: Validate Access Token
+**2.2. Use Access Token for Authorization**
 
 ```bash
-curl -X POST http://localhost:8080/auth/validate \
+# Use access token in Authorization header
+ACCESS_TOKEN="eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9..."
+
+curl -X POST https://localhost:7xxx/auth/v1/auth/revoke \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{
-    \"access_token\": \"$ACCESS_TOKEN\"
-  }" | jq '.'
+  -d '{
+    "jti": "550e8400-e29b-41d4-a716-446655440000",
+    "reason": "admin_action"
+  }'
 ```
 
-**Expected Response** (200 OK):
-```json
-{
-  "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "user_type": "customer",
-  "username": "customer@example.com",
-  "email": "customer@example.com",
-  "roles": ["customer"],
-  "permissions": ["view_orders", "create_order", "view_profile"]
-}
-```
+**Expected Response** (204 No Content)
 
-**Verify**:
-- ✅ `user_type` is "customer"
-- ✅ `user_id` matches the authenticated user
-- ✅ `roles` and `permissions` are populated
+**Validation Checks**:
+- ✅ Response status is 204 (no content)
+- ✅ Database contains revoked token record
+- ✅ Redis pub/sub event published to `token:revoked` channel
+- ✅ Revocation propagates to all services in <2 seconds
 
-#### Step 1.3: Refresh Token (Token Rotation)
+**2.3. Validate Revoked Token (Fails)**
 
 ```bash
-curl -X POST http://localhost:8080/auth/refresh \
+# Token with jti "550e8400-e29b-41d4-a716-446655440000"
+REVOKED_TOKEN="eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9...[REVOKED]"
+
+curl -X POST https://localhost:7xxx/auth/v1/auth/validate \
   -H "Content-Type: application/json" \
-  -d "{
-    \"refresh_token\": \"$REFRESH_TOKEN\"
-  }" | jq '.'
-```
-
-**Expected Response** (200 OK):
-```json
-{
-  "access_token": "NEW_ACCESS_TOKEN_HERE",
-  "refresh_token": "NEW_REFRESH_TOKEN_HERE",
-  "token_type": "Bearer",
-  "expires_in": 900
-}
-```
-
-**Verify**:
-- ✅ New access_token is different from original
-- ✅ New refresh_token is different from original
-- ✅ Old refresh_token is marked as "used" in database
-
-**Update tokens**:
-```bash
-export ACCESS_TOKEN_NEW="<new_access_token>"
-export REFRESH_TOKEN_NEW="<new_refresh_token>"
-```
-
-#### Step 1.4: Try to Reuse Old Refresh Token (Reuse Detection)
-
-```bash
-curl -X POST http://localhost:8080/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"refresh_token\": \"$REFRESH_TOKEN\"
-  }" | jq '.'
+  -d '{
+    "access_token": "'"$REVOKED_TOKEN"'"
+  }'
 ```
 
 **Expected Response** (401 Unauthorized):
 ```json
 {
-  "error": "token_family_invalidated",
-  "error_description": "Token reuse detected. All tokens in this session have been invalidated. Please re-authenticate.",
-  "correlation_id": "abc123..."
+  "error": "invalid_token",
+  "message": "Token validation failed",
+  "validation_failure": "revoked"
 }
 ```
 
-**Verify**:
-- ✅ Error is `token_family_invalidated`
-- ✅ All tokens in the token family are revoked in database
-- ✅ Even the NEW refresh token no longer works
+**Validation Checks**:
+- ✅ Response status is 401 Unauthorized
+- ✅ `validation_failure` equals `"revoked"`
+- ✅ Token found in revocation cache OR database
 
-**Database Check**:
-```sql
-SELECT id, is_used, is_revoked, revoked_at
-FROM refresh_tokens
-WHERE family_id = (
-  SELECT family_id FROM refresh_tokens
-  WHERE token_hash = SHA256('<old_refresh_token>')
-);
+**2.4. Logout (Revoke All Tokens)**
 
--- Expected: All tokens have is_revoked = true
+```bash
+curl -X POST https://localhost:7xxx/auth/v1/auth/logout \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
-**Result**: ✅ Token reuse detection working correctly
+**Expected Response** (204 No Content)
+
+**Validation Checks**:
+- ✅ Response status is 204
+- ✅ All refresh tokens for user marked as revoked
+- ✅ All active access tokens for user added to revocation list
+- ✅ `auth_audit_log` contains logout event
 
 ---
 
-### Scenario 2: Employee Login Flow ✅
+## Scenario 3: Rate Limiting and Account Lockout
 
-**Objective**: Verify employee authentication uses different validation endpoint
+### Test Objective
+Validate multi-layer rate limiting (account-based, IP-based, progressive delays).
 
-#### Step 2.1: Employee Login
+### Steps
+
+**3.1. Test Account Lockout (5 Failed Attempts)**
 
 ```bash
-curl -X POST http://localhost:8080/auth/login \
+# Attempt 1-5 with invalid password
+for i in {1..5}; do
+  curl -X POST https://localhost:7xxx/auth/v1/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{
+      "username": "customer@example.com",
+      "password": "wrong-password",
+      "user_type": "customer"
+    }'
+  echo "\nAttempt $i completed"
+  sleep 1
+done
+```
+
+**Expected Responses**:
+- Attempts 1-2: 401 Unauthorized (invalid credentials)
+- Attempt 3: 401 Unauthorized with 1 second delay
+- Attempt 4: 401 Unauthorized with 2 second delay
+- Attempt 5: 423 Locked
+
+**Response for Attempt 5** (423 Locked):
+```json
+{
+  "error": "account_locked",
+  "message": "Account locked due to failed login attempts",
+  "locked_until": "2025-10-06T15:30:00Z",
+  "retry_after": 900
+}
+```
+
+**Validation Checks**:
+- ✅ Progressive delays observed (1s → 2s → 4s)
+- ✅ 5th attempt returns 423 Locked
+- ✅ `locked_until` is 15 minutes from lockout
+- ✅ Database `account_lockouts` table has record with `failed_attempts = 5`
+
+**3.2. Test IP-Based Rate Limiting (20 Failed Attempts Across Accounts)**
+
+```bash
+# Attempt 20 failed logins from same IP with different usernames
+for i in {1..20}; do
+  curl -X POST https://localhost:7xxx/auth/v1/auth/login \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"username\": \"user$i@example.com\",
+      \"password\": \"wrong\",
+      \"user_type\": \"customer\"
+    }"
+  sleep 0.5
+done
+```
+
+**Expected Response for Attempt 20** (429 Too Many Requests):
+```json
+{
+  "error": "rate_limit_exceeded",
+  "message": "Too many requests, please retry after indicated time",
+  "retry_after": 900,
+  "limit": 20,
+  "remaining": 0
+}
+```
+
+**Validation Checks**:
+- ✅ 20th attempt returns 429 Too Many Requests
+- ✅ Database `ip_rate_limits` table has blocked IP
+- ✅ `blocked_until` is 15 minutes from block
+- ✅ All subsequent requests from IP return 429 until block expires
+
+---
+
+## Scenario 4: Service-to-Service Authentication
+
+### Test Objective
+Validate service authentication with client credentials.
+
+### Prerequisites
+- Service credential created in database: `client_id = "service-dev-customer-api"`, `client_secret = "<secret>"`
+
+### Steps
+
+**4.1. Service Login**
+
+```bash
+curl -X POST https://localhost:7xxx/auth/v1/auth/service/login \
   -H "Content-Type: application/json" \
   -d '{
-    "username": "employee@maliev.com",
-    "password": "employee123",
-    "user_type": "employee"
-  }' | jq '.'
+    "client_id": "service-dev-customer-api",
+    "client_secret": "<client-secret>"
+  }'
+```
+
+**Expected Response** (200 OK):
+```json
+{
+  "access_token": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9...",
+  "token_type": "Bearer",
+  "expires_in": 900,
+  "service": {
+    "client_id": "service-dev-customer-api",
+    "service_name": "Customer Service"
+  }
+}
+```
+
+**Validation Checks**:
+- ✅ Service access token issued
+- ✅ Token contains service-specific claims (no user context)
+- ✅ `auth_audit_log` contains service authentication event
+
+**4.2. Validate Service Token**
+
+```bash
+SERVICE_TOKEN="eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9..."
+
+curl -X POST https://localhost:7xxx/auth/v1/auth/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "access_token": "'"$SERVICE_TOKEN"'"
+  }'
+```
+
+**Expected Response** (200 OK):
+```json
+{
+  "valid": true,
+  "user": {
+    "user_id": "service-dev-customer-api",
+    "user_type": "service",
+    "username": "Customer Service",
+    "email": null,
+    "roles": ["Service"],
+    "permissions": []
+  }
+}
+```
+
+**Validation Checks**:
+- ✅ `user_type` equals `"service"`
+- ✅ No user email or personal data
+
+---
+
+## Scenario 5: Circuit Breaker and Resilience
+
+### Test Objective
+Validate circuit breaker behavior when external services are unavailable.
+
+### Steps
+
+**5.1. Stop External Customer Service**
+
+```bash
+# Simulate external service failure
+docker stop customer-service-mock
+```
+
+**5.2. Attempt Customer Login (Circuit Breaker Opens)**
+
+```bash
+# Attempt 5 logins to trigger circuit breaker
+for i in {1..5}; do
+  curl -X POST https://localhost:7xxx/auth/v1/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{
+      "username": "customer@example.com",
+      "password": "<password>",
+      "user_type": "customer"
+    }'
+  echo "\nAttempt $i"
+done
+```
+
+**Expected Responses**:
+- Attempts 1-5: 503 Service Unavailable (timeout/connection refused)
+- Attempts 6+: 503 Service Unavailable (circuit breaker open - immediate failure)
+
+**Response** (503):
+```json
+{
+  "error": "service_unavailable",
+  "message": "External validation service unavailable. Circuit breaker is open."
+}
+```
+
+**Validation Checks**:
+- ✅ Circuit opens after 5 consecutive failures
+- ✅ Subsequent requests fail immediately (no timeout wait)
+- ✅ Health check reflects circuit state: `customer_service_circuit: Open`
+
+**5.3. Validate Existing Tokens Still Work**
+
+```bash
+# Use previously issued access token
+curl -X POST https://localhost:7xxx/auth/v1/auth/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "access_token": "'"$EXISTING_TOKEN"'"
+  }'
+```
+
+**Expected Response** (200 OK):
+```json
+{
+  "valid": true,
+  "user": { ... }
+}
+```
+
+**Validation Checks**:
+- ✅ Token validation works even when external service is down
+- ✅ Validation only requires public signing key (no external dependency)
+
+**5.4. Circuit Breaker Recovery**
+
+```bash
+# Restart external service
+docker start customer-service-mock
+
+# Wait 30 seconds for circuit to enter half-open state
+sleep 30
+
+# Attempt login (test request)
+curl -X POST https://localhost:7xxx/auth/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "customer@example.com",
+    "password": "<password>",
+    "user_type": "customer"
+  }'
 ```
 
 **Expected Response** (200 OK):
@@ -217,625 +578,116 @@ curl -X POST http://localhost:8080/auth/login \
   "access_token": "...",
   "refresh_token": "...",
   "token_type": "Bearer",
-  "expires_in": 900
+  "expires_in": 900,
+  "user": { ... }
 }
 ```
 
-#### Step 2.2: Validate Employee Token
+**Validation Checks**:
+- ✅ Circuit enters half-open state after 30 seconds
+- ✅ Test request succeeds → Circuit closes
+- ✅ Health check shows: `customer_service_circuit: Closed`
+- ✅ Normal operations resume
+
+---
+
+## Scenario 6: Health Checks
+
+### Test Objective
+Validate liveness and readiness probes for Kubernetes orchestration.
+
+### Steps
+
+**6.1. Liveness Check**
 
 ```bash
-export EMPLOYEE_ACCESS_TOKEN="<access_token_from_response>"
+curl https://localhost:7xxx/auth/liveness
+```
 
-curl -X POST http://localhost:8080/auth/validate \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"access_token\": \"$EMPLOYEE_ACCESS_TOKEN\"
-  }" | jq '.'
+**Expected Response** (200 OK):
+```
+Healthy
+```
+
+**6.2. Readiness Check**
+
+```bash
+curl https://localhost:7xxx/auth/readiness
 ```
 
 **Expected Response** (200 OK):
 ```json
 {
-  "user_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-  "user_type": "employee",
-  "username": "employee@maliev.com",
-  "email": "employee@maliev.com",
-  "roles": ["employee", "admin"],
-  "permissions": ["manage_orders", "manage_users", "view_analytics"]
-}
-```
-
-**Verify**:
-- ✅ `user_type` is "employee"
-- ✅ Different permissions than customer
-
-**Result**: ✅ Employee authentication working correctly
-
----
-
-### Scenario 3: Rate Limiting (Account-Based) ⚠️
-
-**Objective**: Verify account lockout after 5 failed attempts
-
-#### Step 3.1: Make 5 Failed Login Attempts
-
-```bash
-# Attempt 1
-curl -i -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "WRONG_PASSWORD",
-    "user_type": "customer"
-  }'
-# Expected: 401 Unauthorized, X-RateLimit-Remaining: 4
-
-# Attempt 2
-curl -i -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "WRONG_PASSWORD",
-    "user_type": "customer"
-  }'
-# Expected: 401 Unauthorized, X-RateLimit-Remaining: 3
-
-# Attempt 3 (Progressive delay: 1 second)
-curl -i -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "WRONG_PASSWORD",
-    "user_type": "customer"
-  }'
-# Expected: 401 Unauthorized, X-RateLimit-Remaining: 2, ~1s delay
-
-# Attempt 4 (Progressive delay: 2 seconds)
-curl -i -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "WRONG_PASSWORD",
-    "user_type": "customer"
-  }'
-# Expected: 401 Unauthorized, X-RateLimit-Remaining: 1, ~2s delay
-
-# Attempt 5 (Progressive delay: 4 seconds)
-curl -i -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "WRONG_PASSWORD",
-    "user_type": "customer"
-  }'
-# Expected: 429 Too Many Requests, X-RateLimit-Remaining: 0, ~4s delay
-```
-
-**Expected Response on 5th Attempt** (429 Too Many Requests):
-```json
-{
-  "error": "too_many_requests",
-  "error_description": "Too many failed login attempts. Account locked for 15 minutes.",
-  "retry_after": 900,
-  "correlation_id": "..."
-}
-```
-
-**Headers**:
-- `Retry-After`: 900 (15 minutes in seconds)
-- `X-RateLimit-Limit`: 5
-- `X-RateLimit-Remaining`: 0
-- `X-RateLimit-Reset`: Unix timestamp (current time + 900 seconds)
-
-#### Step 3.2: Verify Lockout Persists
-
-```bash
-# Immediate retry should also fail
-curl -i -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "test123",
-    "user_type": "customer"
-  }'
-# Expected: 429 Too Many Requests (even with CORRECT password)
-```
-
-#### Step 3.3: Wait 15 Minutes (Optional)
-
-```bash
-# Wait 15 minutes or adjust system time for testing
-sleep 900
-
-# Retry with correct password
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "test123",
-    "user_type": "customer"
-  }' | jq '.'
-
-# Expected: 200 OK (account unlocked)
-```
-
-**Result**: ✅ Account-based rate limiting working correctly
-
----
-
-### Scenario 4: Rate Limiting (IP-Based) ⚠️
-
-**Objective**: Verify IP blocking after 20 attempts across different accounts
-
-#### Step 4.1: Make 20 Failed Attempts Across Different Accounts
-
-```bash
-for i in {1..20}; do
-  echo "Attempt $i from IP"
-  curl -i -X POST http://localhost:8080/auth/login \
-    -H "Content-Type: application/json" \
-    -d "{
-      \"username\": \"user$i@example.com\",
-      \"password\": \"WRONG\",
-      \"user_type\": \"customer\"
-    }"
-  sleep 0.5
-done
-
-# Expected: 20th attempt returns 429 with IP-based rate limit error
-```
-
-**Expected Response on 20th Attempt** (429 Too Many Requests):
-```json
-{
-  "error": "too_many_requests",
-  "error_description": "Too many requests from this IP address. Please try again later.",
-  "retry_after": 900,
-  "correlation_id": "..."
-}
-```
-
-**Verify**:
-- ✅ IP address is blocked even for different usernames
-- ✅ Retry-After header is present
-
-**Result**: ✅ IP-based rate limiting working correctly
-
----
-
-### Scenario 5: Access Token Revocation 🔒
-
-**Objective**: Test distributed token revocation
-
-#### Step 5.1: Login and Get Access Token
-
-```bash
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "test123",
-    "user_type": "customer"
-  }' | jq '.'
-
-export REVOKE_ACCESS_TOKEN="<access_token>"
-```
-
-#### Step 5.2: Validate Token (Before Revocation)
-
-```bash
-curl -X POST http://localhost:8080/auth/validate \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"access_token\": \"$REVOKE_ACCESS_TOKEN\"
-  }" | jq '.'
-
-# Expected: 200 OK (token is valid)
-```
-
-#### Step 5.3: Revoke Access Token
-
-```bash
-curl -i -X POST http://localhost:8080/auth/revoke \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $REVOKE_ACCESS_TOKEN" \
-  -d "{
-    \"access_token\": \"$REVOKE_ACCESS_TOKEN\",
-    \"reason\": \"user_logout\"
-  }"
-
-# Expected: 204 No Content
-```
-
-#### Step 5.4: Validate Token (After Revocation)
-
-```bash
-curl -X POST http://localhost:8080/auth/validate \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"access_token\": \"$REVOKE_ACCESS_TOKEN\"
-  }" | jq '.'
-```
-
-**Expected Response** (401 Unauthorized):
-```json
-{
-  "error": "token_revoked",
-  "error_description": "The access token has been revoked",
-  "correlation_id": "..."
-}
-```
-
-**Database Check**:
-```sql
-SELECT jti, revoked_at, reason
-FROM revoked_access_tokens
-WHERE jti = '<jti_from_token>';
-
--- Expected: Entry exists with reason = 'user_logout'
-```
-
-**Result**: ✅ Access token revocation working correctly
-
----
-
-### Scenario 6: Circuit Breaker (External Service Failure) 🔌
-
-**Objective**: Test circuit breaker behavior when external validation service is down
-
-#### Step 6.1: Stop External Validation Service
-
-```bash
-# Stop mock customer validation service (or simulate network failure)
-# Method depends on your setup
-```
-
-#### Step 6.2: Make 5 Login Attempts
-
-```bash
-for i in {1..5}; do
-  echo "Attempt $i"
-  curl -i -X POST http://localhost:8080/auth/login \
-    -H "Content-Type: application/json" \
-    -d '{
-      "username": "customer@example.com",
-      "password": "test123",
-      "user_type": "customer"
-    }'
-  sleep 1
-done
-```
-
-**Expected Behavior**:
-- Attempts 1-4: May timeout or return errors (circuit breaker tracking failures)
-- Attempt 5: Circuit breaker opens
-
-**Expected Response After Circuit Opens** (503 Service Unavailable):
-```json
-{
-  "error": "service_unavailable",
-  "error_description": "Authentication service is temporarily unavailable. Please try again later.",
-  "correlation_id": "..."
-}
-```
-
-#### Step 6.3: Check Health Endpoint
-
-```bash
-curl http://localhost:8080/auth/readiness | jq '.'
-```
-
-**Expected Response** (503 Service Unavailable):
-```json
-{
-  "status": "Degraded",
-  "checks": [
-    {
-      "name": "PostgreSQL",
-      "status": "Healthy"
-    },
-    {
-      "name": "CustomerValidationService",
-      "status": "Unhealthy",
-      "description": "Circuit breaker open"
-    }
-  ]
-}
-```
-
-#### Step 6.4: Restart External Service and Wait 30 Seconds
-
-```bash
-# Restart mock service
-# Wait 30 seconds (circuit breaker duration)
-sleep 30
-
-# Retry login
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "test123",
-    "user_type": "customer"
-  }' | jq '.'
-
-# Expected: 200 OK (circuit breaker closed)
-```
-
-**Result**: ✅ Circuit breaker working correctly
-
----
-
-### Scenario 7: Token Expiration ⏰
-
-**Objective**: Verify access token expiration handling
-
-#### Step 7.1: Login and Extract Token
-
-```bash
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "test123",
-    "user_type": "customer"
-  }' | jq '.'
-
-export EXPIRY_ACCESS_TOKEN="<access_token>"
-```
-
-#### Step 7.2: Decode Token to Check Expiration
-
-```bash
-# Decode JWT (using jwt.io or command line)
-echo $EXPIRY_ACCESS_TOKEN | cut -d'.' -f2 | base64 -d | jq '.'
-
-# Check 'exp' claim (should be current_time + 900 seconds)
-```
-
-#### Step 7.3: Wait 16 Minutes (or Adjust System Time)
-
-```bash
-# Option 1: Wait 16 minutes
-sleep 960
-
-# Option 2: Adjust system time for testing (requires elevated permissions)
-# Not recommended for production testing
-```
-
-#### Step 7.4: Validate Expired Token
-
-```bash
-curl -X POST http://localhost:8080/auth/validate \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"access_token\": \"$EXPIRY_ACCESS_TOKEN\"
-  }" | jq '.'
-```
-
-**Expected Response** (401 Unauthorized):
-```json
-{
-  "error": "token_expired",
-  "error_description": "The access token has expired",
-  "correlation_id": "..."
-}
-```
-
-**Result**: ✅ Token expiration working correctly
-
----
-
-### Scenario 8: Distributed Tracing (Correlation ID) 🔍
-
-**Objective**: Verify correlation ID propagation
-
-#### Step 8.1: Send Request with Custom Correlation ID
-
-```bash
-curl -i -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -H "X-Correlation-ID: my-custom-trace-123" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "test123",
-    "user_type": "customer"
-  }'
-```
-
-**Expected**:
-- Response header includes `X-Correlation-ID: my-custom-trace-123`
-- Logs show correlation ID in all log entries for this request
-
-#### Step 8.2: Send Request Without Correlation ID
-
-```bash
-curl -i -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "customer@example.com",
-    "password": "test123",
-    "user_type": "customer"
-  }'
-```
-
-**Expected**:
-- Response header includes `X-Correlation-ID: <auto-generated-uuid>`
-- Service generates correlation ID automatically
-
-**Log Check**:
-```bash
-# Check logs for correlation ID
-tail -f /var/log/maliev-auth-service.log | grep "my-custom-trace-123"
-```
-
-**Result**: ✅ Correlation ID propagation working correctly
-
----
-
-## Health Checks
-
-### Liveness Probe
-
-```bash
-curl http://localhost:8080/auth/liveness
-
-# Expected: 200 OK
-# Response: "Healthy"
-```
-
-### Readiness Probe
-
-```bash
-curl http://localhost:8080/auth/readiness | jq '.'
-
-# Expected: 200 OK (if all dependencies healthy)
-# Response:
-{
   "status": "Healthy",
-  "checks": [
-    {
-      "name": "PostgreSQL",
+  "checks": {
+    "database": {
       "status": "Healthy",
-      "description": "Database connection successful"
+      "description": "PostgreSQL connection successful"
     },
-    {
-      "name": "CustomerValidationService",
+    "customer_service_circuit": {
       "status": "Healthy",
-      "description": "Circuit breaker closed"
+      "description": "Circuit closed"
     },
-    {
-      "name": "EmployeeValidationService",
+    "employee_service_circuit": {
       "status": "Healthy",
-      "description": "Circuit breaker closed"
+      "description": "Circuit closed"
     }
-  ]
+  }
 }
 ```
 
----
-
-## Database Verification Queries
-
-### Check Token Families
-
-```sql
-SELECT family_id, user_id, user_type, created_at, last_used_at
-FROM token_families
-ORDER BY created_at DESC
-LIMIT 10;
-```
-
-### Check Refresh Tokens
-
-```sql
-SELECT id, user_id, user_type, is_used, is_revoked, created_at, expires_at
-FROM refresh_tokens
-ORDER BY created_at DESC
-LIMIT 20;
-```
-
-### Check Revoked Access Tokens
-
-```sql
-SELECT jti, revoked_at, expires_at, reason
-FROM revoked_access_tokens
-ORDER BY revoked_at DESC;
-```
-
-### Count Active vs Revoked Tokens
-
-```sql
-SELECT
-  is_revoked,
-  is_used,
-  COUNT(*) as count
-FROM refresh_tokens
-GROUP BY is_revoked, is_used;
-```
-
----
-
-## Performance Testing
-
-### Basic Load Test (Optional)
-
-```bash
-# Using Apache Bench (ab)
-ab -n 1000 -c 10 -p login-payload.json -T application/json \
-  http://localhost:8080/auth/login
-
-# Expected:
-# - Requests per second: >100
-# - p95 latency: <200ms
-```
-
-```json
-// login-payload.json
-{
-  "username": "customer@example.com",
-  "password": "test123",
-  "user_type": "customer"
-}
-```
+**Validation Checks**:
+- ✅ Overall `status` is `"Healthy"`
+- ✅ Database check passes
+- ✅ Circuit breaker states reported
+- ✅ Response time < 100ms
 
 ---
 
 ## Cleanup
 
-### Reset Database
+```powershell
+# Stop application (Ctrl+C)
 
-```bash
-# Drop and recreate database
-psql -U postgres -c "DROP DATABASE auth_db;"
-psql -U postgres -c "CREATE DATABASE auth_db;"
+# Stop and remove test database
+docker-compose -f docker-compose.test.yml down -v
 
-# Reapply migrations
-dotnet ef database update --project Maliev.AuthService.Data
-```
-
-### Clear Rate Limit Cache
-
-```bash
-# Restart service to clear in-memory rate limit state
-# Or wait 15 minutes for automatic reset
+# Clear environment variables
+Remove-Item Env:ConnectionStrings__AuthServiceDbContext
+Remove-Item Env:Jwt__*
+Remove-Item Env:ExternalServices__*
+Remove-Item Env:CORS_ALLOWED_ORIGINS
 ```
 
 ---
 
-## Troubleshooting
+## Success Criteria
 
-### Issue: External Validation Service Not Responding
+✅ **All 6 scenarios completed successfully**
+- ✅ Scenario 1: Customer login, token validation, refresh, reuse detection
+- ✅ Scenario 2: Employee login, token revocation, logout
+- ✅ Scenario 3: Rate limiting (account + IP), progressive delays, lockouts
+- ✅ Scenario 4: Service-to-service authentication
+- ✅ Scenario 5: Circuit breaker (open, half-open, closed states)
+- ✅ Scenario 6: Health checks (liveness + readiness)
 
-**Symptom**: All login attempts return 503
-**Solution**: Check `appsettings.Development.json` for correct service URLs
+✅ **Security validations passed**:
+- ✅ EdDSA (Ed25519) JWT signature verification
+- ✅ Refresh token rotation working
+- ✅ Token reuse detection invalidates token family
+- ✅ Distributed token revocation propagates in <2s
+- ✅ SHA-256 hash storage for refresh tokens and service secrets
+- ✅ Multi-layer rate limiting prevents brute force
 
-### Issue: Database Connection Failed
+✅ **Performance validated**:
+- ✅ Authentication: <200ms p95
+- ✅ Token validation: <50ms p95
+- ✅ Circuit breaker: 30s recovery time
 
-**Symptom**: Readiness probe returns unhealthy
-**Solution**: Verify PostgreSQL is running and connection string is correct
+✅ **Observability confirmed**:
+- ✅ Structured logs (JSON) to stdout
+- ✅ Audit trail in `auth_audit_logs` table
+- ✅ Correlation ID propagation
+- ✅ Health checks reflect system state
 
-### Issue: Token Rotation Not Working
-
-**Symptom**: Old refresh token still works after rotation
-**Solution**: Check database to verify `is_used` flag is set
-
-### Issue: Rate Limiting Not Applied
-
-**Symptom**: Can make >5 failed attempts without lockout
-**Solution**: Verify rate limiting middleware is registered in Program.cs
-
----
-
-## Next Steps
-
-After manual testing:
-1. ✅ All scenarios pass → Proceed to automated integration tests
-2. ⚠️ Any scenario fails → Fix issues and re-test
-3. 📝 Document any edge cases discovered during testing
-
----
-
-**Document Status**: Complete ✅
-**Test Coverage**: 8 primary scenarios
-**Next Artifact**: Automated integration tests implementation
+**Status**: Feature 001-create-a-jwt is production-ready! 🎉

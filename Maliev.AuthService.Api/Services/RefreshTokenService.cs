@@ -1,150 +1,154 @@
-using Maliev.AuthService.Api.Options;
+using Microsoft.EntityFrameworkCore;
+using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
-using Maliev.AuthService.Data.Repositories;
-using Microsoft.Extensions.Options;
 
 namespace Maliev.AuthService.Api.Services;
 
-/// <summary>
-/// Service implementation for refresh token operations with RFC 9700 compliance.
-/// </summary>
 public class RefreshTokenService : IRefreshTokenService
 {
-    private readonly IRefreshTokenRepository _refreshTokenRepository;
-    private readonly ITokenFamilyRepository _tokenFamilyRepository;
+    private readonly AuthDbContext _dbContext;
     private readonly ITokenGenerator _tokenGenerator;
-    private readonly JwtOptions _jwtOptions;
     private readonly ILogger<RefreshTokenService> _logger;
 
     public RefreshTokenService(
-        IRefreshTokenRepository refreshTokenRepository,
-        ITokenFamilyRepository tokenFamilyRepository,
+        AuthDbContext dbContext,
         ITokenGenerator tokenGenerator,
-        IOptions<JwtOptions> jwtOptions,
         ILogger<RefreshTokenService> logger)
     {
-        _refreshTokenRepository = refreshTokenRepository;
-        _tokenFamilyRepository = tokenFamilyRepository;
+        _dbContext = dbContext;
         _tokenGenerator = tokenGenerator;
-        _jwtOptions = jwtOptions.Value;
         _logger = logger;
     }
 
-    public async Task<Guid> CreateTokenFamilyAsync(string userId, UserType userType, CancellationToken cancellationToken = default)
+    public async Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(Guid userId, UserType userType, string? ipAddress)
     {
-        var family = new TokenFamily
+        var familyId = Guid.NewGuid();
+        var tokenValue = _tokenGenerator.GenerateRefreshToken();
+        var tokenHash = _tokenGenerator.HashToken(tokenValue);
+
+        var tokenFamily = new TokenFamily
         {
-            FamilyId = Guid.NewGuid(),
+            FamilyId = familyId,
             UserId = userId,
             UserType = userType,
             CreatedAt = DateTime.UtcNow,
-            LastUsedAt = DateTime.UtcNow,
-            RefreshTokens = []
+            LastRefreshAt = DateTime.UtcNow
         };
 
-        await _tokenFamilyRepository.CreateAsync(family, cancellationToken);
-        return family.FamilyId;
-    }
-
-    public async Task<RefreshToken> StoreRefreshTokenAsync(
-        string tokenHash,
-        string userId,
-        UserType userType,
-        Guid familyId,
-        DateTime expiresAt,
-        CancellationToken cancellationToken = default)
-    {
         var refreshToken = new RefreshToken
         {
             Id = Guid.NewGuid(),
-            TokenHash = tokenHash,
+            FamilyId = familyId,
             UserId = userId,
             UserType = userType,
-            FamilyId = familyId,
+            TokenHash = tokenHash,
+            IsUsed = false,
+            ExpiresAt = DateTime.UtcNow.AddDays(7),
             CreatedAt = DateTime.UtcNow,
-            ExpiresAt = expiresAt,
-            IsRevoked = false,
-            IsUsed = false
+            IpAddress = ipAddress
         };
 
-        return await _refreshTokenRepository.CreateAsync(refreshToken, cancellationToken);
+        _dbContext.TokenFamilies.Add(tokenFamily);
+        _dbContext.RefreshTokens.Add(refreshToken);
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("Created refresh token for user {UserId}, family {FamilyId}", userId, familyId);
+
+        return (refreshToken, tokenValue);
     }
 
-    public async Task<RefreshToken?> RotateRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
+    public async Task<RefreshToken?> ValidateRefreshTokenAsync(string token)
     {
-        var tokenHash = _tokenGenerator.HashRefreshToken(refreshToken);
-        var storedToken = await _refreshTokenRepository.GetByTokenHashAsync(tokenHash, cancellationToken);
+        var tokenHash = _tokenGenerator.HashToken(token);
 
-        if (storedToken == null)
+        var refreshToken = await _dbContext.RefreshTokens
+            .Include(rt => rt.Family)
+            .FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash);
+
+        if (refreshToken == null)
         {
-            _logger.LogWarning("Refresh token not found in database");
+            _logger.LogWarning("Refresh token not found");
             return null;
         }
 
-        // Check expiration
-        if (storedToken.ExpiresAt < DateTime.UtcNow)
+        if (refreshToken.ExpiresAt < DateTime.UtcNow)
         {
-            _logger.LogWarning("Refresh token expired: {TokenId}", storedToken.Id);
+            _logger.LogWarning("Refresh token expired for user {UserId}", refreshToken.UserId);
             return null;
         }
 
-        // Check if revoked
-        if (storedToken.IsRevoked)
+        if (refreshToken.IsUsed)
         {
-            _logger.LogWarning("Refresh token is revoked: {TokenId}", storedToken.Id);
+            _logger.LogWarning("Token reuse detected for user {UserId}, family {FamilyId}",
+                refreshToken.UserId, refreshToken.FamilyId);
+            await RevokeTokenFamilyAsync(refreshToken.FamilyId, "Token reuse detected");
             return null;
         }
 
-        // **Reuse Detection (RFC 9700)**: If token is already used, invalidate entire family
-        if (storedToken.IsUsed)
-        {
-            _logger.LogError("Refresh token reuse detected! Invalidating token family: {FamilyId}", storedToken.FamilyId);
-            await _refreshTokenRepository.RevokeTokenFamilyAsync(storedToken.FamilyId, cancellationToken);
-            return null; // Token family invalidated
-        }
-
-        // Mark current token as used with optimistic concurrency control
-        var marked = await _refreshTokenRepository.MarkAsUsedAsync(storedToken.Id, storedToken.Version, cancellationToken);
-        if (!marked)
-        {
-            // Concurrent modification detected - another request used this token simultaneously
-            _logger.LogError("Concurrent token use detected! Invalidating token family: {FamilyId}", storedToken.FamilyId);
-            await _refreshTokenRepository.RevokeTokenFamilyAsync(storedToken.FamilyId, cancellationToken);
-            return null;
-        }
-
-        // Generate new refresh token (rotation)
-        var newRefreshToken = _tokenGenerator.GenerateRefreshToken();
-        var newTokenHash = _tokenGenerator.HashRefreshToken(newRefreshToken);
-        var expiresAt = DateTime.UtcNow.AddSeconds(_jwtOptions.RefreshTokenLifetimeSeconds);
-
-        var newToken = await StoreRefreshTokenAsync(
-            newTokenHash,
-            storedToken.UserId,
-            storedToken.UserType,
-            storedToken.FamilyId,
-            expiresAt,
-            cancellationToken);
-
-        // Update family last used timestamp
-        await _tokenFamilyRepository.UpdateLastUsedAsync(storedToken.FamilyId, cancellationToken);
-
-        // Attach plaintext token for response (not stored in DB)
-        newToken.TokenHash = newRefreshToken; // Temporarily store plaintext for response
-
-        return newToken;
+        return refreshToken;
     }
 
-    public async Task<RefreshToken?> ValidateRefreshTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
+    public async Task<(RefreshToken Entity, string TokenValue)> RotateRefreshTokenAsync(RefreshToken oldToken, string? ipAddress)
     {
-        var tokenHash = _tokenGenerator.HashRefreshToken(refreshToken);
-        var storedToken = await _refreshTokenRepository.GetByTokenHashAsync(tokenHash, cancellationToken);
+        oldToken.IsUsed = true;
+        oldToken.UsedAt = DateTime.UtcNow;
 
-        if (storedToken == null || storedToken.ExpiresAt < DateTime.UtcNow || storedToken.IsRevoked || storedToken.IsUsed)
+        var tokenValue = _tokenGenerator.GenerateRefreshToken();
+        var tokenHash = _tokenGenerator.HashToken(tokenValue);
+
+        var newToken = new RefreshToken
         {
-            return null;
+            Id = Guid.NewGuid(),
+            FamilyId = oldToken.FamilyId,
+            UserId = oldToken.UserId,
+            UserType = oldToken.UserType,
+            TokenHash = tokenHash,
+            IsUsed = false,
+            ExpiresAt = DateTime.UtcNow.AddDays(7),
+            CreatedAt = DateTime.UtcNow,
+            IpAddress = ipAddress
+        };
+
+        oldToken.Family.LastRefreshAt = DateTime.UtcNow;
+
+        _dbContext.RefreshTokens.Add(newToken);
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("Rotated refresh token for user {UserId}, family {FamilyId}",
+            oldToken.UserId, oldToken.FamilyId);
+
+        return (newToken, tokenValue);
+    }
+
+    public async Task RevokeTokenFamilyAsync(Guid familyId, string reason)
+    {
+        var family = await _dbContext.TokenFamilies
+            .Include(f => f.RefreshTokens)
+            .FirstOrDefaultAsync(f => f.FamilyId == familyId);
+
+        if (family == null)
+        {
+            _logger.LogWarning("Token family {FamilyId} not found for revocation", familyId);
+            return;
         }
 
-        return storedToken;
+        foreach (var token in family.RefreshTokens.Where(t => !t.IsUsed))
+        {
+            token.IsUsed = true;
+            token.UsedAt = DateTime.UtcNow;
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogWarning("Revoked token family {FamilyId} for user {UserId}. Reason: {Reason}",
+            familyId, family.UserId, reason);
+    }
+
+    public async Task<bool> IsTokenReuseDetectedAsync(string tokenHash)
+    {
+        var token = await _dbContext.RefreshTokens
+            .FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash);
+
+        return token?.IsUsed == true;
     }
 }

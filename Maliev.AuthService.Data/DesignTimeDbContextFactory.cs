@@ -5,21 +5,22 @@ using Microsoft.EntityFrameworkCore.Design;
 namespace Maliev.AuthService.Data;
 
 /// <summary>
-/// Factory for creating RefreshTokenDbContext at design time (for EF Core migrations).
-/// This allows migrations to be created without running the full application.
+/// Design-time factory for EF Core migrations.
+/// Uses environment variable AuthDbContext for connection string.
 /// </summary>
-public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<RefreshTokenDbContext>
+public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<AuthDbContext>
 {
-    public RefreshTokenDbContext CreateDbContext(string[] args)
+    public AuthDbContext CreateDbContext(string[] args)
     {
-        // Use a temporary connection string for migrations
-        // The actual connection string will be provided at runtime via configuration
-        var connectionString = Environment.GetEnvironmentVariable("RefreshTokenDbContext")
-            ?? "Server=localhost;Port=5432;Database=auth_db_design;User Id=postgres;Password=postgres;";
+        var connectionString = Environment.GetEnvironmentVariable("AuthDbContext")
+            ?? throw new InvalidOperationException(
+                "AuthDbContext environment variable not set. " +
+                "Set it before running migrations: " +
+                "export AuthDbContext=\"Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=yourpassword;\"");
 
-        var optionsBuilder = new DbContextOptionsBuilder<RefreshTokenDbContext>()
-            .UseNpgsql(connectionString);
+        var optionsBuilder = new DbContextOptionsBuilder<AuthDbContext>();
+        optionsBuilder.UseNpgsql(connectionString);
 
-        return new RefreshTokenDbContext(optionsBuilder.Options);
+        return new AuthDbContext(optionsBuilder.Options);
     }
 }

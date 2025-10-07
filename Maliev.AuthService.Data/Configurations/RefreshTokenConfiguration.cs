@@ -4,79 +4,36 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Maliev.AuthService.Data.Configurations;
 
-/// <summary>
-/// Entity Framework configuration for RefreshToken entity
-/// </summary>
 public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
 {
     public void Configure(EntityTypeBuilder<RefreshToken> builder)
     {
         builder.ToTable("refresh_tokens");
 
-        builder.HasKey(rt => rt.Id);
+        builder.HasKey(e => e.Id);
+        builder.Property(e => e.Id).HasColumnName("id");
 
-        builder.Property(rt => rt.TokenHash)
-            .IsRequired()
-            .HasMaxLength(64) // SHA-256 produces 64 hex characters
-            .HasColumnName("token_hash");
+        builder.Property(e => e.FamilyId).HasColumnName("family_id").IsRequired();
+        builder.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+        builder.Property(e => e.UserType).HasColumnName("user_type").IsRequired().HasConversion<string>();
+        builder.Property(e => e.TokenHash).HasColumnName("token_hash").HasMaxLength(64).IsRequired();
+        builder.Property(e => e.IsUsed).HasColumnName("is_used").HasDefaultValue(false);
+        builder.Property(e => e.UsedAt).HasColumnName("used_at");
+        builder.Property(e => e.ExpiresAt).HasColumnName("expires_at").IsRequired();
+        builder.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("NOW()");
+        builder.Property(e => e.IpAddress).HasColumnName("ip_address").HasMaxLength(45);
 
-        builder.Property(rt => rt.UserId)
-            .IsRequired()
-            .HasMaxLength(255)
-            .HasColumnName("user_id");
+        // Indexes
+        builder.HasIndex(e => e.TokenHash).IsUnique().HasDatabaseName("idx_refresh_tokens_token_hash");
+        builder.HasIndex(e => e.FamilyId).HasDatabaseName("idx_refresh_tokens_family_id");
+        builder.HasIndex(e => e.UserId).HasDatabaseName("idx_refresh_tokens_user_id");
+        builder.HasIndex(e => e.ExpiresAt).HasDatabaseName("idx_refresh_tokens_expires_at");
 
-        builder.Property(rt => rt.UserType)
-            .IsRequired()
-            .HasConversion<string>()
-            .HasColumnName("user_type");
-
-        builder.Property(rt => rt.FamilyId)
-            .IsRequired()
-            .HasColumnName("family_id");
-
-        builder.Property(rt => rt.CreatedAt)
-            .IsRequired()
-            .HasColumnName("created_at");
-
-        builder.Property(rt => rt.ExpiresAt)
-            .IsRequired()
-            .HasColumnName("expires_at");
-
-        builder.Property(rt => rt.IsRevoked)
-            .IsRequired()
-            .HasDefaultValue(false)
-            .HasColumnName("is_revoked");
-
-        builder.Property(rt => rt.IsUsed)
-            .IsRequired()
-            .HasDefaultValue(false)
-            .HasColumnName("is_used");
-
-        builder.Property(rt => rt.RevokedAt)
-            .HasColumnName("revoked_at");
-
-        builder.Property(rt => rt.Version)
-            .IsRowVersion()
-            .HasColumnName("version");
-
-        // Indexes for performance
-        builder.HasIndex(rt => rt.TokenHash)
-            .IsUnique()
-            .HasDatabaseName("ix_refresh_tokens_token_hash");
-
-        builder.HasIndex(rt => rt.FamilyId)
-            .HasDatabaseName("ix_refresh_tokens_family_id");
-
-        builder.HasIndex(rt => rt.UserId)
-            .HasDatabaseName("ix_refresh_tokens_user_id");
-
-        builder.HasIndex(rt => rt.ExpiresAt)
-            .HasDatabaseName("ix_refresh_tokens_expires_at");
-
-        // Foreign key to token family
-        builder.HasOne(rt => rt.TokenFamily)
-            .WithMany(tf => tf.RefreshTokens)
-            .HasForeignKey(rt => rt.FamilyId)
+        // Foreign key
+        builder.HasOne(e => e.Family)
+            .WithMany(f => f.RefreshTokens)
+            .HasForeignKey(e => e.FamilyId)
+            .HasConstraintName("fk_refresh_tokens_token_families")
             .OnDelete(DeleteBehavior.Cascade);
     }
 }

@@ -1,79 +1,79 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Security.Cryptography;
-using Maliev.AuthService.Api.Options;
-using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Maliev.AuthService.Data.DbContexts;
 
 namespace Maliev.AuthService.Api.Services;
 
-/// <summary>
-/// Service implementation for validating JWT access tokens.
-/// </summary>
 public class TokenValidator : ITokenValidator
 {
-    private readonly JwtOptions _jwtOptions;
-    private readonly ECDsa _ecdsaKey;
-    private readonly JwtSecurityTokenHandler _tokenHandler;
-    private readonly TokenValidationParameters _validationParameters;
+    private readonly IConfiguration _configuration;
+    private readonly AuthDbContext _dbContext;
+    private readonly ILogger<TokenValidator> _logger;
 
-    public TokenValidator(IOptions<JwtOptions> jwtOptions)
+    public TokenValidator(IConfiguration configuration, AuthDbContext dbContext, ILogger<TokenValidator> logger)
     {
-        _jwtOptions = jwtOptions.Value;
-        _tokenHandler = new JwtSecurityTokenHandler();
-
-        // Load ECDSA P-256 private key from Base64-encoded raw bytes (32 bytes)
-        // Public key is automatically derived from private key
-        var privateKeyBytes = Convert.FromBase64String(_jwtOptions.SecurityKey);
-
-        _ecdsaKey = ECDsa.Create(new ECParameters
-        {
-            Curve = ECCurve.NamedCurves.nistP256,
-            D = privateKeyBytes
-        });
-
-        var securityKey = new ECDsaSecurityKey(_ecdsaKey);
-
-        _validationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = _jwtOptions.Issuer,
-            ValidateAudience = true,
-            ValidAudience = _jwtOptions.Audience,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = securityKey,
-            ClockSkew = TimeSpan.FromMinutes(5) // Allow 5 minutes clock skew
-        };
+        _configuration = configuration;
+        _dbContext = dbContext;
+        _logger = logger;
     }
 
-    public async Task<ClaimsPrincipal?> ValidateTokenAsync(string token)
+    public Task<ClaimsPrincipal?> ValidateAccessTokenAsync(string token)
     {
         try
         {
-            var principal = _tokenHandler.ValidateToken(token, _validationParameters, out var validatedToken);
-            return await Task.FromResult(principal);
+            var publicKeyPem = _configuration["Jwt:PublicKey"]
+                ?? throw new InvalidOperationException("JWT public key not configured");
+
+            // Decode Base64-encoded PEM
+            var publicKeyBytes = Convert.FromBase64String(publicKeyPem);
+            var publicKeyString = System.Text.Encoding.UTF8.GetString(publicKeyBytes);
+
+            // Import RSA public key from PEM
+            var rsa = System.Security.Cryptography.RSA.Create();
+            rsa.ImportFromPem(publicKeyString);
+
+            var validationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidateLifetime = true,
+                ValidateIssuerSigningKey = true,
+                ValidIssuer = _configuration["Jwt:Issuer"],
+                ValidAudience = _configuration["Jwt:Audience"],
+                IssuerSigningKey = new RsaSecurityKey(rsa),
+                ClockSkew = TimeSpan.Zero
+            };
+
+            // Disable claim type mapping to keep original claim names like "sub" instead of full URIs
+            var tokenHandler = new JwtSecurityTokenHandler { MapInboundClaims = false };
+            var principal = tokenHandler.ValidateToken(token, validationParameters, out var validatedToken);
+
+            if (validatedToken is not JwtSecurityToken jwtToken ||
+                !jwtToken.Header.Alg.Equals(SecurityAlgorithms.RsaSha256, StringComparison.InvariantCultureIgnoreCase))
+            {
+                _logger.LogWarning("Invalid token algorithm");
+                return Task.FromResult<ClaimsPrincipal?>(null);
+            }
+
+            return Task.FromResult<ClaimsPrincipal?>(principal);
         }
-        catch (SecurityTokenException)
+        catch (SecurityTokenException ex)
         {
-            return null; // Token validation failed
+            _logger.LogWarning(ex, "Token validation failed");
+            return Task.FromResult<ClaimsPrincipal?>(null);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            return null; // Unexpected error during validation
+            _logger.LogError(ex, "Unexpected error during token validation");
+            return Task.FromResult<ClaimsPrincipal?>(null);
         }
     }
 
-    public string? ExtractJti(string token)
+    public async Task<bool> IsTokenRevokedAsync(string jti)
     {
-        try
-        {
-            var jwtToken = _tokenHandler.ReadJwtToken(token);
-            return jwtToken.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Jti)?.Value;
-        }
-        catch
-        {
-            return null;
-        }
+        return await _dbContext.RevokedTokens
+            .AnyAsync(rt => rt.Jti == jti && rt.ExpiresAt > DateTime.UtcNow);
     }
 }

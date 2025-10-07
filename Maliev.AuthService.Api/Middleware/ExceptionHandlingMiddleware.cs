@@ -1,26 +1,18 @@
 using System.Net;
 using System.Text.Json;
-using Maliev.AuthService.Api.Models;
+using Maliev.AuthService.Api.Models.Response;
 
 namespace Maliev.AuthService.Api.Middleware;
 
-/// <summary>
-/// Global exception handling middleware for consistent error responses.
-/// </summary>
 public class ExceptionHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
-    private readonly IHostEnvironment _environment;
 
-    public ExceptionHandlingMiddleware(
-        RequestDelegate next,
-        ILogger<ExceptionHandlingMiddleware> logger,
-        IHostEnvironment environment)
+    public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
     {
         _next = next;
         _logger = logger;
-        _environment = environment;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -31,36 +23,23 @@ public class ExceptionHandlingMiddleware
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unhandled exception occurred");
+            _logger.LogError(ex, "An unhandled exception occurred");
             await HandleExceptionAsync(context, ex);
         }
     }
 
-    private async Task HandleExceptionAsync(HttpContext context, Exception exception)
+    private static async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
         context.Response.ContentType = "application/json";
+        context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
 
-        var (statusCode, errorCode, message) = exception switch
+        var response = new ErrorResponse
         {
-            ArgumentException => (HttpStatusCode.BadRequest, "invalid_argument", exception.Message),
-            UnauthorizedAccessException => (HttpStatusCode.Unauthorized, "unauthorized", "Unauthorized access"),
-            _ => (HttpStatusCode.InternalServerError, "internal_error", "An unexpected error occurred")
+            Error = "internal_server_error",
+            ErrorDescription = "An unexpected error occurred. Please try again later."
         };
 
-        context.Response.StatusCode = (int)statusCode;
-
-        var errorResponse = new ErrorResponse
-        {
-            Error = errorCode,
-            Message = _environment.IsDevelopment() ? exception.Message : message,
-            CorrelationId = context.TraceIdentifier
-        };
-
-        var json = JsonSerializer.Serialize(errorResponse, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
-        });
-
-        await context.Response.WriteAsync(json);
+        var jsonResponse = JsonSerializer.Serialize(response);
+        await context.Response.WriteAsync(jsonResponse);
     }
 }

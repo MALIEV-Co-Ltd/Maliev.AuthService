@@ -1,18 +1,14 @@
-using System.Threading.RateLimiting;
-using HealthChecks.UI.Client;
-using Maliev.AuthService.Api.HealthChecks;
-using Maliev.AuthService.Api.Middleware;
-using Maliev.AuthService.Api.Options;
-using Maliev.AuthService.Api.Services;
-using Maliev.AuthService.Data.DbContexts;
-using Maliev.AuthService.Data.Repositories;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using FluentValidation;
 using Microsoft.EntityFrameworkCore;
+using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Api.Services;
+using Maliev.AuthService.Api.Validators;
+using Maliev.AuthService.Api.Models.Request;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// **Serilog Configuration** (Console only)
+// Serilog Configuration
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .WriteTo.Console()
@@ -20,95 +16,63 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog();
 
-// **Secrets from Google Secret Manager**
-var secretsPath = "/mnt/secrets";
-if (Directory.Exists(secretsPath))
+// Database Configuration
+if (!builder.Environment.IsEnvironment("Testing"))
 {
-    builder.Configuration.AddKeyPerFile(directoryPath: secretsPath, optional: true);
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("Database connection string not configured");
+
+    builder.Services.AddDbContext<AuthDbContext>(options =>
+        options.UseNpgsql(connectionString));
 }
 
-// **Options Configuration**
-builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
-builder.Services.Configure<CustomerServiceOptions>(builder.Configuration.GetSection(CustomerServiceOptions.SectionName));
-builder.Services.Configure<EmployeeServiceOptions>(builder.Configuration.GetSection(EmployeeServiceOptions.SectionName));
-builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection(RateLimitOptions.SectionName));
-builder.Services.Configure<CircuitBreakerOptions>(builder.Configuration.GetSection(CircuitBreakerOptions.SectionName));
-builder.Services.Configure<CacheOptions>(builder.Configuration.GetSection(CacheOptions.SectionName));
-builder.Services.Configure<CorrelationIdOptions>(builder.Configuration.GetSection(CorrelationIdOptions.SectionName));
-builder.Services.Configure<HealthCheckConfiguration>(builder.Configuration.GetSection(HealthCheckConfiguration.SectionName));
-
-// **Database Configuration**
-var connectionString = builder.Configuration.GetConnectionString("RefreshTokenDbContext")
-    ?? "Server=localhost;Port=5432;Database=auth_db;User Id=postgres;Password=postgres;";
-
-builder.Services.AddDbContext<RefreshTokenDbContext>(options =>
-{
-    options.UseNpgsql(connectionString, npgsqlOptions =>
+// Services
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
     {
-        npgsqlOptions.CommandTimeout(30);
-        npgsqlOptions.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(30), errorCodesToAdd: null);
+        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower;
     });
-});
-
-// **Repository Registration**
-builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
-builder.Services.AddScoped<ITokenFamilyRepository, TokenFamilyRepository>();
-builder.Services.AddScoped<IRevokedAccessTokenRepository, RevokedAccessTokenRepository>();
-
-// **Service Registration**
-builder.Services.AddSingleton<ITokenGenerator, TokenGenerator>();
-builder.Services.AddSingleton<ITokenValidator, TokenValidator>();
-builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
-builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
-builder.Services.AddScoped<ICredentialValidationService, CredentialValidationService>();
-builder.Services.AddScoped<IValidationCacheService, ValidationCacheService>();
-
-// **HttpClient for External Services**
-builder.Services.AddHttpClient<IExternalValidationService, ExternalValidationService>();
-
-// **Memory Cache** (Simple configuration without SizeLimit)
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddOpenApi();
+builder.Services.AddHttpClient();
 builder.Services.AddMemoryCache();
 
-// **Rate Limiting**
-builder.Services.AddRateLimiter(rateLimiterOptions =>
-{
-    var rateLimitOptions = builder.Configuration.GetSection(RateLimitOptions.SectionName).Get<RateLimitOptions>() ?? new RateLimitOptions();
-
-    rateLimiterOptions.AddPolicy(rateLimitOptions.PolicyName, context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            factory: _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = rateLimitOptions.LoginAttemptLimit,
-                Window = TimeSpan.FromSeconds(rateLimitOptions.WindowSeconds),
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                QueueLimit = 0
-            }));
-});
-
-// **Health Checks**
+// Health Checks
 builder.Services.AddHealthChecks()
-    .AddCheck<DatabaseHealthCheck>("database", tags: ["readiness"]);
+    .AddDbContextCheck<AuthDbContext>(tags: new[] { "readiness" });
 
-// **Controllers**
-builder.Services.AddControllers();
+// Application Services
+builder.Services.AddScoped<ITokenGenerator, TokenGenerator>();
+builder.Services.AddScoped<ITokenValidator, TokenValidator>();
+builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
+builder.Services.AddScoped<IAccountLockoutService, AccountLockoutService>();
+builder.Services.AddScoped<IRateLimitService, RateLimitService>();
+builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 
-// **OpenAPI/Swagger**
-builder.Services.AddOpenApi();
+// Validators
+builder.Services.AddScoped<IValidator<LoginRequest>, LoginRequestValidator>();
+builder.Services.AddScoped<IValidator<RefreshRequest>, RefreshRequestValidator>();
+builder.Services.AddScoped<IValidator<ValidateRequest>, ValidateRequestValidator>();
+builder.Services.AddScoped<IValidator<RevokeRequest>, RevokeRequestValidator>();
+builder.Services.AddScoped<IValidator<LogoutRequest>, LogoutRequestValidator>();
+builder.Services.AddScoped<IValidator<ServiceLoginRequest>, ServiceLoginRequestValidator>();
 
 var app = builder.Build();
 
-// **Apply Database Migrations** (Development only)
-if (app.Environment.IsDevelopment())
+// Configure the HTTP request pipeline.
+
+// For testing: Set a fake IP address
+if (app.Environment.IsEnvironment("Testing"))
 {
-    using var scope = app.Services.CreateScope();
-    var dbContext = scope.ServiceProvider.GetRequiredService<RefreshTokenDbContext>();
-    await dbContext.Database.MigrateAsync();
+    app.Use(async (context, next) =>
+    {
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("192.168.1.100");
+        await next(context);
+    });
 }
 
-// **Middleware Pipeline** (EXACT ORDER)
-app.UseMiddleware<ExceptionHandlingMiddleware>();
-app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<Maliev.AuthService.Api.Middleware.CorrelationIdMiddleware>();
+app.UseMiddleware<Maliev.AuthService.Api.Middleware.ExceptionHandlingMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {
@@ -116,20 +80,15 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseRateLimiter();
+app.UseAuthorization();
 
-// **Health Check Endpoints**
-app.MapGet("/auth/liveness", () => Results.Ok(new { status = "Healthy" }))
-    .WithName("Liveness")
-    .WithOpenApi();
-
-app.MapHealthChecks("/auth/readiness", new HealthCheckOptions
+// Health check endpoints
+app.MapGet("/liveness", () => "Healthy").AllowAnonymous();
+app.MapHealthChecks("/readiness", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
-    Predicate = healthCheck => healthCheck.Tags.Contains("readiness"),
-    ResponseWriter = UIResponseWriter.WriteHealthCheckUIResponse
-}).WithName("Readiness");
+    Predicate = healthCheck => healthCheck.Tags.Contains("readiness")
+});
 
-// **Controllers**
 app.MapControllers();
 
 app.Run();

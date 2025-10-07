@@ -4,43 +4,21 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Maliev.AuthService.Data.Configurations;
 
-/// <summary>
-/// Entity Framework configuration for TokenFamily entity
-/// </summary>
 public class TokenFamilyConfiguration : IEntityTypeConfiguration<TokenFamily>
 {
     public void Configure(EntityTypeBuilder<TokenFamily> builder)
     {
         builder.ToTable("token_families");
 
-        builder.HasKey(tf => tf.FamilyId);
+        builder.HasKey(e => e.FamilyId);
+        builder.Property(e => e.FamilyId).HasColumnName("family_id");
 
-        builder.Property(tf => tf.FamilyId)
-            .HasColumnName("family_id");
-
-        builder.Property(tf => tf.UserId)
-            .IsRequired()
-            .HasMaxLength(255)
-            .HasColumnName("user_id");
-
-        builder.Property(tf => tf.UserType)
-            .IsRequired()
-            .HasConversion<string>()
-            .HasColumnName("user_type");
-
-        builder.Property(tf => tf.CreatedAt)
-            .IsRequired()
-            .HasColumnName("created_at");
-
-        builder.Property(tf => tf.LastUsedAt)
-            .IsRequired()
-            .HasColumnName("last_used_at");
+        builder.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+        builder.Property(e => e.UserType).HasColumnName("user_type").IsRequired().HasConversion<string>();
+        builder.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("NOW()");
+        builder.Property(e => e.LastRefreshAt).HasColumnName("last_refresh_at").HasDefaultValueSql("NOW()");
 
         // Indexes
-        builder.HasIndex(tf => tf.UserId)
-            .HasDatabaseName("ix_token_families_user_id");
-
-        builder.HasIndex(tf => tf.LastUsedAt)
-            .HasDatabaseName("ix_token_families_last_used_at");
+        builder.HasIndex(e => e.UserId).HasDatabaseName("idx_token_families_user_id");
     }
 }

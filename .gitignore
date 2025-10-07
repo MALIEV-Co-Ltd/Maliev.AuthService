@@ -47,3 +47,4 @@ packages/
 
 # Specification files (should not be in gitignore, but listed here for reference)
 # specs/ - DO NOT IGNORE, needed for feature documentation
+.claude/settings.local.json

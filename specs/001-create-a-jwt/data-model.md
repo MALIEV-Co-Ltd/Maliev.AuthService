@@ -1,638 +1,435 @@
-# Data Model Design: JWT Authentication Service
+# Data Model: JWT Authentication Service
 
-**Project**: Maliev.AuthService
 **Feature**: 001-create-a-jwt
-**Date**: 2025-10-05
-**Purpose**: Define database entities, relationships, validation rules, and state transitions for token management
+**Date**: 2025-10-06
+**Database**: PostgreSQL 18 (auth_app_db)
+
+## Entity Relationship Diagram
+
+```
+┌─────────────────┐
+│  RefreshToken   │
+├─────────────────┤
+│ id (PK)         │
+│ family_id       │◄──────┐
+│ user_id         │       │ Token Family
+│ user_type       │       │ Relationship
+│ token_hash      │       │
+│ is_used         │       │
+│ used_at         │       │
+│ expires_at      │       │
+│ created_at      │       │
+│ ip_address      │       │
+└─────────────────┘       │
+                          │
+┌─────────────────┐       │
+│  TokenFamily    │       │
+├─────────────────┤       │
+│ family_id (PK)  │───────┘
+│ user_id         │
+│ user_type       │
+│ created_at      │
+│ last_refresh_at │
+└─────────────────┘
+
+┌─────────────────┐
+│  RevokedToken   │
+├─────────────────┤
+│ id (PK)         │
+│ jti             │◄────── JWT ID claim
+│ user_id         │
+│ user_type       │
+│ revoked_at      │
+│ expires_at      │
+│ reason          │
+└─────────────────┘
+
+┌─────────────────┐
+│  AccountLockout │
+├─────────────────┤
+│ id (PK)         │
+│ user_id         │
+│ user_type       │
+│ failed_attempts │
+│ locked_until    │
+│ last_attempt_at │
+│ created_at      │
+│ updated_at      │
+└─────────────────┘
+
+┌─────────────────┐
+│  IpRateLimit    │
+├─────────────────┤
+│ id (PK)         │
+│ ip_address      │
+│ failed_attempts │
+│ blocked_until   │
+│ window_start    │
+│ created_at      │
+│ updated_at      │
+└─────────────────┘
+
+┌─────────────────┐
+│  AuthAuditLog   │
+├─────────────────┤
+│ id (PK)         │
+│ user_id         │
+│ user_type       │
+│ action          │
+│ ip_address      │
+│ user_agent      │
+│ success         │
+│ failure_reason  │
+│ correlation_id  │
+│ created_at      │
+└─────────────────┘
+
+┌─────────────────┐
+│ ServiceCredential│
+├─────────────────┤
+│ id (PK)         │
+│ client_id       │
+│ client_secret_hash│
+│ service_name    │
+│ is_active       │
+│ created_at      │
+│ updated_at      │
+└─────────────────┘
+```
 
 ---
 
-## Overview
-
-The authentication service requires persistent storage for:
-1. **Refresh Tokens**: Long-lived tokens with rotation tracking
-2. **Token Families**: Grouping of tokens from same authentication session
-3. **Revoked Access Tokens**: Short-term blacklist for revoked JWTs
-
-**Database**: PostgreSQL 18
-**ORM**: Entity Framework Core 9.0.9
-**Provider**: Npgsql 9.0.2
-
----
-
-## Entities
+## Entity Definitions
 
 ### 1. RefreshToken
 
-Stores hashed refresh tokens with rotation and reuse detection support.
+**Purpose**: Stores hashed refresh tokens with family tracking for rotation and reuse detection
 
-#### Properties
+**Fields**:
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| id | UUID | PRIMARY KEY | Unique token identifier |
+| family_id | UUID | NOT NULL, FK → TokenFamily | Links tokens from same login session |
+| user_id | UUID | NOT NULL | User identifier from external service |
+| user_type | VARCHAR(20) | NOT NULL, CHECK IN ('customer', 'employee') | Distinguishes user type |
+| token_hash | VARCHAR(64) | NOT NULL, UNIQUE | SHA-256 hash of refresh token |
+| is_used | BOOLEAN | DEFAULT FALSE | Indicates if token has been used for refresh |
+| used_at | TIMESTAMP | NULLABLE | When token was used (for audit) |
+| expires_at | TIMESTAMP | NOT NULL | Token expiration (7 days from creation) |
+| created_at | TIMESTAMP | DEFAULT NOW() | Token creation timestamp |
+| ip_address | VARCHAR(45) | NULLABLE | IP address when token was issued |
 
-| Property | Type | Nullable | Description |
-|----------|------|----------|-------------|
-| Id | Guid | No | Primary key (auto-generated) |
-| TokenHash | string(64) | No | SHA-256 hash of refresh token (hex format) |
-| UserId | Guid | No | Reference to user in external service |
-| UserType | UserType (enum) | No | Customer or Employee |
-| FamilyId | Guid | No | Foreign key to TokenFamily |
-| CreatedAt | DateTimeOffset | No | Token creation timestamp (UTC) |
-| ExpiresAt | DateTimeOffset | No | Token expiration timestamp (UTC) |
-| IsRevoked | bool | No | True if token has been revoked |
-| IsUsed | bool | No | True if token has been used for rotation |
-| RevokedAt | DateTimeOffset | Yes | Timestamp when token was revoked |
-| Version | uint | No | Concurrency token (PostgreSQL xmin) |
+**Indexes**:
+- PRIMARY KEY on `id`
+- UNIQUE INDEX on `token_hash`
+- INDEX on `family_id` (for reuse detection queries)
+- INDEX on `user_id` (for user token lookup)
+- INDEX on `expires_at` (for cleanup queries)
 
-#### Validation Rules
+**Validation Rules**:
+- `token_hash` must be exactly 64 characters (SHA-256 hex output)
+- `expires_at` must be in the future when creating
+- `user_type` must be 'customer' or 'employee'
+- `is_used` cannot be changed from TRUE to FALSE
 
-- **TokenHash**:
-  - Required, exactly 64 characters (SHA-256 hex output)
-  - Unique constraint (indexed)
-  - Format: `^[a-f0-9]{64}$`
-
-- **UserId**:
-  - Required, valid Guid
-  - No foreign key constraint (user exists in external service)
-
-- **UserType**:
-  - Required, must be `Customer` or `Employee`
-
-- **FamilyId**:
-  - Required, must reference existing TokenFamily.FamilyId
-  - Foreign key with cascade delete
-
-- **ExpiresAt**:
-  - Required, must be > CreatedAt
-  - Typically CreatedAt + 7 days
-
-- **IsRevoked / IsUsed**:
-  - Both default to false
-  - IsUsed = true when token is rotated (new token issued)
-  - IsRevoked = true when family is invalidated (reuse detection)
-  - Cannot both be true simultaneously (check constraint)
-
-#### State Transitions
-
-```
-[Active]
-  ├─ IsUsed = false, IsRevoked = false
-  ├─ Can be used for token refresh
-  │
-  ├─> [Used] (on successful refresh)
-  │    ├─ IsUsed = true, IsRevoked = false
-  │    ├─ New token generated in same family
-  │    └─ Cannot be used again
-  │
-  └─> [Revoked] (on reuse detection or manual revocation)
-       ├─ IsRevoked = true, RevokedAt = timestamp
-       ├─ Entire family invalidated
-       └─ User must re-authenticate
-
-[Used]
-  └─> [Revoked] (if reuse detected)
-       └─ All tokens in family revoked
-```
-
-#### Indexes
-
-```sql
--- Primary key index (automatic)
-CREATE UNIQUE INDEX pk_refresh_tokens ON refresh_tokens (id);
-
--- Token lookup index (critical for validation performance)
-CREATE UNIQUE INDEX ix_refresh_tokens_token_hash ON refresh_tokens (token_hash);
-
--- Family lookup index (for invalidation queries)
-CREATE INDEX ix_refresh_tokens_family_id ON refresh_tokens (family_id);
-
--- User query index (for logout all sessions)
-CREATE INDEX ix_refresh_tokens_user_composite
-ON refresh_tokens (user_id, user_type, is_revoked, is_used);
-
--- Cleanup query index (for expired token deletion)
-CREATE INDEX ix_refresh_tokens_expires_at ON refresh_tokens (expires_at)
-WHERE is_revoked = false;
-```
-
-#### EF Core Configuration
-
-```csharp
-public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
-{
-    public void Configure(EntityTypeBuilder<RefreshToken> builder)
-    {
-        builder.ToTable("refresh_tokens");
-
-        builder.HasKey(e => e.Id);
-
-        builder.Property(e => e.TokenHash)
-            .IsRequired()
-            .HasMaxLength(64)
-            .IsFixedLength();
-
-        builder.Property(e => e.UserId)
-            .IsRequired();
-
-        builder.Property(e => e.UserType)
-            .IsRequired()
-            .HasConversion<string>(); // Store as "Customer" or "Employee"
-
-        builder.Property(e => e.FamilyId)
-            .IsRequired();
-
-        builder.Property(e => e.CreatedAt)
-            .IsRequired();
-
-        builder.Property(e => e.ExpiresAt)
-            .IsRequired();
-
-        builder.Property(e => e.IsRevoked)
-            .IsRequired()
-            .HasDefaultValue(false);
-
-        builder.Property(e => e.IsUsed)
-            .IsRequired()
-            .HasDefaultValue(false);
-
-        builder.Property(e => e.RevokedAt)
-            .IsRequired(false);
-
-        // PostgreSQL xmin for optimistic concurrency
-        builder.Property(e => e.Version)
-            .IsRowVersion()
-            .HasColumnName("xmin")
-            .HasColumnType("xid")
-            .ValueGeneratedOnAddOrUpdate();
-
-        // Indexes
-        builder.HasIndex(e => e.TokenHash)
-            .IsUnique();
-
-        builder.HasIndex(e => e.FamilyId);
-
-        builder.HasIndex(e => new { e.UserId, e.UserType, e.IsRevoked, e.IsUsed });
-
-        builder.HasIndex(e => e.ExpiresAt)
-            .HasFilter("is_revoked = false");
-
-        // Foreign key relationship
-        builder.HasOne(e => e.Family)
-            .WithMany(f => f.Tokens)
-            .HasForeignKey(e => e.FamilyId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        // Check constraint
-        builder.HasCheckConstraint(
-            "ck_refresh_tokens_not_both_used_and_revoked",
-            "NOT (is_used = true AND is_revoked = true)");
-    }
-}
-```
+**State Transitions**:
+1. Created: `is_used = FALSE, used_at = NULL`
+2. Used for Refresh: `is_used = TRUE, used_at = NOW()`
+3. Expired: Soft delete or hard delete after grace period
 
 ---
 
 ### 2. TokenFamily
 
-Tracks token rotation chains for reuse detection.
+**Purpose**: Tracks lineage of refresh tokens for detecting reuse across multiple refresh cycles
 
-#### Properties
+**Fields**:
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| family_id | UUID | PRIMARY KEY | Unique family identifier |
+| user_id | UUID | NOT NULL | User who owns this token family |
+| user_type | VARCHAR(20) | NOT NULL, CHECK IN ('customer', 'employee') | User type |
+| created_at | TIMESTAMP | DEFAULT NOW() | When family was created (initial login) |
+| last_refresh_at | TIMESTAMP | DEFAULT NOW() | Last time any token in family was refreshed |
 
-| Property | Type | Nullable | Description |
-|----------|------|----------|-------------|
-| FamilyId | Guid | No | Primary key (auto-generated) |
-| UserId | Guid | No | User who owns this token family |
-| UserType | UserType (enum) | No | Customer or Employee |
-| CreatedAt | DateTimeOffset | No | When family was created (initial login) |
-| LastUsedAt | DateTimeOffset | No | Last token refresh timestamp |
+**Indexes**:
+- PRIMARY KEY on `family_id`
+- INDEX on `user_id` (for user family lookup)
 
-#### Validation Rules
+**Validation Rules**:
+- `last_refresh_at` must be >= `created_at`
+- Cannot have multiple active families for same user (business rule enforced in service layer)
 
-- **FamilyId**:
-  - Required, unique
-  - Generated on initial login
+**Lifecycle**:
+1. Created on user login
+2. Updated on each token refresh (last_refresh_at)
+3. Invalidated on reuse detection
+4. Deleted after all tokens expire + grace period (30 days)
 
-- **UserId**:
-  - Required, valid Guid
-  - Same user for all tokens in family
+---
 
-- **LastUsedAt**:
-  - Updated on every token rotation
-  - Must be >= CreatedAt
+### 3. RevokedToken
 
-#### Lifecycle
+**Purpose**: Stores revoked access tokens for distributed validation (supports <2s propagation via Redis + DB fallback)
 
-```
-[Family Created] (on login)
-  ├─ FamilyId generated
-  ├─ Initial refresh token created with this FamilyId
-  │
-  ├─> [Active Usage]
-  │    ├─ LastUsedAt updated on each refresh
-  │    ├─ New tokens added to family
-  │    ├─ Old tokens marked as Used
-  │    │
-  │    └─> [Family Invalidated] (on reuse detection)
-  │         ├─ All tokens in family marked IsRevoked = true
-  │         └─ Family preserved for audit (cascade delete disabled)
-  │
-  └─> [Natural Expiry]
-       └─ All tokens expire after 7 days
-       └─ Family can be deleted by cleanup job
-```
+**Fields**:
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| id | UUID | PRIMARY KEY | Unique record identifier |
+| jti | VARCHAR(100) | NOT NULL, UNIQUE | JWT ID claim from token |
+| user_id | UUID | NOT NULL | User whose token was revoked |
+| user_type | VARCHAR(20) | NOT NULL, CHECK IN ('customer', 'employee') | User type |
+| revoked_at | TIMESTAMP | DEFAULT NOW() | When token was revoked |
+| expires_at | TIMESTAMP | NOT NULL | Token expiration (for cleanup) |
+| reason | VARCHAR(100) | NOT NULL | Revocation reason (logout, password_change, admin_action, etc.) |
 
-#### Indexes
+**Indexes**:
+- PRIMARY KEY on `id`
+- UNIQUE INDEX on `jti` (fast lookup during validation)
+- INDEX on `expires_at` (for cleanup queries)
+- INDEX on `user_id` (for user-specific revocation)
 
+**Validation Rules**:
+- `jti` must be unique (duplicate revocation is idempotent)
+- `expires_at` must be >= `revoked_at`
+- `reason` must be one of: logout, password_change, account_disabled, admin_action, reuse_detected
+
+**Cleanup Strategy**:
+- Delete records where `expires_at < NOW()` (tokens already expired)
+- Run cleanup job daily to remove expired revocation records
+
+---
+
+### 4. AccountLockout
+
+**Purpose**: Tracks failed login attempts and lockout state per user account
+
+**Fields**:
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| id | UUID | PRIMARY KEY | Unique record identifier |
+| user_id | UUID | NOT NULL | User identifier |
+| user_type | VARCHAR(20) | NOT NULL, CHECK IN ('customer', 'employee') | User type |
+| failed_attempts | INTEGER | DEFAULT 0, CHECK >= 0 | Number of consecutive failed attempts |
+| locked_until | TIMESTAMP | NULLABLE | Lockout expiration (15 min from 5th failure) |
+| last_attempt_at | TIMESTAMP | DEFAULT NOW() | Last authentication attempt timestamp |
+| created_at | TIMESTAMP | DEFAULT NOW() | Record creation timestamp |
+| updated_at | TIMESTAMP | DEFAULT NOW() | Last update timestamp |
+
+**Indexes**:
+- PRIMARY KEY on `id`
+- UNIQUE INDEX on `(user_id, user_type)` (one lockout record per user)
+- INDEX on `locked_until` (for active lockout queries)
+
+**Validation Rules**:
+- `failed_attempts` must be >= 0 and <= 5
+- `locked_until` must be NULL OR >= `last_attempt_at`
+- Reset `failed_attempts = 0` on successful login
+
+**State Transitions**:
+1. 0-4 failures: `failed_attempts++, locked_until = NULL`
+2. 5th failure: `failed_attempts = 5, locked_until = NOW() + 15 minutes`
+3. Successful login: `failed_attempts = 0, locked_until = NULL`
+4. Lockout expired: `failed_attempts = 0, locked_until = NULL` (reset on next attempt)
+
+---
+
+### 5. IpRateLimit
+
+**Purpose**: Tracks failed authentication attempts per IP address for distributed brute force protection
+
+**Fields**:
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| id | UUID | PRIMARY KEY | Unique record identifier |
+| ip_address | VARCHAR(45) | NOT NULL, UNIQUE | IPv4 or IPv6 address |
+| failed_attempts | INTEGER | DEFAULT 0, CHECK >= 0 | Failed attempts in current window |
+| blocked_until | TIMESTAMP | NULLABLE | IP block expiration (15 min from 20th failure) |
+| window_start | TIMESTAMP | DEFAULT NOW() | Start of current 15-minute window |
+| created_at | TIMESTAMP | DEFAULT NOW() | Record creation timestamp |
+| updated_at | TIMESTAMP | DEFAULT NOW() | Last update timestamp |
+
+**Indexes**:
+- PRIMARY KEY on `id`
+- UNIQUE INDEX on `ip_address` (fast lookup during authentication)
+- INDEX on `blocked_until` (for active block queries)
+
+**Validation Rules**:
+- `failed_attempts` must be >= 0 and <= 20
+- `blocked_until` must be NULL OR >= `window_start`
+- Reset `failed_attempts = 0, window_start = NOW()` when window expires (15 minutes)
+
+**State Transitions**:
+1. 0-19 failures: `failed_attempts++`
+2. 20th failure: `failed_attempts = 20, blocked_until = NOW() + 15 minutes`
+3. Block expired: `failed_attempts = 0, window_start = NOW(), blocked_until = NULL`
+4. Window expired (no block): `failed_attempts = 0, window_start = NOW()`
+
+---
+
+### 6. AuthAuditLog
+
+**Purpose**: Immutable audit trail of all authentication events for security monitoring and compliance
+
+**Fields**:
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| id | UUID | PRIMARY KEY | Unique log entry identifier |
+| user_id | UUID | NULLABLE | User identifier (NULL for failed attempts with invalid username) |
+| user_type | VARCHAR(20) | NULLABLE, CHECK IN ('customer', 'employee', 'service') | User type |
+| action | VARCHAR(50) | NOT NULL | Action performed (login, refresh, validate, revoke, logout) |
+| ip_address | VARCHAR(45) | NOT NULL | Client IP address |
+| user_agent | TEXT | NULLABLE | Client user agent string |
+| success | BOOLEAN | NOT NULL | Whether action succeeded |
+| failure_reason | VARCHAR(200) | NULLABLE | Reason for failure (invalid_credentials, account_locked, etc.) |
+| correlation_id | VARCHAR(100) | NULLABLE | Request correlation ID for distributed tracing |
+| created_at | TIMESTAMP | DEFAULT NOW() | Log entry timestamp |
+
+**Indexes**:
+- PRIMARY KEY on `id`
+- INDEX on `user_id` (for user activity queries)
+- INDEX on `created_at` (for time-based queries)
+- INDEX on `correlation_id` (for tracing)
+- INDEX on `action, success` (for metrics)
+
+**Validation Rules**:
+- `action` must be one of: login, refresh, validate, revoke, logout, service_auth
+- `failure_reason` is REQUIRED when `success = FALSE`
+- Records are IMMUTABLE (no updates, only inserts)
+
+**Retention Policy**:
+- Keep audit logs for 90 days minimum (compliance requirement)
+- Archive to cold storage after 90 days
+- Never delete audit logs (regulatory compliance)
+
+---
+
+### 7. ServiceCredential
+
+**Purpose**: Stores service-to-service authentication credentials for microservice integration
+
+**Fields**:
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| id | UUID | PRIMARY KEY | Unique credential identifier |
+| client_id | VARCHAR(100) | NOT NULL, UNIQUE | Service client identifier |
+| client_secret_hash | VARCHAR(64) | NOT NULL | SHA-256 hash of client secret |
+| service_name | VARCHAR(100) | NOT NULL | Descriptive service name |
+| is_active | BOOLEAN | DEFAULT TRUE | Whether credential is active |
+| created_at | TIMESTAMP | DEFAULT NOW() | Credential creation timestamp |
+| updated_at | TIMESTAMP | DEFAULT NOW() | Last update timestamp |
+
+**Indexes**:
+- PRIMARY KEY on `id`
+- UNIQUE INDEX on `client_id` (fast lookup during service auth)
+- INDEX on `is_active` (for active credential queries)
+
+**Validation Rules**:
+- `client_id` must be unique and follow pattern: `service-{environment}-{name}`
+- `client_secret_hash` must be exactly 64 characters (SHA-256 hex output)
+- Cannot delete credentials, only mark `is_active = FALSE`
+
+**Security**:
+- Client secrets NEVER stored in plaintext (SHA-256 hash only)
+- Secret rotation requires creating new record and deactivating old one
+- Constant-time comparison when validating secrets
+
+---
+
+## Database Naming Conventions
+
+**Tables**: snake_case (e.g., `refresh_tokens`, `account_lockouts`)
+**Columns**: snake_case (e.g., `user_id`, `expires_at`)
+**Indexes**: `idx_{table}_{column}` (e.g., `idx_refresh_tokens_family_id`)
+**Foreign Keys**: `fk_{source_table}_{target_table}` (e.g., `fk_refresh_tokens_token_families`)
+
+---
+
+## Optimistic Concurrency Control
+
+**Pattern**: RowVersion byte array on entities requiring concurrent update protection
+
+**Entities with RowVersion**:
+- `AccountLockout` (prevents race conditions on failed attempt increments)
+- `IpRateLimit` (prevents race conditions on IP-based rate limiting)
+
+**Implementation**:
 ```sql
-CREATE UNIQUE INDEX pk_token_families ON token_families (family_id);
-
-CREATE INDEX ix_token_families_user_id ON token_families (user_id);
-
-CREATE INDEX ix_token_families_last_used_at ON token_families (last_used_at);
+ALTER TABLE account_lockouts ADD COLUMN version BYTEA DEFAULT '\\x0000000000000000'::bytea;
+ALTER TABLE ip_rate_limits ADD COLUMN version BYTEA DEFAULT '\\x0000000000000000'::bytea;
 ```
 
-#### EF Core Configuration
-
+**EF Core Configuration**:
 ```csharp
-public class TokenFamilyConfiguration : IEntityTypeConfiguration<TokenFamily>
-{
-    public void Configure(EntityTypeBuilder<TokenFamily> builder)
-    {
-        builder.ToTable("token_families");
-
-        builder.HasKey(e => e.FamilyId);
-
-        builder.Property(e => e.UserId)
-            .IsRequired();
-
-        builder.Property(e => e.UserType)
-            .IsRequired()
-            .HasConversion<string>();
-
-        builder.Property(e => e.CreatedAt)
-            .IsRequired();
-
-        builder.Property(e => e.LastUsedAt)
-            .IsRequired();
-
-        builder.HasIndex(e => e.UserId);
-
-        builder.HasIndex(e => e.LastUsedAt);
-
-        // Navigation property
-        builder.HasMany(e => e.Tokens)
-            .WithOne(t => t.Family)
-            .HasForeignKey(t => t.FamilyId)
-            .OnDelete(DeleteBehavior.Cascade);
-    }
-}
+builder.Property(e => e.Version)
+    .HasColumnName("version")
+    .IsRowVersion()
+    .HasDefaultValueSql("'\\x0000000000000000'::bytea")
+    .ValueGeneratedOnAddOrUpdate()
+    .IsRequired();
 ```
 
 ---
 
-### 3. RevokedAccessToken
+## Data Retention and Cleanup
 
-Short-term blacklist for revoked access tokens (expires with token TTL).
+| Entity | Retention Policy | Cleanup Strategy |
+|--------|------------------|------------------|
+| RefreshToken | 7 days + 30 day grace period | Hard delete expired tokens after grace period |
+| TokenFamily | Until all tokens expire + 30 days | Cascade delete when cleanup runs |
+| RevokedToken | Until token expiration | Hard delete after `expires_at` |
+| AccountLockout | 90 days of inactivity | Delete records not updated in 90 days |
+| IpRateLimit | 90 days of inactivity | Delete records not updated in 90 days |
+| AuthAuditLog | 90 days (then archive) | Archive to cold storage, never delete |
+| ServiceCredential | Indefinite (soft delete only) | Mark `is_active = FALSE`, never hard delete |
 
-#### Properties
-
-| Property | Type | Nullable | Description |
-|----------|------|----------|-------------|
-| Jti | string(64) | No | JWT ID claim (unique identifier) |
-| RevokedAt | DateTimeOffset | No | When token was revoked |
-| ExpiresAt | DateTimeOffset | No | When token expires naturally (15 min from issue) |
-| Reason | string(200) | No | Revocation reason (audit trail) |
-
-#### Validation Rules
-
-- **Jti**:
-  - Required, primary key
-  - Unique identifier from JWT `jti` claim
-  - Format: Guid string
-
-- **RevokedAt**:
-  - Required, timestamp when revocation occurred
-  - Must be <= current time
-
-- **ExpiresAt**:
-  - Required, must be > RevokedAt
-  - Typically RevokedAt + remaining token lifetime
-  - Used for automatic cleanup (no need to store expired revocations)
-
-- **Reason**:
-  - Required, max 200 characters
-  - Enum values: "user_logout", "password_changed", "admin_action", "suspicious_activity", "token_family_invalidated"
-
-#### Lifecycle
-
-```
-[Token Revoked]
-  ├─ Added to RevokedAccessToken table
-  ├─ Event published to Redis (distributed revocation)
-  │
-  └─> [Cached in Memory] (all services)
-       ├─ Validation checks in-memory cache first
-       ├─ Falls back to database on cache miss
-       │
-       └─> [Auto-Expiry]
-            ├─ Removed from cache after ExpiresAt
-            ├─ Deleted from database by cleanup job
-            └─ Token would be expired anyway (15 min)
-```
-
-#### Indexes
-
-```sql
-CREATE UNIQUE INDEX pk_revoked_access_tokens ON revoked_access_tokens (jti);
-
-CREATE INDEX ix_revoked_access_tokens_expires_at ON revoked_access_tokens (expires_at);
-```
-
-#### EF Core Configuration
-
-```csharp
-public class RevokedAccessTokenConfiguration : IEntityTypeConfiguration<RevokedAccessToken>
-{
-    public void Configure(EntityTypeBuilder<RevokedAccessToken> builder)
-    {
-        builder.ToTable("revoked_access_tokens");
-
-        builder.HasKey(e => e.Jti);
-
-        builder.Property(e => e.Jti)
-            .IsRequired()
-            .HasMaxLength(64);
-
-        builder.Property(e => e.RevokedAt)
-            .IsRequired();
-
-        builder.Property(e => e.ExpiresAt)
-            .IsRequired();
-
-        builder.Property(e => e.Reason)
-            .IsRequired()
-            .HasMaxLength(200);
-
-        builder.HasIndex(e => e.ExpiresAt);
-    }
-}
-```
+**Cleanup Jobs**:
+1. **Daily Cleanup**: Remove expired tokens and revocations
+2. **Weekly Cleanup**: Remove stale lockout and rate limit records
+3. **Monthly Archive**: Move old audit logs to cold storage
 
 ---
 
-## Enumerations
+## Entity Relationship Rules
 
-### UserType
+### RefreshToken ↔ TokenFamily
+- **Relationship**: Many-to-One (many tokens belong to one family)
+- **Cascade**: When family is deleted, all tokens are deleted
+- **Constraint**: All tokens in a family must have same `user_id` and `user_type`
 
-```csharp
-public enum UserType
-{
-    Customer = 1,
-    Employee = 2
-}
-```
-
-**Usage**: Distinguishes between customer and employee authentication flows
-**Storage**: String in database ("Customer", "Employee")
-
----
-
-## Relationships
-
-### Entity Relationship Diagram
-
-```
-┌─────────────────┐
-│  TokenFamily    │
-│─────────────────│
-│ FamilyId (PK)   │◄─────┐
-│ UserId          │      │
-│ UserType        │      │ One-to-Many
-│ CreatedAt       │      │
-│ LastUsedAt      │      │
-└─────────────────┘      │
-                         │
-                         │
-                         │
-┌─────────────────┐      │
-│  RefreshToken   │      │
-│─────────────────│      │
-│ Id (PK)         │      │
-│ TokenHash       │      │
-│ UserId          │      │
-│ UserType        │      │
-│ FamilyId (FK)   │──────┘
-│ CreatedAt       │
-│ ExpiresAt       │
-│ IsRevoked       │
-│ IsUsed          │
-│ RevokedAt       │
-│ Version         │
-└─────────────────┘
-
-┌─────────────────────┐
-│ RevokedAccessToken  │
-│─────────────────────│
-│ Jti (PK)            │
-│ RevokedAt           │
-│ ExpiresAt           │
-│ Reason              │
-└─────────────────────┘
-(No relationships - standalone blacklist)
-```
-
----
-
-## Database Cleanup Strategy
-
-### Expired Refresh Tokens
-
-```sql
--- Run daily via scheduled job
-DELETE FROM refresh_tokens
-WHERE expires_at < NOW() - INTERVAL '7 days';
--- Keep 7 days history for audit
-```
-
-### Expired Access Token Revocations
-
-```sql
--- Run hourly
-DELETE FROM revoked_access_tokens
-WHERE expires_at < NOW();
--- No need to keep expired entries
-```
-
-### Inactive Token Families
-
-```sql
--- Run weekly
-DELETE FROM token_families
-WHERE last_used_at < NOW() - INTERVAL '30 days'
-AND NOT EXISTS (
-    SELECT 1 FROM refresh_tokens
-    WHERE family_id = token_families.family_id
-    AND is_revoked = false
-);
--- Cleanup families with all tokens expired/revoked
-```
-
----
-
-## Sample Data Scenarios
-
-### Scenario 1: Successful Token Rotation
-
-```sql
--- Initial login (2025-10-05 10:00:00)
-INSERT INTO token_families VALUES (
-    'a1b2c3d4-...', -- FamilyId
-    'user-123',     -- UserId
-    'Customer',     -- UserType
-    '2025-10-05 10:00:00+00',
-    '2025-10-05 10:00:00+00'
-);
-
-INSERT INTO refresh_tokens VALUES (
-    'token-001',    -- Id
-    'abc123...def', -- TokenHash (SHA-256)
-    'user-123',
-    'Customer',
-    'a1b2c3d4-...',
-    '2025-10-05 10:00:00+00',
-    '2025-10-12 10:00:00+00', -- +7 days
-    false,          -- IsRevoked
-    false,          -- IsUsed
-    NULL
-);
-
--- Token refresh (2025-10-05 12:00:00)
-UPDATE refresh_tokens SET is_used = true WHERE id = 'token-001';
-
-INSERT INTO refresh_tokens VALUES (
-    'token-002',
-    'xyz789...uvw',
-    'user-123',
-    'Customer',
-    'a1b2c3d4-...', -- Same family
-    '2025-10-05 12:00:00+00',
-    '2025-10-12 12:00:00+00',
-    false,
-    false,
-    NULL
-);
-
-UPDATE token_families
-SET last_used_at = '2025-10-05 12:00:00+00'
-WHERE family_id = 'a1b2c3d4-...';
-```
-
-### Scenario 2: Token Reuse Detection
-
-```sql
--- Attacker tries to reuse token-001 (already used)
--- Service detects IsUsed = true
-
--- Invalidate entire family
-UPDATE refresh_tokens
-SET is_revoked = true, revoked_at = NOW()
-WHERE family_id = 'a1b2c3d4-...';
-
--- Result: Both token-001 and token-002 are revoked
--- User must re-authenticate
-```
-
-### Scenario 3: Access Token Revocation
-
-```sql
--- User logs out
-INSERT INTO revoked_access_tokens VALUES (
-    'jwt-jti-567', -- Jti from access token
-    '2025-10-05 14:00:00+00',
-    '2025-10-05 14:15:00+00', -- +15 min (token TTL)
-    'user_logout'
-);
-
--- Redis pub/sub event sent to all services
--- Services cache this Jti in memory for 15 minutes
-```
-
----
-
-## Migration Strategy
-
-### Initial Migration
-
-```bash
-# Create migration
-dotnet ef migrations add InitialCreate --project Maliev.AuthService.Data
-
-# Review generated migration
-# Apply to development
-export AuthDbContext="Server=localhost;Port=5432;Database=auth_db;User Id=postgres;Password=***;"
-dotnet ef database update --project Maliev.AuthService.Data
-
-# Verify schema
-psql -d auth_db -c "\d refresh_tokens"
-psql -d auth_db -c "\d token_families"
-psql -d auth_db -c "\d revoked_access_tokens"
-```
-
-### Production Deployment
-
-```bash
-# Port forward to PostgreSQL pod (NOT service)
-kubectl port-forward -n maliev-dev postgres-cluster-1 5432:5432
-
-# Apply migration
-export AuthDbContext="Server=localhost;Port=5432;Database=maliev_auth;User Id=postgres;Password=***;"
-dotnet ef database update --project Maliev.AuthService.Data
-
-# Verify
-kubectl exec -n maliev-dev postgres-cluster-1 -- psql -U postgres -d maliev_auth -c "SELECT COUNT(*) FROM refresh_tokens;"
-```
-
----
-
-## Performance Considerations
-
-### Expected Load
-
-- **Reads**: 10,000 token validations/min (across all services)
-- **Writes**: 500 token rotations/min during peak hours
-- **Storage**: ~100,000 active refresh tokens (estimate)
-
-### Optimization Strategies
-
-1. **Indexing**: All critical query paths indexed
-2. **Connection Pooling**: EF Core with Npgsql connection pooling (max 100 connections)
-3. **Read Replicas**: Token validation queries can use read replicas if needed
-4. **Partitioning**: Consider table partitioning by CreatedAt if >10M rows
-
-### Query Performance Targets
-
-- **Token lookup by hash**: <5ms (indexed)
-- **Family invalidation**: <50ms (indexed by FamilyId)
-- **Revocation check**: <2ms (in-memory cache) or <10ms (database fallback)
+### Token Reuse Detection Flow
+1. Refresh request with token T1 from family F1
+2. Check if T1 has `is_used = TRUE`
+3. If YES → Find all tokens with `family_id = F1` → Mark all as invalid
+4. If NO → Mark T1 as `is_used = TRUE` → Create new token T2 with same `family_id = F1`
 
 ---
 
 ## Security Considerations
 
-1. **Token Hash Storage**: SHA-256 one-way hash, irreversible
-2. **Constant-Time Comparison**: Use CryptographicOperations.FixedTimeEquals
-3. **Concurrency Control**: PostgreSQL xmin prevents race conditions
-4. **Audit Trail**: All revocations logged with timestamp and reason
-5. **No Plaintext Tokens**: Never log or expose actual refresh token values
+### Hash Storage
+- **RefreshToken.token_hash**: SHA-256 hash of refresh token (256-bit security)
+- **ServiceCredential.client_secret_hash**: SHA-256 hash of service secret
+- **Constant-Time Comparison**: Use `CryptographicOperations.FixedTimeEquals()` to prevent timing attacks
+
+### Sensitive Data Protection
+- Never log or expose token values (only hashes)
+- Never return `token_hash` or `client_secret_hash` in API responses
+- Redact IP addresses in logs after 30 days (GDPR compliance)
+
+### Database Security
+- Row-level security policies for multi-tenant isolation (future enhancement)
+- Encrypted connections (SSL/TLS) required for all database access
+- Least privilege access for application database user (no DDL permissions)
 
 ---
 
-## Next Steps
+## Status
 
-- **Phase 1**: Create OpenAPI contracts for endpoints that interact with this data model
-- **Phase 1**: Define integration tests for token rotation and reuse detection scenarios
-- **Phase 2**: Implement repository interfaces and EF Core DbContext
+✅ **Entity Design Complete** - All entities defined with fields and constraints
+✅ **Relationships Mapped** - Token family tracking and audit relationships
+✅ **Indexes Planned** - Performance-optimized query patterns
+✅ **Security Validated** - Hash storage, no plaintext secrets
+✅ **Cleanup Strategy Defined** - Data retention and archival policies
 
----
-
-**Document Status**: Complete ✅
-**Reviewed By**: Technical Planning Phase
-**Next Artifact**: contracts/openapi.yaml
+**Next Step**: Generate OpenAPI contracts from functional requirements

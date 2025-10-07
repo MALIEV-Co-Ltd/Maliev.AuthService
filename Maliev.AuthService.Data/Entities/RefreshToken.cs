@@ -1,69 +1,60 @@
 namespace Maliev.AuthService.Data.Entities;
 
 /// <summary>
-/// Represents a refresh token stored in the database.
-/// Refresh tokens are hashed using SHA-256 before storage.
+/// Represents a refresh token with family tracking for OAuth 2.0 RFC 9700 rotation and reuse detection.
 /// </summary>
 public class RefreshToken
 {
     /// <summary>
-    /// Unique identifier for the refresh token record
+    /// Unique token identifier (Primary Key)
     /// </summary>
     public Guid Id { get; set; }
 
     /// <summary>
-    /// SHA-256 hash of the actual refresh token value.
-    /// The plaintext token is never stored.
-    /// </summary>
-    public required string TokenHash { get; set; }
-
-    /// <summary>
-    /// The user ID this token belongs to
-    /// </summary>
-    public required string UserId { get; set; }
-
-    /// <summary>
-    /// The type of user (Customer or Employee)
-    /// </summary>
-    public UserType UserType { get; set; }
-
-    /// <summary>
-    /// The token family ID - all tokens from the same login session share this ID
+    /// Links tokens from the same login session for rotation tracking
     /// </summary>
     public Guid FamilyId { get; set; }
 
     /// <summary>
-    /// When the token was created
+    /// User identifier from external service (Customer or Employee API)
     /// </summary>
-    public DateTime CreatedAt { get; set; }
+    public Guid UserId { get; set; }
 
     /// <summary>
-    /// When the token expires
+    /// Distinguishes customer vs employee users
     /// </summary>
-    public DateTime ExpiresAt { get; set; }
+    public UserType UserType { get; set; }
 
     /// <summary>
-    /// Whether the token has been explicitly revoked
+    /// SHA-256 hash of the refresh token (64 characters hex)
     /// </summary>
-    public bool IsRevoked { get; set; }
+    public string TokenHash { get; set; } = string.Empty;
 
     /// <summary>
-    /// Whether the token has been used for a refresh operation
+    /// Indicates if token has been used for refresh (reuse detection)
     /// </summary>
     public bool IsUsed { get; set; }
 
     /// <summary>
-    /// When the token was revoked (if applicable)
+    /// When token was used for refresh (audit trail)
     /// </summary>
-    public DateTime? RevokedAt { get; set; }
+    public DateTime? UsedAt { get; set; }
 
     /// <summary>
-    /// Concurrency token for optimistic concurrency control
+    /// Token expiration (7 days from creation)
     /// </summary>
-    public byte[] Version { get; set; } = Array.Empty<byte>();
+    public DateTime ExpiresAt { get; set; }
 
     /// <summary>
-    /// Navigation property to the token family
+    /// Token creation timestamp
     /// </summary>
-    public TokenFamily? TokenFamily { get; set; }
+    public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// IP address when token was issued (security audit)
+    /// </summary>
+    public string? IpAddress { get; set; }
+
+    // Navigation property
+    public TokenFamily Family { get; set; } = null!;
 }

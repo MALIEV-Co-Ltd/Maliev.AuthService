@@ -1,91 +1,183 @@
-using System.Net;
-using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Xunit;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace Maliev.AuthService.Tests.Contract;
 
-/// <summary>
-/// Contract tests for POST /auth/login endpoint.
-/// These tests verify the API contract matches the OpenAPI specification.
-/// </summary>
-[Trait("Category", "Contract")]
-public class AuthenticationContractTests : IClassFixture<WebApplicationFactory<Program>>
+[TestClass]
+public class AuthenticationContractTests
 {
-    private readonly HttpClient _client;
+    private HttpClient _client = null!;
+    private TestWebApplicationFactory _factory = null!;
 
-    public AuthenticationContractTests(WebApplicationFactory<Program> factory)
+    [TestInitialize]
+    public void Setup()
     {
-        _client = factory.CreateClient();
+        _factory = new TestWebApplicationFactory();
+        _client = _factory.CreateClient();
     }
 
-    [Fact]
-    public async Task Login_WithValidCredentials_ReturnsLoginResponse()
+    [TestCleanup]
+    public void Cleanup()
+    {
+        _client.Dispose();
+        _factory.Dispose();
+    }
+
+    [TestMethod]
+    public async Task POST_V1_Auth_Login_ValidCustomerCredentials_Returns200WithTokens()
     {
         // Arrange
         var request = new
         {
-            username = "test.customer@example.com",
-            password = "Password123!",
+            username = "customer@example.com",
+            password = "ValidPassword123!",
             user_type = "customer"
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/login", request);
+        var response = await _client.PostAsJsonAsync("/v1/auth/login", request);
 
-        // Assert - This should FAIL until endpoint is implemented
+        // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var content = await response.Content.ReadFromJsonAsync<LoginResponse>();
-        content.Should().NotBeNull();
-        content!.AccessToken.Should().NotBeNullOrEmpty();
-        content.RefreshToken.Should().NotBeNullOrEmpty();
-        content.TokenType.Should().Be("Bearer");
-        content.ExpiresIn.Should().BeGreaterThan(0);
+        var content = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(content);
+
+        json.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrEmpty();
+        json.RootElement.GetProperty("refresh_token").GetString().Should().NotBeNullOrEmpty();
+        json.RootElement.GetProperty("token_type").GetString().Should().Be("Bearer");
+        json.RootElement.GetProperty("expires_in").GetInt32().Should().Be(900); // 15 minutes
+
+        var user = json.RootElement.GetProperty("user");
+        user.GetProperty("user_id").GetString().Should().NotBeNullOrEmpty();
+        user.GetProperty("user_type").GetString().Should().Be("customer");
     }
 
-    [Fact]
-    public async Task Login_WithInvalidCredentials_Returns401()
+    [TestMethod]
+    public async Task POST_V1_Auth_Login_ValidEmployeeCredentials_Returns200WithCorrectUserType()
+    {
+        // Arrange
+        var request = new
+        {
+            username = "employee@maliev.com",
+            password = "ValidPassword123!",
+            user_type = "employee"
+        };
+
+        // Act
+        var response = await _client.PostAsJsonAsync("/v1/auth/login", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var content = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(content);
+
+        var user = json.RootElement.GetProperty("user");
+        user.GetProperty("user_type").GetString().Should().Be("employee");
+    }
+
+    [TestMethod]
+    public async Task POST_V1_Auth_Login_InvalidCredentials_Returns401()
     {
         // Arrange
         var request = new
         {
             username = "invalid@example.com",
-            password = "wrongpassword",
+            password = "WrongPassword",
             user_type = "customer"
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/login", request);
+        var response = await _client.PostAsJsonAsync("/v1/auth/login", request);
 
-        // Assert - This should FAIL until endpoint is implemented
+        // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
-        var content = await response.Content.ReadFromJsonAsync<ErrorResponse>();
-        content.Should().NotBeNull();
-        content!.Error.Should().NotBeNullOrEmpty();
+        var content = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(content);
+
+        json.RootElement.GetProperty("error").GetString().Should().NotBeNullOrEmpty();
+        json.RootElement.GetProperty("error_description").GetString().Should().NotBeNullOrEmpty();
     }
 
-    [Fact]
-    public async Task Login_ExceedingRateLimit_Returns429()
+    [TestMethod]
+    public async Task POST_V1_Auth_Login_MissingRequiredFields_Returns400WithValidationErrors()
     {
         // Arrange
         var request = new
         {
-            username = "test@example.com",
-            password = "wrongpassword",
+            username = "test@example.com"
+            // Missing password and user_type
+        };
+
+        // Act
+        var response = await _client.PostAsJsonAsync("/v1/auth/login", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var content = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(content);
+
+        json.RootElement.GetProperty("errors").EnumerateArray().Should().NotBeEmpty();
+    }
+
+    [TestMethod]
+    public async Task POST_V1_Auth_Login_AccountLocked_Returns423WithLockedUntil()
+    {
+        // Arrange - Simulate account lockout by making 5 failed attempts first
+        var failedRequest = new
+        {
+            username = "locked@example.com",
+            password = "WrongPassword",
             user_type = "customer"
         };
 
-        // Act - Attempt 6 failed logins (exceeds 5 attempt limit)
-        HttpResponseMessage? lastResponse = null;
-        for (int i = 0; i < 6; i++)
+        // Make 5 failed attempts to trigger lockout
+        for (int i = 0; i < 5; i++)
         {
-            lastResponse = await _client.PostAsJsonAsync("/auth/login", request);
+            await _client.PostAsJsonAsync("/v1/auth/login", failedRequest);
         }
 
-        // Assert - This should FAIL until rate limiting is implemented
-        lastResponse!.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+        // Act - 6th attempt should return 423
+        var response = await _client.PostAsJsonAsync("/v1/auth/login", failedRequest);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Locked); // 423
+
+        var content = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(content);
+
+        json.RootElement.GetProperty("locked_until").GetString().Should().NotBeNullOrEmpty();
+        json.RootElement.GetProperty("error").GetString().Should().Contain("locked");
+    }
+
+    [TestMethod]
+    public async Task POST_V1_Auth_Login_RateLimitExceeded_Returns429WithRetryAfter()
+    {
+        // Arrange - Make 20+ failed requests from same IP to trigger rate limit
+        // Use different usernames to avoid account lockout (5 attempts per user)
+        // but same IP to trigger IP-based rate limiting (20 attempts per IP)
+
+        // Act - Make 21 failed requests with different usernames to exceed IP rate limit (20/15min)
+        HttpResponseMessage? response = null;
+        for (int i = 0; i < 21; i++)
+        {
+            var request = new
+            {
+                username = $"ratelimit{i}@example.com",  // Different username each time
+                password = "WrongPassword123!",  // Invalid password to trigger failed attempts
+                user_type = "customer"
+            };
+            response = await _client.PostAsJsonAsync("/v1/auth/login", request);
+        }
+
+        // Assert - 21st request should be rate limited
+        response!.StatusCode.Should().Be(HttpStatusCode.TooManyRequests); // 429
+        response.Headers.Should().ContainKey("Retry-After");
     }
 }

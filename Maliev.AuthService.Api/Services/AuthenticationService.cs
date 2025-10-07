@@ -1,216 +1,375 @@
 using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using Maliev.AuthService.Api.Models;
-using Maliev.AuthService.Api.Options;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
+using Maliev.AuthService.Api.Models.Request;
+using Maliev.AuthService.Api.Models.Response;
+using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
-using Maliev.AuthService.Data.Repositories;
-using Microsoft.Extensions.Options;
 
 namespace Maliev.AuthService.Api.Services;
 
-/// <summary>
-/// Main authentication service orchestrating login, refresh, validate, and revoke operations.
-/// </summary>
 public class AuthenticationService : IAuthenticationService
 {
-    private readonly ICredentialValidationService _credentialValidationService;
+    private readonly AuthDbContext _dbContext;
     private readonly ITokenGenerator _tokenGenerator;
     private readonly ITokenValidator _tokenValidator;
     private readonly IRefreshTokenService _refreshTokenService;
-    private readonly IRevokedAccessTokenRepository _revokedTokenRepository;
-    private readonly JwtOptions _jwtOptions;
+    private readonly IAccountLockoutService _accountLockoutService;
+    private readonly IRateLimitService _rateLimitService;
     private readonly ILogger<AuthenticationService> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
 
     public AuthenticationService(
-        ICredentialValidationService credentialValidationService,
+        AuthDbContext dbContext,
         ITokenGenerator tokenGenerator,
         ITokenValidator tokenValidator,
         IRefreshTokenService refreshTokenService,
-        IRevokedAccessTokenRepository revokedTokenRepository,
-        IOptions<JwtOptions> jwtOptions,
-        ILogger<AuthenticationService> logger)
+        IAccountLockoutService accountLockoutService,
+        IRateLimitService rateLimitService,
+        ILogger<AuthenticationService> logger,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration)
     {
-        _credentialValidationService = credentialValidationService;
+        _dbContext = dbContext;
         _tokenGenerator = tokenGenerator;
         _tokenValidator = tokenValidator;
         _refreshTokenService = refreshTokenService;
-        _revokedTokenRepository = revokedTokenRepository;
-        _jwtOptions = jwtOptions.Value;
+        _accountLockoutService = accountLockoutService;
+        _rateLimitService = rateLimitService;
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
     }
 
-    public async Task<LoginResponse?> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
+    public async Task<AuthenticationResult> AuthenticateAsync(LoginRequest request, string? ipAddress)
     {
-        // Parse user type
         var userType = request.UserType.ToLowerInvariant() == "customer" ? UserType.Customer : UserType.Employee;
 
-        // Validate credentials with external service
-        var validationResult = await _credentialValidationService.ValidateCredentialsAsync(
-            request.Username,
-            request.Password,
-            userType,
-            cancellationToken);
-
-        if (validationResult == null)
+        // Check rate limiting first
+        if (!string.IsNullOrEmpty(ipAddress) && await _rateLimitService.IsRateLimitExceededAsync(ipAddress))
         {
-            _logger.LogWarning("Login failed for user: {Username}", request.Username);
-            return null; // Invalid credentials
+            await LogAuditAsync(null, userType, "login", ipAddress, false, "Rate limit exceeded");
+            var blockedUntil = await _rateLimitService.GetBlockedUntilAsync(ipAddress);
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "rate_limit_exceeded",
+                ErrorDescription = "Too many failed attempts. Please try again later.",
+                RetryAfter = blockedUntil
+            };
         }
 
-        // Create token family for this login session
-        var familyId = await _refreshTokenService.CreateTokenFamilyAsync(validationResult.UserId, userType, cancellationToken);
+        var validationResult = await ValidateCredentialsAsync(request.Username, request.Password, userType);
 
-        // Generate access token
-        var claims = new[]
+        // Check account lockout BEFORE returning invalid credentials error
+        // This ensures locked accounts return 423 instead of 401
+        if (validationResult.UserId.HasValue && await _accountLockoutService.IsAccountLockedAsync(validationResult.UserId.Value, userType))
         {
-            new Claim(JwtRegisteredClaimNames.Sub, validationResult.UserId),
-            new Claim(JwtRegisteredClaimNames.Email, validationResult.Email),
-            new Claim(JwtRegisteredClaimNames.UniqueName, validationResult.Username),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new Claim("user_type", userType.ToString().ToLowerInvariant()),
-            new Claim(ClaimTypes.Name, validationResult.Username)
+            await LogAuditAsync(validationResult.UserId.Value, userType, "login", ipAddress, false, "Account locked");
+            var lockedUntil = await _accountLockoutService.GetLockedUntilAsync(validationResult.UserId.Value, userType);
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "account_locked",
+                ErrorDescription = "Account is locked due to too many failed login attempts.",
+                LockedUntil = lockedUntil
+            };
         }
-        .Concat(validationResult.Roles.Select(r => new Claim(ClaimTypes.Role, r)))
-        .Concat(validationResult.Permissions.Select(p => new Claim("permission", p)));
 
-        var accessToken = _tokenGenerator.GenerateAccessToken(claims);
-
-        // Generate and store refresh token
-        var refreshToken = _tokenGenerator.GenerateRefreshToken();
-        var refreshTokenHash = _tokenGenerator.HashRefreshToken(refreshToken);
-        var refreshExpiresAt = DateTime.UtcNow.AddSeconds(_jwtOptions.RefreshTokenLifetimeSeconds);
-
-        await _refreshTokenService.StoreRefreshTokenAsync(
-            refreshTokenHash,
-            validationResult.UserId,
-            userType,
-            familyId,
-            refreshExpiresAt,
-            cancellationToken);
-
-        _logger.LogInformation("User logged in successfully: {UserId}", validationResult.UserId);
-
-        return new LoginResponse
+        if (!validationResult.IsValid)
         {
-            AccessToken = accessToken,
-            RefreshToken = refreshToken,
-            ExpiresIn = _jwtOptions.AccessTokenLifetimeSeconds
+            // Record failed attempt for rate limiting
+            if (!string.IsNullOrEmpty(ipAddress))
+            {
+                await _rateLimitService.RecordFailedAttemptAsync(ipAddress);
+            }
+
+            // Record failed attempt for account lockout if we have a userId
+            if (validationResult.UserId.HasValue)
+            {
+                await _accountLockoutService.RecordFailedAttemptAsync(validationResult.UserId.Value, userType);
+            }
+
+            await LogAuditAsync(validationResult.UserId, userType, "login", ipAddress, false, validationResult.FailureReason);
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "invalid_credentials",
+                ErrorDescription = "Invalid username or password"
+            };
+        }
+
+        var userId = validationResult.UserId!.Value;
+
+        // Validate credentials succeeded, reset lockout
+        await _accountLockoutService.ResetFailedAttemptsAsync(userId, userType);
+
+        var accessToken = _tokenGenerator.GenerateAccessToken(userId, request.UserType, validationResult.Email, validationResult.Name);
+        var (refreshTokenEntity, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(userId, userType, ipAddress);
+
+        await LogAuditAsync(userId, userType, "login", ipAddress, true, null);
+
+        return new AuthenticationResult
+        {
+            Success = true,
+            Response = new LoginResponse
+            {
+                AccessToken = accessToken,
+                RefreshToken = refreshTokenValue,
+                TokenType = "Bearer",
+                ExpiresIn = 900,
+                User = new UserIdentityResponse
+                {
+                    UserId = userId.ToString(),
+                    UserType = request.UserType,
+                    Email = validationResult.Email,
+                    Name = validationResult.Name
+                }
+            }
         };
     }
 
-    public async Task<LoginResponse?> RefreshAsync(RefreshRequest request, CancellationToken cancellationToken = default)
+    public async Task<TokenResponse?> RefreshTokenAsync(RefreshRequest request, string? ipAddress)
     {
-        // Rotate refresh token (with reuse detection)
-        var newToken = await _refreshTokenService.RotateRefreshTokenAsync(request.RefreshToken, cancellationToken);
-
-        if (newToken == null)
+        var refreshToken = await _refreshTokenService.ValidateRefreshTokenAsync(request.RefreshToken);
+        if (refreshToken == null)
         {
-            _logger.LogWarning("Refresh token rotation failed");
-            return null; // Invalid or reused token
-        }
-
-        // Extract plaintext token from temporary storage
-        var newRefreshToken = newToken.TokenHash; // Was temporarily set to plaintext in RotateRefreshTokenAsync
-
-        // Generate new access token with same claims as original
-        var claims = new[]
-        {
-            new Claim(JwtRegisteredClaimNames.Sub, newToken.UserId),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new Claim("user_type", newToken.UserType.ToString().ToLowerInvariant())
-        };
-
-        var accessToken = _tokenGenerator.GenerateAccessToken(claims);
-
-        _logger.LogInformation("Refresh token rotated successfully for user: {UserId}", newToken.UserId);
-
-        return new LoginResponse
-        {
-            AccessToken = accessToken,
-            RefreshToken = newRefreshToken,
-            ExpiresIn = _jwtOptions.AccessTokenLifetimeSeconds
-        };
-    }
-
-    public async Task<ValidateResponse?> ValidateAsync(ValidateRequest request, CancellationToken cancellationToken = default)
-    {
-        // Validate JWT signature and claims
-        var principal = await _tokenValidator.ValidateTokenAsync(request.AccessToken);
-        if (principal == null)
-        {
-            _logger.LogWarning("Token validation failed: invalid signature or expired");
+            _logger.LogWarning("Invalid refresh token");
             return null;
         }
 
-        // Extract JTI and check if token is revoked
-        var jti = _tokenValidator.ExtractJti(request.AccessToken);
-        if (jti != null)
-        {
-            var isRevoked = await _revokedTokenRepository.IsRevokedAsync(jti, cancellationToken);
-            if (isRevoked)
-            {
-                _logger.LogWarning("Token validation failed: token is revoked (JTI: {Jti})", jti);
-                return null;
-            }
-        }
+        var (newRefreshTokenEntity, newRefreshTokenValue) = await _refreshTokenService.RotateRefreshTokenAsync(refreshToken, ipAddress);
+        var userTypeString = refreshToken.UserType == UserType.Customer ? "customer" : "employee";
+        var accessToken = _tokenGenerator.GenerateAccessToken(refreshToken.UserId, userTypeString);
 
-        // Extract user information from claims
-        var userId = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ?? "";
-        var userType = principal.FindFirst("user_type")?.Value ?? "";
-        var username = principal.FindFirst(JwtRegisteredClaimNames.UniqueName)?.Value ?? "";
-        var email = principal.FindFirst(JwtRegisteredClaimNames.Email)?.Value ?? "";
-        var roles = principal.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray();
-        var permissions = principal.FindAll("permission").Select(c => c.Value).ToArray();
+        await LogAuditAsync(refreshToken.UserId, refreshToken.UserType, "token_refresh", ipAddress, true, null);
 
-        return new ValidateResponse
+        return new TokenResponse
         {
-            UserId = userId,
-            UserType = userType,
-            Username = username,
-            Email = email,
-            Roles = roles,
-            Permissions = permissions
+            AccessToken = accessToken,
+            RefreshToken = newRefreshTokenValue,
+            TokenType = "Bearer",
+            ExpiresIn = 900
         };
     }
 
-    public async Task<bool> RevokeAsync(RevokeRequest request, CancellationToken cancellationToken = default)
+    public async Task<ValidateResponse> ValidateTokenAsync(ValidateRequest request)
     {
-        // Extract JTI and expiration from token
-        var jti = _tokenValidator.ExtractJti(request.AccessToken);
-        if (jti == null)
+        var principal = await _tokenValidator.ValidateAccessTokenAsync(request.AccessToken);
+        if (principal == null)
         {
-            _logger.LogWarning("Cannot revoke token: JTI not found");
+            return new ValidateResponse
+            {
+                Valid = false,
+                Error = "Invalid token"
+            };
+        }
+
+        // Use shorthand claim names since we disabled MapInboundClaims in TokenValidator
+        var jtiClaim = principal.FindFirst("jti");
+        if (jtiClaim != null && await _tokenValidator.IsTokenRevokedAsync(jtiClaim.Value))
+        {
+            return new ValidateResponse
+            {
+                Valid = false,
+                Error = "Token has been revoked"
+            };
+        }
+
+        var userId = principal.FindFirst("sub")?.Value;
+        var userType = principal.FindFirst("user_type")?.Value;
+
+        return new ValidateResponse
+        {
+            Valid = true,
+            UserId = userId,
+            UserType = userType
+        };
+    }
+
+    public async Task<bool> RevokeTokenAsync(RevokeRequest request)
+    {
+        var principal = await _tokenValidator.ValidateAccessTokenAsync(request.Token);
+        if (principal == null)
+        {
             return false;
         }
 
-        // Parse token to get expiration
-        var handler = new JwtSecurityTokenHandler();
-        JwtSecurityToken? token;
-        try
+        // Use shorthand claim names since we disabled MapInboundClaims in TokenValidator
+        var jtiClaim = principal.FindFirst("jti")?.Value;
+        var userIdClaim = principal.FindFirst("sub")?.Value;
+        var userTypeClaim = principal.FindFirst("user_type")?.Value;
+
+        if (string.IsNullOrEmpty(jtiClaim) || string.IsNullOrEmpty(userIdClaim))
         {
-            token = handler.ReadJwtToken(request.AccessToken);
-        }
-        catch
-        {
-            _logger.LogWarning("Cannot revoke token: invalid JWT format");
             return false;
         }
 
-        var expiresAt = token.ValidTo;
+        var userId = Guid.Parse(userIdClaim);
+        var userType = userTypeClaim?.ToLowerInvariant() == "customer" ? UserType.Customer : UserType.Employee;
 
-        // Store revocation
-        var revokedToken = new RevokedAccessToken
+        var expClaim = principal.FindFirst("exp")?.Value;
+        var expiresAt = expClaim != null
+            ? DateTimeOffset.FromUnixTimeSeconds(long.Parse(expClaim)).UtcDateTime
+            : DateTime.UtcNow.AddMinutes(15);
+
+        var revokedToken = new RevokedToken
         {
-            Jti = jti,
+            Id = Guid.NewGuid(),
+            Jti = jtiClaim,
+            UserId = userId,
+            UserType = userType,
             RevokedAt = DateTime.UtcNow,
             ExpiresAt = expiresAt,
-            Reason = request.Reason
+            Reason = "User requested revocation"
         };
 
-        await _revokedTokenRepository.RevokeAsync(revokedToken, cancellationToken);
+        _dbContext.RevokedTokens.Add(revokedToken);
+        await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("Access token revoked: {Jti}, Reason: {Reason}", jti, request.Reason ?? "not_specified");
+        await LogAuditAsync(userId, userType, "token_revoke", null, true, null);
 
         return true;
+    }
+
+    public async Task<bool> LogoutAsync(LogoutRequest request)
+    {
+        var refreshToken = await _refreshTokenService.ValidateRefreshTokenAsync(request.RefreshToken);
+        if (refreshToken == null)
+        {
+            return false;
+        }
+
+        await _refreshTokenService.RevokeTokenFamilyAsync(refreshToken.FamilyId, "User logout");
+
+        await LogAuditAsync(refreshToken.UserId, refreshToken.UserType, "logout", null, true, null);
+
+        return true;
+    }
+
+    public async Task<LoginResponse?> AuthenticateServiceAsync(ServiceLoginRequest request, string? ipAddress)
+    {
+        var serviceCredential = await _dbContext.ServiceCredentials
+            .FirstOrDefaultAsync(sc => sc.ClientId == request.ClientId && sc.IsActive);
+
+        if (serviceCredential == null)
+        {
+            await LogAuditAsync(null, null, "service_login", ipAddress, false, "Invalid client ID");
+            return null;
+        }
+
+        var secretHash = HashSecret(request.ClientSecret);
+        if (secretHash != serviceCredential.ClientSecretHash)
+        {
+            await LogAuditAsync(null, null, "service_login", ipAddress, false, "Invalid client secret");
+            return null;
+        }
+
+        var accessToken = await _tokenGenerator.GenerateServiceAccessTokenAsync(request.ClientId, serviceCredential.ServiceName);
+
+        await LogAuditAsync(null, null, "service_login", ipAddress, true, null);
+
+        return new LoginResponse
+        {
+            AccessToken = accessToken,
+            RefreshToken = null, // Service tokens don't have refresh tokens
+            TokenType = "Bearer",
+            ExpiresIn = 3600,
+            User = new UserIdentityResponse
+            {
+                UserId = request.ClientId,
+                UserType = "service",
+                Name = serviceCredential.ServiceName
+            }
+        };
+    }
+
+    private async Task<(bool IsValid, Guid? UserId, string? Email, string? Name, string? FailureReason)> ValidateCredentialsAsync(
+        string username, string password, UserType userType)
+    {
+        var serviceUrl = userType == UserType.Customer
+            ? _configuration["ExternalServices:CustomerService:BaseUrl"]
+            : _configuration["ExternalServices:EmployeeService:BaseUrl"];
+
+        if (string.IsNullOrEmpty(serviceUrl))
+        {
+            _logger.LogError("External service URL not configured for {UserType}", userType);
+            return (false, null, null, null, "Configuration error");
+        }
+
+        try
+        {
+            var timeoutSeconds = userType == UserType.Customer
+                ? _configuration.GetValue<int>("ExternalServices:CustomerService:TimeoutSeconds", 30)
+                : _configuration.GetValue<int>("ExternalServices:EmployeeService:TimeoutSeconds", 30);
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+
+            var client = _httpClientFactory.CreateClient();
+            var response = await client.PostAsJsonAsync($"{serviceUrl}/validate-credentials", new
+            {
+                username,
+                password
+            }, cts.Token);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return (false, null, null, null, "Invalid credentials");
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<CredentialValidationResult>();
+            if (result == null || !result.IsValid)
+            {
+                // Return UserId even for failed validation to enable account lockout tracking
+                return (false, result?.UserId, null, null, "Invalid credentials");
+            }
+
+            return (true, result.UserId, result.Email, result.Name, null);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("External service validation timed out for {UserType}", userType);
+            return (false, null, null, null, "Service timeout");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error validating credentials with external service");
+            return (false, null, null, null, "Service unavailable");
+        }
+    }
+
+    private string HashSecret(string secret)
+    {
+        using var sha256 = SHA256.Create();
+        var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(secret));
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    private async Task LogAuditAsync(Guid? userId, UserType? userType, string action, string? ipAddress, bool success, string? failureReason)
+    {
+        var auditLog = new AuthAuditLog
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            UserType = userType,
+            Action = action,
+            IpAddress = ipAddress ?? "unknown",
+            Success = success,
+            FailureReason = failureReason,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.AuthAuditLogs.Add(auditLog);
+        await _dbContext.SaveChangesAsync();
+    }
+
+    private class CredentialValidationResult
+    {
+        public bool IsValid { get; set; }
+        public Guid UserId { get; set; }
+        public string? Email { get; set; }
+        public string? Name { get; set; }
     }
 }

@@ -1,38 +1,35 @@
 namespace Maliev.AuthService.Data.Entities;
 
 /// <summary>
-/// Represents a token family - a lineage of refresh tokens from the same login session.
-/// Used to detect token reuse attacks.
+/// Tracks lineage of refresh tokens for detecting reuse across multiple refresh cycles.
 /// </summary>
 public class TokenFamily
 {
     /// <summary>
-    /// Unique identifier for the token family
+    /// Unique family identifier (Primary Key)
     /// </summary>
     public Guid FamilyId { get; set; }
 
     /// <summary>
-    /// The user ID this family belongs to
+    /// User who owns this token family
     /// </summary>
-    public required string UserId { get; set; }
+    public Guid UserId { get; set; }
 
     /// <summary>
-    /// The type of user (Customer or Employee)
+    /// User type (customer or employee)
     /// </summary>
     public UserType UserType { get; set; }
 
     /// <summary>
-    /// When the token family was created (initial login)
+    /// When family was created (initial login)
     /// </summary>
     public DateTime CreatedAt { get; set; }
 
     /// <summary>
-    /// When the most recent token in this family was used
+    /// Last time any token in family was refreshed
     /// </summary>
-    public DateTime LastUsedAt { get; set; }
+    public DateTime LastRefreshAt { get; set; }
 
-    /// <summary>
-    /// Navigation property to all refresh tokens in this family
-    /// </summary>
+    // Navigation property
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
 }

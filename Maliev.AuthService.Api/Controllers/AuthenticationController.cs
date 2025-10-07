@@ -1,178 +1,222 @@
-using Maliev.AuthService.Api.Models;
-using Maliev.AuthService.Api.Services;
-using Microsoft.AspNetCore.Authorization;
+using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.RateLimiting;
+using Maliev.AuthService.Api.Models.Request;
+using Maliev.AuthService.Api.Models.Response;
+using Maliev.AuthService.Api.Services;
 
 namespace Maliev.AuthService.Api.Controllers;
 
-/// <summary>
-/// Authentication controller providing JWT token operations.
-/// </summary>
 [ApiController]
-[Route("auth")]
-[Produces("application/json")]
+[Route("v1/auth")]
 public class AuthenticationController : ControllerBase
 {
     private readonly IAuthenticationService _authenticationService;
+    private readonly IValidator<LoginRequest> _loginValidator;
+    private readonly IValidator<RefreshRequest> _refreshValidator;
+    private readonly IValidator<ValidateRequest> _validateValidator;
+    private readonly IValidator<RevokeRequest> _revokeValidator;
+    private readonly IValidator<LogoutRequest> _logoutValidator;
+    private readonly IValidator<ServiceLoginRequest> _serviceLoginValidator;
     private readonly ILogger<AuthenticationController> _logger;
 
     public AuthenticationController(
         IAuthenticationService authenticationService,
+        IValidator<LoginRequest> loginValidator,
+        IValidator<RefreshRequest> refreshValidator,
+        IValidator<ValidateRequest> validateValidator,
+        IValidator<RevokeRequest> revokeValidator,
+        IValidator<LogoutRequest> logoutValidator,
+        IValidator<ServiceLoginRequest> serviceLoginValidator,
         ILogger<AuthenticationController> logger)
     {
         _authenticationService = authenticationService;
+        _loginValidator = loginValidator;
+        _refreshValidator = refreshValidator;
+        _validateValidator = validateValidator;
+        _revokeValidator = revokeValidator;
+        _logoutValidator = logoutValidator;
+        _serviceLoginValidator = serviceLoginValidator;
         _logger = logger;
     }
 
-    /// <summary>
-    /// Authenticates user and returns access + refresh tokens.
-    /// </summary>
-    /// <param name="request">Login credentials.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Login response with tokens.</returns>
     [HttpPost("login")]
-    [EnableRateLimiting("FixedLoginRateLimit")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status429TooManyRequests)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
-    public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
-        if (!ModelState.IsValid)
+        var validationResult = await _loginValidator.ValidateAsync(request);
+        if (!validationResult.IsValid)
         {
-            return BadRequest(new ErrorResponse
+            return BadRequest(new
             {
-                Error = "invalid_request",
-                Message = "Invalid request parameters",
-                CorrelationId = HttpContext.TraceIdentifier
+                error = "validation_error",
+                error_description = "Validation failed",
+                errors = validationResult.Errors.Select(e => e.ErrorMessage).ToArray()
             });
         }
 
-        var result = await _authenticationService.LoginAsync(request, cancellationToken);
+        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var result = await _authenticationService.AuthenticateAsync(request, ipAddress);
 
-        if (result == null)
+        if (!result.Success)
         {
+            if (result.ErrorCode == "account_locked")
+            {
+                return StatusCode(423, new
+                {
+                    error = result.ErrorCode,
+                    error_description = result.ErrorDescription,
+                    locked_until = result.LockedUntil?.ToString("o")
+                });
+            }
+
+            if (result.ErrorCode == "rate_limit_exceeded")
+            {
+                if (result.RetryAfter.HasValue)
+                {
+                    var retryAfterSeconds = (int)(result.RetryAfter.Value - DateTime.UtcNow).TotalSeconds;
+                    Response.Headers["Retry-After"] = retryAfterSeconds.ToString();
+                }
+
+                return StatusCode(429, new ErrorResponse
+                {
+                    Error = result.ErrorCode ?? "rate_limit_exceeded",
+                    ErrorDescription = result.ErrorDescription ?? "Too many requests"
+                });
+            }
+
             return Unauthorized(new ErrorResponse
             {
-                Error = "invalid_credentials",
-                Message = "Invalid username or password",
-                CorrelationId = HttpContext.TraceIdentifier
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
             });
         }
 
-        return Ok(result);
+        return Ok(result.Response);
     }
 
-    /// <summary>
-    /// Refreshes access token using refresh token (with rotation).
-    /// </summary>
-    /// <param name="request">Refresh request.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>New tokens.</returns>
     [HttpPost("refresh")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> Refresh([FromBody] RefreshRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Refresh([FromBody] RefreshRequest request)
     {
-        if (!ModelState.IsValid)
+        var validationResult = await _refreshValidator.ValidateAsync(request);
+        if (!validationResult.IsValid)
         {
             return BadRequest(new ErrorResponse
             {
-                Error = "invalid_request",
-                Message = "Invalid request parameters",
-                CorrelationId = HttpContext.TraceIdentifier
+                Error = "validation_error",
+                ErrorDescription = string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))
             });
         }
 
-        var result = await _authenticationService.RefreshAsync(request, cancellationToken);
+        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var result = await _authenticationService.RefreshTokenAsync(request, ipAddress);
 
         if (result == null)
         {
             return Unauthorized(new ErrorResponse
             {
-                Error = "token_family_invalidated",
-                Message = "Refresh token is invalid, expired, or has been reused",
-                CorrelationId = HttpContext.TraceIdentifier
+                Error = "invalid_token",
+                ErrorDescription = "Invalid or expired refresh token"
             });
         }
 
         return Ok(result);
     }
 
-    /// <summary>
-    /// Validates access token and returns user identity.
-    /// </summary>
-    /// <param name="request">Validation request.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>User identity.</returns>
     [HttpPost("validate")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(ValidateResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> Validate([FromBody] ValidateRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Validate([FromBody] ValidateRequest request)
     {
-        if (!ModelState.IsValid)
+        var validationResult = await _validateValidator.ValidateAsync(request);
+        if (!validationResult.IsValid)
         {
             return BadRequest(new ErrorResponse
             {
-                Error = "invalid_request",
-                Message = "Invalid request parameters",
-                CorrelationId = HttpContext.TraceIdentifier
+                Error = "validation_error",
+                ErrorDescription = string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))
             });
         }
 
-        var result = await _authenticationService.ValidateAsync(request, cancellationToken);
-
-        if (result == null)
-        {
-            return Unauthorized(new ErrorResponse
-            {
-                Error = "token_revoked",
-                Message = "Access token is invalid, expired, or has been revoked",
-                CorrelationId = HttpContext.TraceIdentifier
-            });
-        }
-
+        var result = await _authenticationService.ValidateTokenAsync(request);
         return Ok(result);
     }
 
-    /// <summary>
-    /// Revokes an access token.
-    /// </summary>
-    /// <param name="request">Revocation request.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>No content on success.</returns>
     [HttpPost("revoke")]
-    [AllowAnonymous]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> Revoke([FromBody] RevokeRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> Revoke([FromBody] RevokeRequest request)
     {
-        if (!ModelState.IsValid)
+        var validationResult = await _revokeValidator.ValidateAsync(request);
+        if (!validationResult.IsValid)
         {
             return BadRequest(new ErrorResponse
             {
-                Error = "invalid_request",
-                Message = "Invalid request parameters",
-                CorrelationId = HttpContext.TraceIdentifier
+                Error = "validation_error",
+                ErrorDescription = string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))
             });
         }
 
-        var result = await _authenticationService.RevokeAsync(request, cancellationToken);
+        var result = await _authenticationService.RevokeTokenAsync(request);
+
+        if (!result)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = "revocation_failed",
+                ErrorDescription = "Failed to revoke token"
+            });
+        }
+
+        return NoContent();
+    }
+
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout([FromBody] LogoutRequest request)
+    {
+        var validationResult = await _logoutValidator.ValidateAsync(request);
+        if (!validationResult.IsValid)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = "validation_error",
+                ErrorDescription = string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))
+            });
+        }
+
+        var result = await _authenticationService.LogoutAsync(request);
 
         if (!result)
         {
             return Unauthorized(new ErrorResponse
             {
                 Error = "invalid_token",
-                Message = "Token cannot be revoked",
-                CorrelationId = HttpContext.TraceIdentifier
+                ErrorDescription = "Invalid refresh token"
             });
         }
 
         return NoContent();
+    }
+
+    [HttpPost("service/login")]
+    public async Task<IActionResult> ServiceLogin([FromBody] ServiceLoginRequest request)
+    {
+        var validationResult = await _serviceLoginValidator.ValidateAsync(request);
+        if (!validationResult.IsValid)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = "validation_error",
+                ErrorDescription = string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))
+            });
+        }
+
+        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var result = await _authenticationService.AuthenticateServiceAsync(request, ipAddress);
+
+        if (result == null)
+        {
+            return Unauthorized(new ErrorResponse
+            {
+                Error = "invalid_credentials",
+                ErrorDescription = "Invalid client credentials"
+            });
+        }
+
+        return Ok(result);
     }
 }
