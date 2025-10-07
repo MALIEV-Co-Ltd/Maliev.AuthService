@@ -7,7 +7,7 @@ using Maliev.AuthService.Api.Services;
 namespace Maliev.AuthService.Api.Controllers;
 
 [ApiController]
-[Route("v1/auth")]
+[Route("v1")]
 public class AuthenticationController : ControllerBase
 {
     private readonly IAuthenticationService _authenticationService;

@@ -35,7 +35,7 @@ public class TokenRefreshContractTests
             user_type = "customer"
         };
 
-        var response = await _client.PostAsJsonAsync("/v1/auth/login", loginRequest);
+        var response = await _client.PostAsJsonAsync("/auth/v1/login", loginRequest);
         response.EnsureSuccessStatusCode();
 
         var content = await response.Content.ReadAsStringAsync();
@@ -58,7 +58,7 @@ public class TokenRefreshContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/refresh", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -81,7 +81,7 @@ public class TokenRefreshContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/refresh", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -103,11 +103,11 @@ public class TokenRefreshContractTests
         };
 
         // First use - should succeed
-        var firstResponse = await _client.PostAsJsonAsync("/v1/auth/refresh", request);
+        var firstResponse = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
         firstResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Act - Reuse the same token (should fail)
-        var response = await _client.PostAsJsonAsync("/v1/auth/refresh", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -125,7 +125,7 @@ public class TokenRefreshContractTests
         var request = new { };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/refresh", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);

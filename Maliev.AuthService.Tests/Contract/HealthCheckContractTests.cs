@@ -28,7 +28,7 @@ public class HealthCheckContractTests
     public async Task GET_Liveness_Returns200()
     {
         // Act
-        var response = await _client.GetAsync("/liveness");
+        var response = await _client.GetAsync("/auth/liveness");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -41,7 +41,7 @@ public class HealthCheckContractTests
     public async Task GET_Readiness_DatabaseHealthy_Returns200()
     {
         // Act
-        var response = await _client.GetAsync("/readiness");
+        var response = await _client.GetAsync("/auth/readiness");
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);

@@ -35,7 +35,7 @@ public class DebugTest
             user_type = "customer"
         };
 
-        var response = await _client.PostAsJsonAsync("/v1/auth/login", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
 
         var body = await response.Content.ReadAsStringAsync();
         Console.WriteLine($"Status: {response.StatusCode}");

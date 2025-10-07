@@ -35,7 +35,7 @@ public class TokenValidationContractTests
             user_type = "customer"
         };
 
-        var response = await _client.PostAsJsonAsync("/v1/auth/login", loginRequest);
+        var response = await _client.PostAsJsonAsync("/auth/v1/login", loginRequest);
         response.EnsureSuccessStatusCode();
 
         var content = await response.Content.ReadAsStringAsync();
@@ -58,7 +58,7 @@ public class TokenValidationContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/validate", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -81,7 +81,7 @@ public class TokenValidationContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/validate", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -105,14 +105,14 @@ public class TokenValidationContractTests
             token = accessToken,
             reason = "test_revocation"
         };
-        await _client.PostAsJsonAsync("/v1/auth/revoke", revokeRequest);
+        await _client.PostAsJsonAsync("/auth/v1/revoke", revokeRequest);
 
         // Act - Try to validate the revoked token
         var request = new
         {
             access_token = accessToken
         };
-        var response = await _client.PostAsJsonAsync("/v1/auth/validate", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -139,7 +139,7 @@ public class TokenValidationContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/validate", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);

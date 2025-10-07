@@ -38,7 +38,7 @@ public class AuthenticationContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/login", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -68,7 +68,7 @@ public class AuthenticationContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/login", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -92,7 +92,7 @@ public class AuthenticationContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/login", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -115,7 +115,7 @@ public class AuthenticationContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/login", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
@@ -140,11 +140,11 @@ public class AuthenticationContractTests
         // Make 5 failed attempts to trigger lockout
         for (int i = 0; i < 5; i++)
         {
-            await _client.PostAsJsonAsync("/v1/auth/login", failedRequest);
+            await _client.PostAsJsonAsync("/auth/v1/login", failedRequest);
         }
 
         // Act - 6th attempt should return 423
-        var response = await _client.PostAsJsonAsync("/v1/auth/login", failedRequest);
+        var response = await _client.PostAsJsonAsync("/auth/v1/login", failedRequest);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Locked); // 423
@@ -173,7 +173,7 @@ public class AuthenticationContractTests
                 password = "WrongPassword123!",  // Invalid password to trigger failed attempts
                 user_type = "customer"
             };
-            response = await _client.PostAsJsonAsync("/v1/auth/login", request);
+            response = await _client.PostAsJsonAsync("/auth/v1/login", request);
         }
 
         // Assert - 21st request should be rate limited

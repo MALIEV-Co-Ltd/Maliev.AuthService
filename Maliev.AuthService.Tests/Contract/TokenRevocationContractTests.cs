@@ -35,7 +35,7 @@ public class TokenRevocationContractTests
             user_type = "customer"
         };
 
-        var response = await _client.PostAsJsonAsync("/v1/auth/login", loginRequest);
+        var response = await _client.PostAsJsonAsync("/auth/v1/login", loginRequest);
         response.EnsureSuccessStatusCode();
 
         var content = await response.Content.ReadAsStringAsync();
@@ -59,7 +59,7 @@ public class TokenRevocationContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/revoke", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/revoke", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
@@ -77,11 +77,11 @@ public class TokenRevocationContractTests
         };
 
         // Act - First revocation
-        var firstResponse = await _client.PostAsJsonAsync("/v1/auth/revoke", request);
+        var firstResponse = await _client.PostAsJsonAsync("/auth/v1/revoke", request);
         firstResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         // Act - Second revocation (idempotent)
-        var response = await _client.PostAsJsonAsync("/v1/auth/revoke", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/revoke", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
@@ -97,7 +97,7 @@ public class TokenRevocationContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/revoke", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/revoke", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);

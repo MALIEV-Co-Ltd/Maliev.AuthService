@@ -19,7 +19,7 @@ builder.Host.UseSerilog();
 // Database Configuration
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    var connectionString = builder.Configuration.GetConnectionString("RefreshTokenDbContext")
         ?? throw new InvalidOperationException("Database connection string not configured");
 
     builder.Services.AddDbContext<AuthDbContext>(options =>
@@ -33,7 +33,7 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower;
     });
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddOpenApi();
+builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient();
 builder.Services.AddMemoryCache();
 
@@ -59,6 +59,9 @@ builder.Services.AddScoped<IValidator<ServiceLoginRequest>, ServiceLoginRequestV
 
 var app = builder.Build();
 
+// Configure base path for all routes
+app.UsePathBase("/auth");
+
 // Configure the HTTP request pipeline.
 
 // For testing: Set a fake IP address
@@ -74,15 +77,17 @@ if (app.Environment.IsEnvironment("Testing"))
 app.UseMiddleware<Maliev.AuthService.Api.Middleware.CorrelationIdMiddleware>();
 app.UseMiddleware<Maliev.AuthService.Api.Middleware.ExceptionHandlingMiddleware>();
 
-if (app.Environment.IsDevelopment())
+// Swagger UI (disabled in production)
+if (!app.Environment.IsProduction())
 {
-    app.MapOpenApi();
+    app.UseSwagger();
+    app.UseSwaggerUI(c => c.RoutePrefix = "swagger");
 }
 
 app.UseHttpsRedirection();
 app.UseAuthorization();
 
-// Health check endpoints
+// Health check endpoints (path base adds /auth prefix)
 app.MapGet("/liveness", () => "Healthy").AllowAnonymous();
 app.MapHealthChecks("/readiness", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {

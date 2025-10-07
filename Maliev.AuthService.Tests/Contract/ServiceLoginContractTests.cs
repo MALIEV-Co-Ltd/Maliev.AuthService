@@ -37,7 +37,7 @@ public class ServiceLoginContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/service/login", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/service/login", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -64,7 +64,7 @@ public class ServiceLoginContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/service/login", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/service/login", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -86,7 +86,7 @@ public class ServiceLoginContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/service/login", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/service/login", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -103,7 +103,7 @@ public class ServiceLoginContractTests
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/v1/auth/service/login", request);
+        var response = await _client.PostAsJsonAsync("/auth/v1/service/login", request);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
