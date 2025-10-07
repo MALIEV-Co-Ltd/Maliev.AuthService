@@ -19,7 +19,7 @@ builder.Host.UseSerilog();
 // Database Configuration
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    var connectionString = builder.Configuration.GetConnectionString("RefreshTokenDbContext")
+    var connectionString = builder.Configuration.GetConnectionString("AuthDbContext")
         ?? throw new InvalidOperationException("Database connection string not configured");
 
     builder.Services.AddDbContext<AuthDbContext>(options =>

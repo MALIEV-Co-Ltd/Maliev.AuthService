@@ -77,7 +77,7 @@ dotnet test Maliev.AuthService.Tests --verbosity normal
 kubectl port-forward -n maliev-dev postgres-cluster-1 5432:5432
 
 # Set connection string environment variable
-$env:RefreshTokenDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=<password>;"
+$env:AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=<password>;"
 
 # Create migration
 dotnet ef migrations add MigrationName --project Maliev.AuthService.Data
@@ -122,12 +122,12 @@ All endpoints are prefixed with `/auth` (configured via `UsePathBase("/auth")`):
 ```
 Jwt:PrivateKey - Base64-encoded RSA-2048 private key (PEM format)
 Jwt:PublicKey  - Base64-encoded RSA-2048 public key (PEM format)
-ConnectionStrings:RefreshTokenDbContext - PostgreSQL connection string
+ConnectionStrings:AuthDbContext - PostgreSQL connection string
 ```
 
 ### Environment Variables
 ```
-RefreshTokenDbContext="Server=localhost;Port=5432;Database=auth_app_db;..."
+AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;..."
 Jwt:Issuer="https://dev.api.maliev.com/auth"
 Jwt:Audience="https://dev.api.maliev.com"
 ExternalServices:CustomerService:BaseUrl="http://localhost:5001"
@@ -206,10 +206,10 @@ kubectl get pods -n maliev-dev | grep auth-service
 ### Issue: Tests fail with "Database connection string not configured"
 **Solution**: Tests use in-memory database. Ensure `IsEnvironment("Testing")` check in Program.cs.
 
-### Issue: Migration fails with "RefreshTokenDbContext environment variable not set"
+### Issue: Migration fails with "AuthDbContext environment variable not set"
 **Solution**: Set environment variable before running `dotnet ef database update`:
 ```powershell
-$env:RefreshTokenDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=<password>;"
+$env:AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=<password>;"
 ```
 
 ### Issue: Swagger UI returns 404

@@ -40,10 +40,10 @@ Production-ready JWT token-based authentication service with OAuth 2.0 token rot
 3. **Set connection string**
    ```powershell
    # Windows PowerShell
-   $env:RefreshTokenDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=dummy;"
+   $env:AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=dummy;"
 
    # Linux/macOS
-   export RefreshTokenDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=dummy;"
+   export AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=dummy;"
    ```
 
 4. **Run database migrations**
@@ -240,14 +240,14 @@ Production secrets are stored in Google Secret Manager:
 ```
 Jwt:PrivateKey  - Base64-encoded RSA-2048 private key (PEM format)
 Jwt:PublicKey   - Base64-encoded RSA-2048 public key (PEM format)
-ConnectionStrings:RefreshTokenDbContext - PostgreSQL connection string
+ConnectionStrings:AuthDbContext - PostgreSQL connection string
 ```
 
 ### Environment Variables
 
 ```bash
 # Database
-RefreshTokenDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=..."
+AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=..."
 
 # JWT Configuration
 Jwt:Issuer="https://dev.api.maliev.com/auth"
@@ -305,7 +305,7 @@ The service uses PostgreSQL with 7 entities:
 kubectl port-forward -n maliev-dev postgres-cluster-1 5432:5432
 
 # Set connection string
-export RefreshTokenDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=..."
+export AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=..."
 
 # Apply migrations
 dotnet ef database update --project Maliev.AuthService.Data
@@ -411,7 +411,7 @@ Each workflow:
 **Solution:** Swagger is disabled in production. Set `ASPNETCORE_ENVIRONMENT=Development` or `Staging`.
 
 ### Issue: Database migration fails
-**Solution:** Ensure PostgreSQL is running and `RefreshTokenDbContext` environment variable is set correctly.
+**Solution:** Ensure PostgreSQL is running and `AuthDbContext` environment variable is set correctly.
 
 ## Architecture
 
