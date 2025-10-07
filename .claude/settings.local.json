@@ -62,7 +62,9 @@
       "Bash(Select-String -Pattern \"Passed|Failed|Total\" -Context 0,1)",
       "Bash(python3:*)",
       "Bash(openssl genrsa:*)",
-      "Bash(openssl rsa:*)"
+      "Bash(openssl rsa:*)",
+      "Bash(cat:*)",
+      "Bash(gh run list:*)"
     ],
     "deny": [],
     "ask": []
