@@ -1,33 +1,60 @@
-using System.ComponentModel.DataAnnotations;
+namespace Maliev.AuthService.Data.Entities;
 
-namespace Maliev.AuthService.Data.Entities
+/// <summary>
+/// Represents a refresh token with family tracking for OAuth 2.0 RFC 9700 rotation and reuse detection.
+/// </summary>
+public class RefreshToken
 {
-    public class RefreshToken
-    {
-        [Key]
-        public int Id { get; set; }
+    /// <summary>
+    /// Unique token identifier (Primary Key)
+    /// </summary>
+    public Guid Id { get; set; }
 
-        [Required]
-        public required string Username { get; set; }
+    /// <summary>
+    /// Links tokens from the same login session for rotation tracking
+    /// </summary>
+    public Guid FamilyId { get; set; }
 
-        [Required]
-        public required string Token { get; set; }
+    /// <summary>
+    /// User identifier from external service (Customer or Employee API)
+    /// </summary>
+    public Guid UserId { get; set; }
 
-        [Required]
-        public DateTime Expires { get; set; }
+    /// <summary>
+    /// Distinguishes customer vs employee users
+    /// </summary>
+    public UserType UserType { get; set; }
 
-        public bool IsRevoked { get; set; }
+    /// <summary>
+    /// SHA-256 hash of the refresh token (64 characters hex)
+    /// </summary>
+    public string TokenHash { get; set; } = string.Empty;
 
-        public DateTime Created { get; set; }
+    /// <summary>
+    /// Indicates if token has been used for refresh (reuse detection)
+    /// </summary>
+    public bool IsUsed { get; set; }
 
-        public string? CreatedByIp { get; set; }
+    /// <summary>
+    /// When token was used for refresh (audit trail)
+    /// </summary>
+    public DateTime? UsedAt { get; set; }
 
-        public DateTime? Revoked { get; set; }
+    /// <summary>
+    /// Token expiration (7 days from creation)
+    /// </summary>
+    public DateTime ExpiresAt { get; set; }
 
-        public string? RevokedByIp { get; set; }
+    /// <summary>
+    /// Token creation timestamp
+    /// </summary>
+    public DateTime CreatedAt { get; set; }
 
-        public string? ReplacedByToken { get; set; }
+    /// <summary>
+    /// IP address when token was issued (security audit)
+    /// </summary>
+    public string? IpAddress { get; set; }
 
-        public bool IsActive => !IsRevoked && Expires > DateTime.UtcNow;
-    }
+    // Navigation property
+    public TokenFamily Family { get; set; } = null!;
 }
