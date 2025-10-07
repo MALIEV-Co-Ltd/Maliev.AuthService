@@ -87,7 +87,7 @@ This feature implements a production-ready JWT token-based authentication servic
 
 - Access token expiry: 15 minutes (security requirement)
 - Refresh token expiry: 7 days (user convenience vs security balance)
-- EdDSA (Ed25519) asymmetric signing (no HS256 shared secrets)
+- RSA-SHA256 (RSA-2048) asymmetric signing (no HS256 shared secrets)
 - SHA-256 hashing for refresh token storage (no plaintext)
 - External validation timeout: 5 seconds total (100ms/200ms/400ms retry)
 - Circuit breaker: 5 failures → 30 second open state
@@ -112,7 +112,7 @@ This feature implements a production-ready JWT token-based authentication servic
 - **II. Explicit Contracts**: ✅ OpenAPI/Swagger, API versioning, contract tests
 - **III. Test-First Development**: ✅ Red-Green-Refactor, 80% coverage, tests before implementation
 - **IV. Auditability**: ✅ Serilog structured logging, correlation IDs, Prometheus metrics
-- **V. Security**: ✅ EdDSA JWT signing, SHA-256 hashing, OAuth 2.0 RFC 9700 compliance
+- **V. Security**: ✅ RSA-SHA256 JWT signing, SHA-256 hashing, OAuth 2.0 RFC 9700 compliance
 - **VI. Secrets Management**: ✅ All secrets via Google Secret Manager environment variables
 - **VII. Zero Warnings**: ✅ TreatWarningsAsErrors enabled in all projects
 - **VIII. Clean Artifacts**: ✅ Proper .gitignore/.dockerignore, no boilerplate files
@@ -268,10 +268,10 @@ The structure separates concerns while maintaining simplicity appropriate for a 
 ### Research Tasks
 
 1. **JWT Signing Algorithm Selection** (EdDSA vs RSA vs ECDSA)
-   
-   - Decision needed: Confirm EdDSA (Ed25519) per FR-018
-   - Research: .NET 9 native support, key generation, rotation patterns
-   - Library: Microsoft.IdentityModel.Tokens EdDSA support
+
+   - **Decision made: RSA-2048 (RSA-SHA256)** per FR-018
+   - Rationale: Better .NET 9 native support, proven compatibility, industry standard
+   - Library: Microsoft.IdentityModel.Tokens with RsaSecurityKey
 
 2. **Refresh Token Storage Strategy** (SHA-256 hashing)
    

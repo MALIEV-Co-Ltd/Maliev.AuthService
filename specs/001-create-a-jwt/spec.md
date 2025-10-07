@@ -144,7 +144,7 @@ As a customer or employee of Maliev Co. Ltd., I need to securely authenticate wi
 **Token Validation**
 
 - **FR-017**: System MUST provide an endpoint to validate access tokens
-- **FR-018**: System MUST verify token signature using EdDSA (Ed25519) asymmetric cryptography algorithm. The system MUST validate that the token algorithm matches the expected algorithm from an allowlist (EdDSA), and MUST reject tokens with unexpected or 'none' algorithms
+- **FR-018**: System MUST verify token signature using RSA-SHA256 (RSA-2048) asymmetric cryptography algorithm. The system MUST validate that the token algorithm matches the expected algorithm from an allowlist (RS256), and MUST reject tokens with unexpected or 'none' algorithms
 - **FR-019**: System MUST verify token expiration when validating tokens
 - **FR-020**: System MUST return complete user identity information when validating a valid token: user_id, user_type, username, email, roles, and permissions
 - **FR-021**: System MUST return appropriate error information when validating an invalid or expired token
@@ -277,7 +277,7 @@ As a customer or employee of Maliev Co. Ltd., I need to securely authenticate wi
 - [x] **Refresh token rotation** - Implements automatic rotation with reuse detection (FR-015, FR-016)
 - [x] **Refresh token hashing** - SHA-256 hashing instead of encryption (FR-023)
 - [x] **Dual-factor rate limiting** - Account-based (5/15min) + IP-based (20/15min) (FR-026, FR-053)
-- [x] **JWT algorithm validation** - EdDSA/ES256 with allowlist validation (FR-018)
+- [x] **JWT algorithm validation** - RSA-SHA256 (RS256) with allowlist validation (FR-018)
 - [x] **Complete JWT claim validation** - iss, aud, exp, nbf, jti (FR-058)
 - [x] **Access token revocation** - Distributed event system (<2s propagation) (FR-060-062)
 - [x] **Service-to-service authentication** - Separate flows for microservices (FR-063-066)
