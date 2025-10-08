@@ -120,7 +120,7 @@ public class MockHttpMessageHandler : HttpMessageHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         // Mock credential validation
-        if (request.RequestUri?.PathAndQuery.Contains("validate-credentials") == true)
+        if (request.RequestUri?.PathAndQuery.Contains("/validate") == true)
         {
             // Read the request body to check credentials
             var requestBody = await request.Content!.ReadAsStringAsync(cancellationToken);

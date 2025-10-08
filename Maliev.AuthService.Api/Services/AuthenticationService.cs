@@ -293,9 +293,13 @@ public class AuthenticationService : IAuthenticationService
             ? _configuration["ExternalServices:CustomerService:BaseUrl"]
             : _configuration["ExternalServices:EmployeeService:BaseUrl"];
 
-        if (string.IsNullOrEmpty(serviceUrl))
+        var validationEndpoint = userType == UserType.Customer
+            ? _configuration["ExternalServices:CustomerService:ValidationEndpoint"]
+            : _configuration["ExternalServices:EmployeeService:ValidationEndpoint"];
+
+        if (string.IsNullOrEmpty(serviceUrl) || string.IsNullOrEmpty(validationEndpoint))
         {
-            _logger.LogError("External service URL not configured for {UserType}", userType);
+            _logger.LogError("External service URL or validation endpoint not configured for {UserType}", userType);
             return (false, null, null, null, "Configuration error");
         }
 
@@ -308,7 +312,7 @@ public class AuthenticationService : IAuthenticationService
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
 
             var client = _httpClientFactory.CreateClient();
-            var response = await client.PostAsJsonAsync($"{serviceUrl}/validate-credentials", new
+            var response = await client.PostAsJsonAsync($"{serviceUrl}{validationEndpoint}", new
             {
                 username,
                 password
