@@ -26,37 +26,43 @@ Production-ready JWT token-based authentication service with OAuth 2.0 token rot
 ### Local Development
 
 1. **Clone repository**
+   
    ```bash
    git clone https://github.com/MALIEV-Co-Ltd/Maliev.AuthService.git
    cd Maliev.AuthService
    ```
 
 2. **Set up PostgreSQL**
+   
    ```bash
    # Using Docker
    docker run --name auth-postgres -e POSTGRES_PASSWORD=dummy -p 5432:5432 -d postgres:15
    ```
 
 3. **Set connection string**
+   
    ```powershell
    # Windows PowerShell
    $env:AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=dummy;"
-
+   
    # Linux/macOS
    export AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=dummy;"
    ```
 
 4. **Run database migrations**
+   
    ```bash
    dotnet ef database update --project Maliev.AuthService.Data
    ```
 
 5. **Run the service**
+   
    ```bash
    dotnet run --project Maliev.AuthService.Api
    ```
 
 6. **Access Swagger UI**
+   
    ```
    http://localhost:5000/auth/swagger
    ```
@@ -68,6 +74,7 @@ All endpoints are prefixed with `/auth` base path.
 ### Authentication
 
 #### Login (Customer/Employee)
+
 ```http
 POST /auth/v1/login
 Content-Type: application/json
@@ -80,6 +87,7 @@ Content-Type: application/json
 ```
 
 **Response (200 OK):**
+
 ```json
 {
   "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
@@ -90,6 +98,7 @@ Content-Type: application/json
 ```
 
 **Error Codes:**
+
 - `400` - Invalid request (validation failure)
 - `401` - Invalid credentials
 - `423` - Account locked (too many failed attempts)
@@ -99,6 +108,7 @@ Content-Type: application/json
 ---
 
 #### Service Login
+
 ```http
 POST /auth/v1/service/login
 Content-Type: application/json
@@ -114,6 +124,7 @@ Content-Type: application/json
 ---
 
 #### Refresh Token
+
 ```http
 POST /auth/v1/refresh
 Content-Type: application/json
@@ -128,6 +139,7 @@ Content-Type: application/json
 **Token Rotation:** Each refresh generates a new token pair. Old refresh tokens are marked as used. If an old token is reused, the entire token family is invalidated for security.
 
 **Error Codes:**
+
 - `400` - Missing refresh token
 - `401` - Invalid/expired token
 - `403` - Token reuse detected (family invalidated)
@@ -135,6 +147,7 @@ Content-Type: application/json
 ---
 
 #### Validate Token
+
 ```http
 POST /auth/v1/validate
 Content-Type: application/json
@@ -145,6 +158,7 @@ Content-Type: application/json
 ```
 
 **Response (200 OK):**
+
 ```json
 {
   "user_id": "12345",
@@ -161,6 +175,7 @@ Content-Type: application/json
 ---
 
 #### Revoke Token
+
 ```http
 POST /auth/v1/revoke
 Content-Type: application/json
@@ -171,6 +186,7 @@ Content-Type: application/json
 ```
 
 **Response (200 OK):**
+
 ```json
 {
   "message": "Token revoked successfully"
@@ -182,6 +198,7 @@ Revoked tokens are stored in the database and checked during validation.
 ---
 
 #### Logout
+
 ```http
 POST /auth/v1/logout
 Content-Type: application/json
@@ -192,6 +209,7 @@ Content-Type: application/json
 ```
 
 **Response (200 OK):**
+
 ```json
 {
   "message": "Logged out successfully"
@@ -205,6 +223,7 @@ Invalidates the entire token family associated with the refresh token.
 ### Health Checks
 
 #### Liveness Probe
+
 ```http
 GET /auth/liveness
 ```
@@ -214,11 +233,13 @@ GET /auth/liveness
 ---
 
 #### Readiness Probe
+
 ```http
 GET /auth/readiness
 ```
 
 **Response (200 OK):**
+
 ```json
 {
   "status": "Healthy",
@@ -273,15 +294,19 @@ AccountLockout:LockoutDurationMinutes=15
 For production use, generate RSA-2048 key pairs:
 
 ```bash
-# Generate private key
+# Generate private key (PEM)
 openssl genrsa -out private_key.pem 2048
 
-# Extract public key
+# Convert private key to DER and base64 encode for Secret Manager
+openssl pkcs8 -topk8 -inform PEM -outform DER -in private_key.pem -out private_key.der -nocrypt
+base64 private_key.der -w 0 > private_key_base64.txt
+
+# Extract public key (PEM)
 openssl rsa -in private_key.pem -pubout -out public_key.pem
 
-# Base64 encode for Google Secret Manager
-cat private_key.pem | base64 -w 0 > private_key_base64.txt
-cat public_key.pem | base64 -w 0 > public_key_base64.txt
+# Convert public key to DER and base64 encode for Secret Manager
+openssl rsa -pubin -in public_key.pem -outform DER -out public_key.der
+base64 public_key.der -w 0 > public_key_base64.txt
 ```
 
 **Note:** Test keys are provided in `appsettings.Testing.json` for local development only.
@@ -359,6 +384,7 @@ GitHub Actions workflows handle automated deployment:
 - **main** branch → Production environment
 
 Each workflow:
+
 1. Builds and tests the service
 2. Creates Docker image
 3. Pushes to Google Artifact Registry
@@ -399,18 +425,23 @@ Each workflow:
 ## Troubleshooting
 
 ### Issue: Tests fail with database connection errors
+
 **Solution:** Tests use in-memory database. Ensure `ASPNETCORE_ENVIRONMENT=Testing` is set.
 
 ### Issue: Token validation always fails
+
 **Solution:** Verify public key matches the private key used for signing. Check Google Secret Manager configuration.
 
 ### Issue: Rate limit errors in development
+
 **Solution:** Increase rate limits in `appsettings.Development.json` or clear `IpRateLimit` table.
 
 ### Issue: SwaggerUI returns 404
+
 **Solution:** Swagger is disabled in production. Set `ASPNETCORE_ENVIRONMENT=Development` or `Staging`.
 
 ### Issue: Database migration fails
+
 **Solution:** Ensure PostgreSQL is running and `AuthDbContext` environment variable is set correctly.
 
 ## Architecture
