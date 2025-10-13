@@ -63,13 +63,35 @@ jobs:
         cd maliev-gitops/3-apps/maliev-auth-service/overlays/staging
         kustomize edit set image asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact/maliev-auth-service=asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-auth-service:$RELEASE_VERSION
         
-    - name: Commit and push changes
+    - name: Create Pull Request
+      env:
+        GH_TOKEN: ${{ secrets.GITOPS_PAT }}
       run: |
         cd maliev-gitops
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git add .
+
+        # Extract release version
         export RELEASE_VERSION=$(echo ${{ github.ref }} | sed -e 's,.*/v,,g')
-        git commit -m "Update auth-service image to $RELEASE_VERSION" || exit 0
-        git pull --rebase origin $(git branch --show-current) || true
-        git push
+
+        # Create a new branch for this update
+        BRANCH_NAME="auth-service/staging-$RELEASE_VERSION"
+        git checkout -b $BRANCH_NAME
+
+        # Commit and push changes to the new branch
+        git add .
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+          exit 0
+        fi
+
+        git commit -m "Update auth-service image to $RELEASE_VERSION"
+        git push origin $BRANCH_NAME
+
+        # Create pull request using GitHub CLI
+        gh pr create \
+          --title "Deploy auth-service $RELEASE_VERSION to staging" \
+          --body "Automated deployment of auth-service to staging environment.\n\nRelease: $RELEASE_VERSION\nTag: ${{ github.ref }}\nTriggered by: ${{ github.actor }}\nWorkflow: ${{ github.workflow }}" \
+          --base main \
+          --head $BRANCH_NAME \
+          --repo MALIEV-Co-Ltd/maliev-gitops

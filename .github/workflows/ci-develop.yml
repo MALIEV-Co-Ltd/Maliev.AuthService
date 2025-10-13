@@ -60,12 +60,32 @@ jobs:
         cd maliev-gitops/3-apps/maliev-auth-service/overlays/development
         kustomize edit set image asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact/maliev-auth-service=asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-dev/maliev-auth-service:${{ github.sha }}
         
-    - name: Commit and push changes
+    - name: Create Pull Request
+      env:
+        GH_TOKEN: ${{ secrets.GITOPS_PAT }}
       run: |
         cd maliev-gitops
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+        # Create a new branch for this update
+        BRANCH_NAME="auth-service/dev-${{ github.sha }}"
+        git checkout -b $BRANCH_NAME
+
+        # Commit and push changes to the new branch
         git add .
-        git commit -m "Update auth-service image to ${{ github.sha }}" || exit 0
-        git pull --rebase origin $(git branch --show-current) || true
-        git push
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+          exit 0
+        fi
+
+        git commit -m "Update auth-service image to ${{ github.sha }}"
+        git push origin $BRANCH_NAME
+
+        # Create pull request using GitHub CLI
+        gh pr create \
+          --title "Deploy auth-service ${{ github.sha }} to development" \
+          --body "Automated deployment of auth-service to development environment.\n\nCommit: ${{ github.sha }}\nTriggered by: ${{ github.actor }}\nWorkflow: ${{ github.workflow }}" \
+          --base main \
+          --head $BRANCH_NAME \
+          --repo MALIEV-Co-Ltd/maliev-gitops
