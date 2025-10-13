@@ -3,36 +3,27 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.0.0 → 1.0.0 (Initial Constitution)
+Version Change: 1.1.0 → 1.2.0 (Amendment: Business Metrics & Analytics Enforcement)
 Ratification Date: 2025-10-02
-Last Amendment: 2025-10-02
+Last Amendment: 2025-10-09
 
-PRINCIPLES DEFINED:
-- I. Service Autonomy (NON-NEGOTIABLE)
-- II. Explicit Contracts
-- III. Test-First Development (NON-NEGOTIABLE)
-- IV. Auditability & Observability
-- V. Security & Compliance
-- VI. Secrets Management & Configuration Security (NON-NEGOTIABLE)
-- VII. Zero Warnings Policy (NON-NEGOTIABLE)
-- VIII. Clean Project Artifacts (NON-NEGOTIABLE)
-- IX. Simplicity & Maintainability
+NEW PRINCIPLE ADDED:
+- X. Business Metrics & Analytics (NON-NEGOTIABLE)
 
-SECTIONS ADDED:
-- Deployment & Operations Standards
-- Development Workflow
-- Security Compliance & Audit Requirements
-- Governance
+UPDATES:
+- Deployment & Operations Standards: Metrics collection endpoints required.
+- Development Workflow: Tests must include analytics validation.
+- Governance: Constitution compliance extended to cover business analytics reporting.
 
 TEMPLATE UPDATES REQUIRED:
-✅ plan-template.md - Constitution Check section updated to reference all 9 principles
-✅ spec-template.md - No changes required (implementation-agnostic)
-✅ tasks-template.md - Updated validation to include security and artifact cleanup tasks
-✅ agent-file-template.md - No changes required (auto-generated from plans)
+✅ spec-template.md — add “Metrics & Analytics Requirements” section  
+✅ plan-template.md — reference Principle X compliance check  
+✅ tasks-template.md — add analytics instrumentation and test task before release  
+✅ monitoring-config.yaml — enforce standard metrics labels (service, version, region)
 
 FOLLOW-UP ITEMS:
-- None - All placeholders resolved
-- Constitution ready for immediate use
+- Centralize analytics ingestion via company telemetry gateway  
+- Define canonical metric taxonomy (revenue, user activity, conversion, uptime, etc.)
 -->
 
 ## Core Principles
@@ -42,158 +33,153 @@ FOLLOW-UP ITEMS:
 Each microservice must be **self-contained**:
 
 * Own database and schema
-* Own domain logic, independent of other services' internals
-* Communicate with other services only via stable APIs or event streams
+* Own domain logic
+* Interact with others only via APIs or events
 * No direct database access to another service
 
-**Rationale**: Service autonomy enables independent deployment, scaling, and team ownership. Violating this principle creates tight coupling that negates the benefits of microservices architecture.
+**Rationale:** Enables independent deployment, scaling, and ownership.
+
+---
 
 ### II. Explicit Contracts
 
-* All API endpoints must have **OpenAPI/Swagger documentation**
-* Data contracts must be versioned (MAJOR.MINOR)
-* Any schema or contract changes require backward-compatible migration or version bump
+* All APIs documented via **OpenAPI/Swagger**
+* Data contracts versioned (MAJOR.MINOR)
+* Backward-compatible migrations mandatory
 
-**Rationale**: Explicit contracts prevent breaking changes and enable safe evolution of services. Versioning ensures consumers can migrate at their own pace.
+**Rationale:** Prevents breaking changes and preserves consumer stability.
+
+---
 
 ### III. Test-First Development (NON-NEGOTIABLE)
 
-* Unit tests mandatory for all critical functionality
-* Integration tests required for inter-service interactions
-* Code must **fail tests before implementation**; adhere to Red-Green-Refactor cycle
-* Minimum coverage: 80% for business-critical logic
+* Tests authored **immediately after specification approval**, before implementation
+* Code must **fail tests first** (Red–Green–Refactor)
+* Unit, integration, and contract tests mandatory
+* Minimum 80 % coverage for business-critical logic
+* Test code reviewed equally with production code
 
-**Rationale**: TDD ensures code meets requirements before implementation begins, reduces bugs, and serves as living documentation of system behavior.
+**Rationale:** Ensures correctness before coding and keeps system behavior verifiable.
+
+---
 
 ### IV. Auditability & Observability
 
-* All operations must log structured events (JSON, stdout) with traceable user/action info
-* Audit logs must be tamper-proof and retained per company policy
-* Services must expose lightweight health checks (liveness/readiness)
+* Structured JSON logging with traceable user/action IDs
+* Immutable audit logs retained per policy
+* Health checks for liveness/readiness
 
-**Rationale**: Observability enables rapid incident response and debugging. Audit trails ensure compliance and accountability for business operations.
+**Rationale:** Enables compliance, diagnostics, and operational insight.
+
+---
 
 ### V. Security & Compliance
 
-* JWT-based authentication for service endpoints
-* Role-based authorization enforced for all operations
-* No sensitive data stored unencrypted
-* Follow relevant regulations (e.g., GDPR, Thai taxation for withholding tax)
+* JWT authentication, role-based authorization
+* Sensitive data encrypted at rest and in transit
+* Compliance with GDPR, Thai tax law, and all relevant regulations
 
-**Rationale**: Security is non-negotiable in production systems. Regulatory compliance protects the business from legal and financial risk.
+---
 
 ### VI. Secrets Management & Configuration Security (NON-NEGOTIABLE)
 
-**CRITICAL SECURITY REQUIREMENTS:**
+* No secrets in source code
+* Secrets injected from **Google Secret Manager**
+* Public repositories sanitized of real endpoints
+* Commits scanned for secrets before merge
 
-* **NEVER** store sensitive information in source code including:
-  - Database connection strings (username, password, server details)
-  - Production API endpoints (prevents DDOS attacks through exposed URLs)
-  - JWT signing keys, secrets, or tokens
-  - Service credentials, authentication tokens, or certificates
-  - Production environment URLs or internal service addresses
-  - Any configuration that could expose infrastructure topology
+**Rationale:** Prevents leaks and targeted attacks.
 
-* **ALL** sensitive configuration MUST be provided via environment variables sourced from Google Secret Manager
-
-* **SOURCE CODE RESTRICTIONS:**
-  - Source code MUST contain ONLY placeholder examples marked as `<secret-value>` or `${ENVIRONMENT_VARIABLE_NAME}`
-  - Localhost/development defaults are permitted ONLY for local development scenarios
-  - Test configurations MAY contain non-production values but MUST NOT expose real infrastructure
-
-* **DDOS PREVENTION:**
-  - Public repositories MUST NOT contain production API endpoints
-  - Documentation MUST use example domains (e.g., `https://example.com/api`) or placeholder patterns
-  - Internal service URLs MUST be abstracted through environment configuration
-
-* **MANDATORY SECURITY AUDIT:**
-  - ALL commits MUST be scanned for exposed secrets before merge
-  - Configuration files MUST be reviewed for production data leakage
-  - Documentation MUST be sanitized of real infrastructure references
-  - Violations MUST be remediated immediately with no exceptions
-
-**Rationale**: Exposed endpoints enable DDOS attacks, credential leakage compromises security, and infrastructure exposure facilitates targeted attacks against production systems.
+---
 
 ### VII. Zero Warnings Policy (NON-NEGOTIABLE)
 
-* All builds MUST produce **zero warnings and zero errors**
-* Exception: Preview versions of SDKs may generate warnings until stable release
-* Code analysis rules MUST be enforced without suppressions
-* Pull requests MUST NOT be merged with any build warnings
-* Warnings MUST be treated as build failures in CI/CD pipeline
+* Builds must emit zero warnings
+* Warnings treated as build failures
 
-**Rationale**: Warnings indicate potential bugs, maintainability issues, or deprecated patterns that can lead to production failures and technical debt.
+**Rationale:** Eliminates technical debt and instability.
+
+---
 
 ### VIII. Clean Project Artifacts (NON-NEGOTIABLE)
 
-* ALL unused files MUST be deleted from the repository including:
-  - Boilerplate files from project templates
-  - Sample/example files not relevant to the project
-  - Generated files that should be excluded (build artifacts, IDE files)
-  - Outdated documentation or configuration files
-  - Unused assets, images, or resources
-* Only project-specific artifacts that serve the current implementation MUST remain
-* Regular cleanup required during development and before each release
-* Git ignore patterns MUST exclude all generated and temporary files
+* Remove unused files, outdated docs, and generated artifacts
+* `.gitignore` must exclude temporary files
+* Cleanup enforced pre-release
 
-**Rationale**: Unused files create confusion, increase repository size, and can contain outdated or conflicting information that misleads developers.
+---
 
 ### IX. Simplicity & Maintainability
 
-* YAGNI principle: build only what is required
-* Avoid global state; stateless services preferred
-* Favor clear, readable code over clever optimizations
-* Shared libraries allowed only if fully documented, tested, and versioned
+* Apply YAGNI
+* Favor readable, stateless design
+* Shared libraries must be versioned and documented
 
-**Rationale**: Simple, maintainable code reduces cognitive load, accelerates onboarding, and minimizes bugs. Over-engineering increases complexity without proportional value.
+---
+
+### X. Business Metrics & Analytics (NON-NEGOTIABLE)
+
+* Every service must expose **business-relevant metrics and analytics endpoints** for use by the company’s telemetry pipeline.
+* Metrics must quantify both **system health** and **business outcomes**, including (where applicable):
+
+  * Number of processed jobs, quotes, or transactions
+  * Active users, conversion rates, and session durations
+  * Production throughput, revenue per feature, or machine utilization
+* Metrics must use **structured formats** compatible with Prometheus, OpenTelemetry, or other standard collectors.
+* Services must tag metrics with:
+
+  * `service_name`
+  * `version`
+  * `region`
+  * `environment` (dev/staging/prod)
+* Each release must define a clear mapping between **business objectives** and the metrics implemented.
+* Tests must validate the **presence and format** of required metrics endpoints.
+* Metrics must not expose confidential or personally identifiable information.
+
+**Rationale:** Analytics convert operational data into measurable business intelligence. This enables data-driven decisions for product strategy, cost optimization, and growth.
+
+---
 
 ## Deployment & Operations Standards
 
-* All services must support containerization (Docker)
-* Environment-specific configurations via environment variables
-* Backups, scaling, monitoring, and recovery handled at infrastructure level
-* Rate limiting and concurrency safeguards for critical endpoints
+* All services containerized via Docker
+* Configurable solely by environment variables
+* Rate limiting and recovery mechanisms mandatory
+* Services must emit metrics consumable by the central telemetry gateway
+* Metrics availability verified during deployment pipeline
+
+---
 
 ## Development Workflow
 
-* Feature branches named `XXX-description` with automated CI/CD
-* PRs must pass tests, code style, and review checks before merge
-* Changes to contracts, critical logic, or infrastructure require explicit review and approval
-* Versioning and changelogs mandatory for all service releases
+**Mandatory sequence:**
+
+1. Specification
+2. **Test Definition (includes metrics tests)**
+3. Implementation
+4. Validation (tests, coverage, analytics endpoints)
+5. Refactor
+
+* Pull requests without analytics instrumentation will be rejected.
+* CI/CD must verify both functional tests and metrics schema compliance.
+
+---
 
 ## Security Compliance & Audit Requirements
 
-### Pre-Commit Security Checklist
+* Pre-commit scans for secrets and sensitive endpoints
+* Compromised credentials rotated within 24 hours
+* Quarterly audits of metrics exposure to ensure no PII leakage
 
-**MANDATORY** verification before ANY commit to public repositories:
-
-* ✅ No production API endpoints in configuration files
-* ✅ No database connection strings with real credentials
-* ✅ No JWT signing keys or authentication secrets
-* ✅ No production service URLs or internal addresses
-* ✅ Documentation uses only placeholder/example domains
-* ✅ Test configurations contain no production references
-
-### Security Violation Response
-
-* **IMMEDIATE REMEDIATION REQUIRED** for any exposed secrets or endpoints
-* Compromised credentials MUST be rotated within 24 hours
-* Production systems MUST be monitored for unauthorized access following exposure
-* Security incidents MUST be reported to engineering leadership immediately
-
-### Continuous Security Monitoring
-
-* Automated scanning for secrets in all pull requests
-* Regular audit of configuration files and documentation
-* Quarterly review of security compliance across all services
-* Security training mandatory for all developers with repository access
+---
 
 ## Governance
 
-* Constitution supersedes any individual developer preference
-* All PRs must verify compliance with constitution principles AND security requirements
-* Amendments require documentation, approval by engineering leadership, and a migration plan
-* Violations must be flagged and corrected before merge or deployment
-* Security violations result in immediate pull request rejection
+* Constitution supersedes developer preference.
+* All PRs validated for constitutional and analytics compliance.
+* Amendments require leadership approval and documented migration plan.
+* Violations block merge or deployment.
 
-**Version**: 1.0.0 | **Ratified**: 2025-10-02 | **Last Amended**: 2025-10-02
+---
+
+**Version:** 1.2.0 | **Ratified:** 2025-10-02 | **Last Amended:** 2025-10-09
