@@ -66,6 +66,13 @@ jobs:
     - name: Create Pull Request
       env:
         GH_TOKEN: ${{ secrets.GITOPS_PAT }}
+        PR_BODY: |
+                  Automated deployment of auth-service to staging environment.
+        
+                  Release: $RELEASE_VERSION
+                  Tag: ${{ github.ref }}
+                  Triggered by: ${{ github.actor }}
+                  Workflow: ${{ github.workflow }}
       run: |
         cd maliev-gitops
         git config --global user.name 'github-actions[bot]'
@@ -91,7 +98,7 @@ jobs:
         # Create pull request using GitHub CLI
         gh pr create \
           --title "Deploy auth-service $RELEASE_VERSION to staging" \
-          --body "Automated deployment of auth-service to staging environment.\n\nRelease: $RELEASE_VERSION\nTag: ${{ github.ref }}\nTriggered by: ${{ github.actor }}\nWorkflow: ${{ github.workflow }}" \
+          --body "$PR_BODY" \
           --base main \
           --head $BRANCH_NAME \
           --repo MALIEV-Co-Ltd/maliev-gitops

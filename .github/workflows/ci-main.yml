@@ -64,6 +64,14 @@ jobs:
     - name: Create Pull Request
       env:
         GH_TOKEN: ${{ secrets.GITOPS_PAT }}
+        PR_BODY: |
+                  Automated deployment of auth-service to production environment.
+        
+                  ⚠️ **PRODUCTION DEPLOYMENT** - Please review carefully before merging.
+        
+                  Commit: ${{ github.sha }}
+                  Triggered by: ${{ github.actor }}
+                  Workflow: ${{ github.workflow }}
       run: |
         cd maliev-gitops
         git config --global user.name 'github-actions[bot]'
@@ -86,7 +94,9 @@ jobs:
         # Create pull request using GitHub CLI
         gh pr create \
           --title "Deploy auth-service ${{ github.sha }} to production" \
-          --body "Automated deployment of auth-service to production environment.\n\n⚠️ **PRODUCTION DEPLOYMENT** - Please review carefully before merging.\n\nCommit: ${{ github.sha }}\nTriggered by: ${{ github.actor }}\nWorkflow: ${{ github.workflow }}" \
+          --body "$PR_BODY" \
+Triggered by: ${{ github.actor }}
+Workflow: ${{ github.workflow }}" \
           --base main \
           --head $BRANCH_NAME \
           --repo MALIEV-Co-Ltd/maliev-gitops
