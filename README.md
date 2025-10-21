@@ -291,26 +291,53 @@ AccountLockout:LockoutDurationMinutes=15
 
 ### Generating RSA Keys
 
-For production use, generate RSA-2048 key pairs:
+For production use, generate RSA-2048 key pairs in **PEM format**:
 
 ```bash
-# Generate private key (PEM)
-openssl genrsa -out private_key.pem 2048
+# Generate private key in PKCS#8 PEM format
+openssl genpkey -algorithm RSA -out private_key.pem -pkeyopt rsa_keygen_bits:2048
 
-# Convert private key to DER and base64 encode for Secret Manager
-openssl pkcs8 -topk8 -inform PEM -outform DER -in private_key.pem -out private_key.der -nocrypt
-base64 private_key.der -w 0 > private_key_base64.txt
+# Extract public key in PEM format
+openssl rsa -pubout -in private_key.pem -out public_key.pem
 
-# Extract public key (PEM)
-openssl rsa -in private_key.pem -pubout -out public_key.pem
+# Base64 encode the PEM files for Google Secret Manager (single-line storage)
+# Linux/macOS
+base64 -w 0 private_key.pem > private_key_base64.txt
+base64 -w 0 public_key.pem > public_key_base64.txt
 
-# Convert public key to DER and base64 encode for Secret Manager
-openssl rsa -pubin -in public_key.pem -outform DER -out public_key.der
-base64 public_key.der -w 0 > public_key_base64.txt
+# Windows PowerShell
+[Convert]::ToBase64String([System.IO.File]::ReadAllBytes("private_key.pem")) | Out-File -Encoding ASCII -NoNewline private_key_base64.txt
+[Convert]::ToBase64String([System.IO.File]::ReadAllBytes("public_key.pem")) | Out-File -Encoding ASCII -NoNewline public_key_base64.txt
 ```
+
+**IMPORTANT:**
+- Keys must be stored as **base64-encoded PEM text** (not DER format)
+- The AuthService code uses `ImportFromPem()` which requires PEM format with BEGIN/END markers
+- Google Secret Manager requires single-line values, hence the base64 encoding
+- The code flow: base64 decode → UTF-8 decode → PEM text → ImportFromPem()
 
 **Note:** Test keys are provided in `appsettings.Testing.json` for local development only.
 
+### Verifying Key Format
+
+To verify your keys are in the correct PEM format after decoding:
+
+```bash
+# Decode and verify private key structure
+cat private_key_base64.txt | base64 -d | openssl pkey -text -noout
+
+# Decode and verify public key structure
+cat public_key_base64.txt | base64 -d | openssl pkey -pubin -text -noout
+
+# Verify the decoded output contains PEM headers
+cat private_key_base64.txt | base64 -d | head -n 1
+# Should output: -----BEGIN PRIVATE KEY-----
+
+cat public_key_base64.txt | base64 -d | head -n 1
+# Should output: -----BEGIN PUBLIC KEY-----
+```
+
+If these commands succeed and show the PEM headers, your keys are in the correct format for AuthService.
 ## Database Schema
 
 The service uses PostgreSQL with 7 entities:
