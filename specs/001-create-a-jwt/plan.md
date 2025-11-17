@@ -35,11 +35,11 @@ This feature implements a production-ready JWT token-based authentication servic
 
 ## Technical Context
 
-**Language/Version**: .NET 9.0 (ASP.NET Core 9.0)
+**Language/Version**: .NET 10.0 (ASP.NET Core 9.0)
 **Primary Dependencies**:
 
-- Entity Framework Core 9.0.9 (data access)
-- Npgsql 9.0.2 (PostgreSQL provider)
+- Entity Framework Core 9.0.10 (data access)
+- Npgsql 9.0.4 (PostgreSQL provider)
 - Microsoft.OpenApi 9.0.0 (Swagger/OpenAPI)
 - Serilog 8.0.2 (structured logging)
 - AutoMapper 12.0.1 (object mapping)

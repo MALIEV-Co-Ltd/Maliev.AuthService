@@ -306,8 +306,8 @@ public class AuthenticationService : IAuthenticationService
         try
         {
             var timeoutSeconds = userType == UserType.Customer
-                ? _configuration.GetValue<int>("ExternalServices:CustomerService:TimeoutSeconds", 30)
-                : _configuration.GetValue<int>("ExternalServices:EmployeeService:TimeoutSeconds", 30);
+                ? _configuration.GetValue<int>("ExternalServices:CustomerService:TimeoutInSeconds", 30)
+                : _configuration.GetValue<int>("ExternalServices:EmployeeService:TimeoutInSeconds", 30);
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
 

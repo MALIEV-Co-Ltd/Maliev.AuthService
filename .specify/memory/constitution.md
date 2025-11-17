@@ -3,27 +3,29 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.1.0 → 1.2.0 (Amendment: Business Metrics & Analytics Enforcement)
+Version Change: 1.2.0 → 1.3.0 (Amendment: PostgreSQL-Only Testing Enforcement)
 Ratification Date: 2025-10-02
-Last Amendment: 2025-10-09
+Last Amendment: 2025-10-16
 
 NEW PRINCIPLE ADDED:
-- X. Business Metrics & Analytics (NON-NEGOTIABLE)
+- IV. PostgreSQL-Only Testing (NON-NEGOTIABLE)
 
 UPDATES:
-- Deployment & Operations Standards: Metrics collection endpoints required.
-- Development Workflow: Tests must include analytics validation.
-- Governance: Constitution compliance extended to cover business analytics reporting.
+- All existing principles renumbered (IV→V, V→VI, VI→VII, VII→VIII, VIII→IX, IX→X, X→XI)
+- Test-First Development (Principle III): Now explicitly complemented by PostgreSQL-only requirement
+- Development Workflow: Integration tests must use PostgreSQL in Docker containers
+- CI/CD Pipeline: Must provision PostgreSQL test databases
 
 TEMPLATE UPDATES REQUIRED:
-✅ spec-template.md — add “Metrics & Analytics Requirements” section  
-✅ plan-template.md — reference Principle X compliance check  
-✅ tasks-template.md — add analytics instrumentation and test task before release  
-✅ monitoring-config.yaml — enforce standard metrics labels (service, version, region)
+✅ spec-template.md — update "Testing Strategy" section to mandate PostgreSQL
+✅ plan-template.md — reference Principle IV compliance check
+✅ tasks-template.md — ensure all integration test tasks specify PostgreSQL setup
+✅ test-setup-template.md — add PostgreSQL Docker Compose configuration
 
 FOLLOW-UP ITEMS:
-- Centralize analytics ingestion via company telemetry gateway  
-- Define canonical metric taxonomy (revenue, user activity, conversion, uptime, etc.)
+- Refactor all existing in-memory database tests to use PostgreSQL
+- Document PostgreSQL test database setup for local development and CI
+- Update CI/CD pipelines to provision PostgreSQL test containers
 -->
 
 ## Core Principles
@@ -63,7 +65,19 @@ Each microservice must be **self-contained**:
 
 ---
 
-### IV. Auditability & Observability
+### IV. PostgreSQL-Only Testing (NON-NEGOTIABLE)
+
+* **ALL tests MUST use PostgreSQL database** - no in-memory databases allowed
+* Integration tests MUST use real PostgreSQL instances (Docker containers for local/CI)
+* Test isolation achieved through database transactions or cleanup scripts
+* No EF Core InMemoryDatabase provider permitted in any test project
+* Test databases must mirror production schema exactly
+
+**Rationale:** In-memory databases have different behavior, concurrency handling, and constraints than PostgreSQL. Testing against production-like databases catches real-world issues early and eliminates false positives from in-memory quirks. This ensures test fidelity and production confidence.
+
+---
+
+### V. Auditability & Observability
 
 * Structured JSON logging with traceable user/action IDs
 * Immutable audit logs retained per policy
@@ -73,7 +87,7 @@ Each microservice must be **self-contained**:
 
 ---
 
-### V. Security & Compliance
+### VI. Security & Compliance
 
 * JWT authentication, role-based authorization
 * Sensitive data encrypted at rest and in transit
@@ -81,7 +95,7 @@ Each microservice must be **self-contained**:
 
 ---
 
-### VI. Secrets Management & Configuration Security (NON-NEGOTIABLE)
+### VII. Secrets Management & Configuration Security (NON-NEGOTIABLE)
 
 * No secrets in source code
 * Secrets injected from **Google Secret Manager**
@@ -92,7 +106,7 @@ Each microservice must be **self-contained**:
 
 ---
 
-### VII. Zero Warnings Policy (NON-NEGOTIABLE)
+### VIII. Zero Warnings Policy (NON-NEGOTIABLE)
 
 * Builds must emit zero warnings
 * Warnings treated as build failures
@@ -101,7 +115,7 @@ Each microservice must be **self-contained**:
 
 ---
 
-### VIII. Clean Project Artifacts (NON-NEGOTIABLE)
+### IX. Clean Project Artifacts (NON-NEGOTIABLE)
 
 * Remove unused files, outdated docs, and generated artifacts
 * `.gitignore` must exclude temporary files
@@ -109,7 +123,7 @@ Each microservice must be **self-contained**:
 
 ---
 
-### IX. Simplicity & Maintainability
+### X. Simplicity & Maintainability
 
 * Apply YAGNI
 * Favor readable, stateless design
@@ -117,7 +131,7 @@ Each microservice must be **self-contained**:
 
 ---
 
-### X. Business Metrics & Analytics (NON-NEGOTIABLE)
+### XI. Business Metrics & Analytics (NON-NEGOTIABLE)
 
 * Every service must expose **business-relevant metrics and analytics endpoints** for use by the company’s telemetry pipeline.
 * Metrics must quantify both **system health** and **business outcomes**, including (where applicable):
