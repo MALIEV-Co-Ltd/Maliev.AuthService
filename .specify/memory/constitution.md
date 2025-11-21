@@ -3,6 +3,31 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version Change: 1.5.0 → 1.6.0 (Amendment: .NET Aspire Integration & GitHub Packages)
+Ratification Date: 2025-10-02
+Last Amendment: 2025-11-21
+
+UPDATES:
+- Added Principle XIII: .NET Aspire Integration (NON-NEGOTIABLE)
+- ServiceDefaults must be consumed as NuGet package from GitHub Packages
+- Docker builds must use BuildKit secrets for NuGet authentication
+- CI/CD must authenticate with GITOPS_PAT (not GITHUB_TOKEN) for cross-repo packages
+
+TEMPLATE UPDATES REQUIRED:
+✅ constitution.md — Added Principle XIII for Aspire integration
+🔄 All microservices — Must update to use PackageReference for ServiceDefaults
+🔄 All Dockerfiles — Must use BuildKit secrets syntax
+🔄 All CI workflows — Must pass NuGet credentials
+
+FOLLOW-UP ITEMS:
+- Update remaining 19 microservices to use GitHub Packages for ServiceDefaults
+- Verify all GITOPS_PAT secrets have read:packages scope
+- Update CI workflows to use BuildKit secret flags in docker build
+-->
+
+<!--
+PREVIOUS SYNC IMPACT REPORT
+===========================
 Version Change: 1.4.0 → 1.5.0 (Amendment: Real Infrastructure Testing with Testcontainers)
 Ratification Date: 2025-10-02
 Last Amendment: 2025-11-18
@@ -170,6 +195,19 @@ Each microservice must be **self-contained**:
 
 ---
 
+### XIII. .NET Aspire Integration (NON-NEGOTIABLE)
+
+* **ServiceDefaults as NuGet Package**: All microservices MUST consume `Maliev.Aspire.ServiceDefaults` as a NuGet package from GitHub Packages, NOT as a project reference
+* **Package Source Configuration**: Each repository MUST have a `nuget.config` file pointing to GitHub Packages with credential placeholders
+* **CI/CD Authentication**: Workflows MUST use `GITOPS_PAT` (with `read:packages` scope) for NuGet authentication - `GITHUB_TOKEN` is insufficient for cross-repo packages
+* **Docker BuildKit Secrets**: Dockerfiles MUST use BuildKit secrets (`--mount=type=secret`) for NuGet credentials - using `ARG` for credentials is FORBIDDEN (exposes in image layers)
+* **Program.cs Integration**: All services MUST call `builder.AddServiceDefaults()` and `app.MapDefaultEndpoints()`
+* **nuget.config Mandatory**: Repository root MUST contain `nuget.config` with GitHub Packages source and `%NUGET_USERNAME%`/`%NUGET_PASSWORD%` placeholders
+
+**Rationale:** Each microservice has its own Git repository. Project references (`../../Maliev.Aspire/...`) fail in CI because the Aspire repository is not present in the microservice's checkout context. Using a NuGet package from GitHub Packages enables independent CI/CD pipelines while maintaining shared observability standards. BuildKit secrets prevent credential exposure in Docker image layers.
+
+---
+
 ## Deployment & Operations Standards
 
 * All services containerized via Docker
@@ -212,4 +250,4 @@ Each microservice must be **self-contained**:
 
 ---
 
-**Version:** 1.5.0 | **Ratified:** 2025-10-02 | **Last Amended:** 2025-11-18
+**Version:** 1.6.0 | **Ratified:** 2025-10-02 | **Last Amended:** 2025-11-21
