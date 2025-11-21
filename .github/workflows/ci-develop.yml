@@ -20,6 +20,9 @@ jobs:
 
       - name: Restore dependencies
         run: dotnet restore Maliev.AuthService.sln
+        env:
+          NUGET_USERNAME: ${{ github.actor }}
+          NUGET_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
         run: dotnet build Maliev.AuthService.sln --no-restore
@@ -89,9 +92,4 @@ jobs:
           git push origin $BRANCH_NAME
 
           # Create pull request using GitHub CLI
-          gh pr create \
-            --title "Deploy auth-service ${{ github.sha }} to development" \
-            --body "$PR_BODY" \
-            --base main \
-            --head $BRANCH_NAME \
-            --repo MALIEV-Co-Ltd/maliev-gitops
+          gh pr create             --title "Deploy auth-service ${{ github.sha }} to development"             --body "$PR_BODY"             --base main             --head $BRANCH_NAME             --repo MALIEV-Co-Ltd/maliev-gitops
