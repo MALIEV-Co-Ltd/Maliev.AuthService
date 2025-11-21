@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
 
 # This stage is used when running from VS in fast mode (Default for Debug configuration)
@@ -11,8 +12,6 @@ EXPOSE 8081
 # This stage is used to build the service project
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
-ARG NUGET_USERNAME
-ARG NUGET_PASSWORD
 WORKDIR /src
 
 # Copy nuget.config and project files
@@ -20,8 +19,12 @@ COPY ["nuget.config", "."]
 COPY ["Maliev.AuthService.Api/Maliev.AuthService.Api.csproj", "Maliev.AuthService.Api/"]
 COPY ["Maliev.AuthService.Data/Maliev.AuthService.Data.csproj", "Maliev.AuthService.Data/"]
 
-# Restore with GitHub Packages authentication
-RUN dotnet restore "./Maliev.AuthService.Api/Maliev.AuthService.Api.csproj"
+# Restore with GitHub Packages authentication using BuildKit secrets
+RUN --mount=type=secret,id=nuget_username \
+    --mount=type=secret,id=nuget_password \
+    NUGET_USERNAME=$(cat /run/secrets/nuget_username) \
+    NUGET_PASSWORD=$(cat /run/secrets/nuget_password) \
+    dotnet restore "./Maliev.AuthService.Api/Maliev.AuthService.Api.csproj"
 
 COPY . .
 WORKDIR "/src/Maliev.AuthService.Api"
