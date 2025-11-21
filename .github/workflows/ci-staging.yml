@@ -45,7 +45,7 @@ jobs:
         run: |
           gcloud auth configure-docker asia-southeast1-docker.pkg.dev
           export RELEASE_VERSION=$(echo ${{ github.ref }} | sed -e 's,.*/v,,g')
-          docker build -t asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-auth-service:$RELEASE_VERSION -f Maliev.AuthService.Api/Dockerfile .
+          docker build --build-arg NUGET_USERNAME=${{ github.actor }} --build-arg NUGET_PASSWORD=${{ secrets.GITOPS_PAT }} -t asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-auth-service:$RELEASE_VERSION -f Maliev.AuthService.Api/Dockerfile .
           docker push asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-staging/maliev-auth-service:$RELEASE_VERSION
 
       - name: Checkout maliev-gitops repository

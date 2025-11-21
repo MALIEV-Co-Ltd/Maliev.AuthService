@@ -11,10 +11,18 @@ EXPOSE 8081
 # This stage is used to build the service project
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
+ARG NUGET_USERNAME
+ARG NUGET_PASSWORD
 WORKDIR /src
+
+# Copy nuget.config and project files
+COPY ["nuget.config", "."]
 COPY ["Maliev.AuthService.Api/Maliev.AuthService.Api.csproj", "Maliev.AuthService.Api/"]
 COPY ["Maliev.AuthService.Data/Maliev.AuthService.Data.csproj", "Maliev.AuthService.Data/"]
+
+# Restore with GitHub Packages authentication
 RUN dotnet restore "./Maliev.AuthService.Api/Maliev.AuthService.Api.csproj"
+
 COPY . .
 WORKDIR "/src/Maliev.AuthService.Api"
 RUN dotnet build "./Maliev.AuthService.Api.csproj" -c $BUILD_CONFIGURATION -o /app/build
