@@ -3,29 +3,25 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version Change: 1.2.0 → 1.3.0 (Amendment: Docker Best Practices Enforcement)
+Version Change: 1.4.0 → 1.5.0 (Amendment: Real Infrastructure Testing with Testcontainers)
 Ratification Date: 2025-10-02
-Last Amendment: 2025-11-17
-
-NEW PRINCIPLE ADDED:
-- X. Docker Best Practices (NON-NEGOTIABLE)
+Last Amendment: 2025-11-18
 
 UPDATES:
-- All existing principles renumbered (X→XI, XI→XII)
-- Docker configuration standardized across all services
-- Mandatory use of built-in 'app' user from Microsoft ASP.NET images
-- .dockerignore files required for all services
-- .NET 10 base images mandated
+- Expanded Principle IV from "PostgreSQL-Only Testing" to "Real Infrastructure Testing"
+- Mandated Testcontainers for ALL infrastructure: PostgreSQL, RabbitMQ, Redis
+- Prohibited in-memory substitutes for databases, message queues, and caches
 
 TEMPLATE UPDATES REQUIRED:
-✅ argument.md — updated with Docker Best Practices section
-✅ All Dockerfiles — updated to use built-in app user and .NET 10 images
-✅ All services — .dockerignore files created
+✅ constitution.md — Principle IV expanded to cover all infrastructure dependencies
+🔄 All test projects — Must include Testcontainers for PostgreSQL, RabbitMQ, Redis
+🔄 All specs — plan.md must validate Real Infrastructure Testing compliance
 
 FOLLOW-UP ITEMS:
-- Verify CI/CD builds pass with new Docker configurations
-- Monitor image sizes after .dockerignore implementation
-- Ensure all services follow ownership optimization pattern
+- Update all existing test projects to use Testcontainers.RabbitMQ and Testcontainers.Redis
+- Add Testcontainers fixture setup for RabbitMQ and Redis in integration tests
+- Verify CI/CD has Docker daemon available for Testcontainers
+- Update quickstart.md in all specs to document infrastructure requirements
 -->
 
 ## Core Principles
@@ -65,15 +61,17 @@ Each microservice must be **self-contained**:
 
 ---
 
-### IV. PostgreSQL-Only Testing (NON-NEGOTIABLE)
+### IV. Real Infrastructure Testing (NON-NEGOTIABLE)
 
-* **ALL tests MUST use PostgreSQL database** - no in-memory databases allowed
-* Integration tests MUST use real PostgreSQL instances (Docker containers for local/CI)
-* Test isolation achieved through database transactions or cleanup scripts
-* No EF Core InMemoryDatabase provider permitted in any test project
-* Test databases must mirror production schema exactly
+* **ALL tests MUST use real infrastructure dependencies** via Testcontainers - no in-memory substitutes allowed
+* **PostgreSQL**: Real PostgreSQL instances required (no EF Core InMemoryDatabase provider permitted)
+* **RabbitMQ**: Real RabbitMQ instances required for message queue testing (no in-memory message buses)
+* **Redis**: Real Redis instances required for caching and distributed locking tests (no in-memory cache providers)
+* Integration tests MUST use Docker containers for all infrastructure (local/CI)
+* Test isolation achieved through database transactions, queue purging, or cleanup scripts
+* Test infrastructure must mirror production configuration exactly (same versions, same settings)
 
-**Rationale:** In-memory databases have different behavior, concurrency handling, and constraints than PostgreSQL. Testing against production-like databases catches real-world issues early and eliminates false positives from in-memory quirks. This ensures test fidelity and production confidence.
+**Rationale:** In-memory substitutes have different behavior, concurrency handling, and constraints than real infrastructure. Testing against production-like infrastructure catches real-world issues early (distributed locking race conditions, message serialization, connection pooling, transaction isolation) and eliminates false positives from in-memory quirks. This ensures test fidelity and production confidence across all infrastructure layers.
 
 ---
 
@@ -130,7 +128,7 @@ Each microservice must be **self-contained**:
 * **NO custom user creation** with `useradd`, `adduser`, or `addgroup` commands
 * Set ownership with `chown -R app:app /app` **BEFORE** the `USER app` directive
 * This ensures copied files inherit correct ownership from the start
-* Use `.dockerignore` to exclude build outputs, IDE files, specs, and CI/CD files
+* Use `.dockerignore` to exclude build outputs, IDE files, specs, CI/CD files, **and Test projects**
 * Multi-stage builds mandatory: SDK for build, ASP.NET runtime for final image
 * Use .NET 10 base images: `mcr.microsoft.com/dotnet/sdk:10.0` and `mcr.microsoft.com/dotnet/aspnet:10.0`
 * Health checks must validate service liveness endpoint
@@ -214,4 +212,4 @@ Each microservice must be **self-contained**:
 
 ---
 
-**Version:** 1.3.0 | **Ratified:** 2025-10-02 | **Last Amended:** 2025-11-17
+**Version:** 1.5.0 | **Ratified:** 2025-10-02 | **Last Amended:** 2025-11-18

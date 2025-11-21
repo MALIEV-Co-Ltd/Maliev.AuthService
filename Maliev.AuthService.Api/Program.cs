@@ -142,6 +142,9 @@ builder.Services.AddScoped<IValidator<RevokeRequest>, RevokeRequestValidator>();
 builder.Services.AddScoped<IValidator<LogoutRequest>, LogoutRequestValidator>();
 builder.Services.AddScoped<IValidator<ServiceLoginRequest>, ServiceLoginRequestValidator>();
 
+// Add service defaults for .NET Aspire
+builder.AddServiceDefaults();
+
 var app = builder.Build();
 
 // Configure base path for all routes
