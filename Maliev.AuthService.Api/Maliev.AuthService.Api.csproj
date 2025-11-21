@@ -25,11 +25,12 @@
     <PackageReference Include="Scalar.AspNetCore" Version="1.2.42" />
     <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
     <PackageReference Include="StackExchange.Redis" Version="2.9.25" />
+    <!-- Aspire ServiceDefaults from GitHub Packages -->
+    <PackageReference Include="Maliev.Aspire.ServiceDefaults" Version="1.0.*" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Maliev.AuthService.Data\Maliev.AuthService.Data.csproj" />
-    <ProjectReference Include="..\..\Maliev.Aspire\Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" />
   </ItemGroup>
 
   <ItemGroup>
