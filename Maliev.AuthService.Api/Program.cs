@@ -135,12 +135,7 @@ builder.Services.AddScoped<IRateLimitService, RateLimitService>();
 builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 
 // Validators
-builder.Services.AddScoped<IValidator<LoginRequest>, LoginRequestValidator>();
-builder.Services.AddScoped<IValidator<RefreshRequest>, RefreshRequestValidator>();
-builder.Services.AddScoped<IValidator<ValidateRequest>, ValidateRequestValidator>();
-builder.Services.AddScoped<IValidator<RevokeRequest>, RevokeRequestValidator>();
-builder.Services.AddScoped<IValidator<LogoutRequest>, LogoutRequestValidator>();
-builder.Services.AddScoped<IValidator<ServiceLoginRequest>, ServiceLoginRequestValidator>();
+builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // Add service defaults for .NET Aspire
 builder.AddServiceDefaults();
@@ -169,15 +164,19 @@ app.UseMiddleware<Maliev.AuthService.Api.Middleware.ExceptionHandlingMiddleware>
 if (!app.Environment.IsProduction())
 {
     app.MapOpenApi("/openapi/{documentName}.json");
-    app.MapScalarApiReference(options =>
+    // Map Scalar at /auth/scalar/v1 path (matches ingress /auth prefix)
+    app.MapScalarApiReference("/scalar/v1", options =>
     {
         options
             .WithTitle("Maliev Auth Service API")
-            .WithTheme(Scalar.AspNetCore.ScalarTheme.Saturn)
-            .WithDefaultHttpClient(Scalar.AspNetCore.ScalarTarget.CSharp, Scalar.AspNetCore.ScalarClient.HttpClient)
-            .WithEndpointPrefix("/scalar/{documentName}")
+            .WithTheme(ScalarTheme.Saturn)
+            .WithDefaultHttpClient(ScalarTarget.CSharp, ScalarClient.HttpClient)
             .WithOpenApiRoutePattern("/openapi/{documentName}.json");
     });
+
+    // Redirect root to Scalar
+    app.MapGet("/", () => Results.Redirect("/auth/scalar/v1")).ExcludeFromDescription();
+    app.MapGet("/scalar", () => Results.Redirect("/auth/scalar/v1")).ExcludeFromDescription();
 }
 
 app.UseHttpsRedirection();
