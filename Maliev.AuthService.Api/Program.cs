@@ -180,9 +180,13 @@ if (!app.Environment.IsEnvironment("Testing"))
         {
             startupLogger.LogInformation("Resolving AuthDbContext");
             var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-
+            startupLogger.LogInformation("AuthDbContext resolved successfully");
+            
             // Use EF Core Execution Strategy (native resilience) for database migrations
+            startupLogger.LogInformation("Creating execution strategy");
             var strategy = dbContext.Database.CreateExecutionStrategy();
+            startupLogger.LogInformation("Execution strategy created successfully");
+            
             startupLogger.LogInformation("Executing migration strategy");
 
             await strategy.ExecuteAsync(async () =>
