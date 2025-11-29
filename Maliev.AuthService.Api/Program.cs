@@ -329,20 +329,6 @@ try
     app.MapControllers();
     logger.LogInformation("Controllers mapped successfully");
 
-    // Map Aspire default endpoints (/health, /alive, /metrics) and service-specific endpoints (/auth/liveness, /auth/readiness)
-    logger.LogInformation("Mapping default endpoints...");
-    app.MapDefaultEndpoints(servicePrefix: "auth");
-    logger.LogInformation("Default endpoints mapped successfully");
-
-    logger.LogInformation("AuthService started successfully");
-
-    app.Run();
-}
-catch (Exception ex)
-{
-    // Log fatal exception to bootstrap logger (since it's safe)
-    bootstrapLogger.LogCritical(ex, "AuthService terminated unexpectedly during startup");
-    throw; // Re-throw to ensure process exits with error code
 }
 
 /// <summary>
