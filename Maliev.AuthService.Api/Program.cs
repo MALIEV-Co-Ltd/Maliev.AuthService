@@ -88,9 +88,6 @@ try
     // RabbitMQ Configuration (MassTransit)
     var rabbitmqConnectionString = builder.Configuration.GetConnectionString("rabbitmq");
 
-    // TEMPORARILY DISABLED - MassTransit is blocking startup even with WaitUntilStarted=false
-    // TODO: Re-enable once RabbitMQ connectivity is stable or find alternative configuration
-    /*
     if (!string.IsNullOrEmpty(rabbitmqConnectionString) && !builder.Environment.IsEnvironment("Testing"))
     {
         bootstrapLogger.LogInformation("Configuring MassTransit with RabbitMQ");
@@ -103,22 +100,19 @@ try
             {
                 cfg.Host(rabbitmqConnectionString, h =>
                 {
-                    // Set shorter timeouts to fail fast and not block startup
-                    h.RequestedConnectionTimeout(TimeSpan.FromSeconds(5));
-                    h.RequestedHeartbeat(TimeSpan.FromSeconds(10));
+                    // Set shorter timeouts to fail fast if RabbitMQ is truly unavailable
+                    h.RequestedConnectionTimeout(TimeSpan.FromSeconds(30));
+                    h.RequestedHeartbeat(TimeSpan.FromSeconds(60));
                 });
                 cfg.ConfigureEndpoints(context);
             });
-            
-            // Don't wait indefinitely for bus to start - fail fast
-            x.SetBusFactory(new RabbitMqBusFactory());
         });
         
         // Configure MassTransit hosted service to not block startup
         builder.Services.Configure<MassTransit.MassTransitHostOptions>(options =>
         {
             options.WaitUntilStarted = false; // Don't block app startup waiting for bus
-            options.StartTimeout = TimeSpan.FromSeconds(10); // Timeout if bus doesn't start in 10s
+            options.StartTimeout = TimeSpan.FromSeconds(60); // Increased timeout to match RabbitMQ handshake timeout
             options.StopTimeout = TimeSpan.FromSeconds(30);
         });
         
@@ -128,8 +122,6 @@ try
     {
         bootstrapLogger.LogInformation("RabbitMQ not configured (connection string: {HasRabbitMQ})", !string.IsNullOrEmpty(rabbitmqConnectionString));
     }
-    */
-    bootstrapLogger.LogInformation("MassTransit DISABLED - temporarily commented out to allow startup");
 
     // Database Configuration
     if (!builder.Environment.IsEnvironment("Testing"))
