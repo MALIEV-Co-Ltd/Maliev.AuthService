@@ -1,42 +1,31 @@
-using FluentValidation;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Api.Services;
-using Maliev.AuthService.Api.Validators;
 using Maliev.AuthService.Api.Models.Request;
 using Scalar.AspNetCore;
-using Serilog;
+using Prometheus;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
-
-// Serilog Configuration
-Log.Logger = new LoggerConfiguration()
-    .ReadFrom.Configuration(builder.Configuration)
-    .WriteTo.Console()
-    .CreateLogger();
-
-builder.Host.UseSerilog();
 
 // Load secrets from Google Secret Manager (Kubernetes /mnt/secrets volume mount)
 var secretsPath = "/mnt/secrets";
 if (Directory.Exists(secretsPath))
 {
     builder.Configuration.AddKeyPerFile(directoryPath: secretsPath, optional: true);
-    Log.Information("Loaded secrets from Google Secret Manager at {SecretsPath}", secretsPath);
-}
-else
-{
-    Log.Warning("Secrets path {SecretsPath} not found. Running without Secret Manager", secretsPath);
 }
 
 // Redis Distributed Cache Configuration
-var redisConnectionString = builder.Configuration["Redis:ConnectionString"];
-var redisEnabled = bool.TryParse(builder.Configuration["Redis:Enabled"], out var isRedisEnabled) && isRedisEnabled;
+var redisConnectionString = builder.Configuration.GetConnectionString("redis");
 
-if (redisEnabled && !string.IsNullOrEmpty(redisConnectionString) && !builder.Environment.IsEnvironment("Testing"))
+if (!builder.Environment.IsEnvironment("Testing"))
 {
+    if (string.IsNullOrEmpty(redisConnectionString))
+    {
+        throw new InvalidOperationException("Redis connection string not found. Expected 'ConnectionStrings:redis'");
+    }
+
     try
     {
         builder.Services.AddStackExchangeRedisCache(options =>
@@ -47,30 +36,19 @@ if (redisEnabled && !string.IsNullOrEmpty(redisConnectionString) && !builder.Env
 
         var redis = ConnectionMultiplexer.Connect(redisConnectionString);
         builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
-
-        Log.Information("Redis distributed cache configured: {RedisConnectionString}", redisConnectionString);
     }
     catch (Exception ex)
     {
-        Log.Warning(ex, "Redis connection failed - will use in-memory cache fallback");
+        throw new InvalidOperationException("Failed to connect to Redis", ex);
     }
-}
-else
-{
-    Log.Information("Redis disabled or not configured - using in-memory cache only");
 }
 
 builder.Services.AddMemoryCache(); // Fallback in-memory cache
 
 // RabbitMQ Configuration (MassTransit)
-var rabbitmqHost = builder.Configuration["RabbitMQ:Host"] ?? "localhost";
-var rabbitmqPort = int.TryParse(builder.Configuration["RabbitMQ:Port"], out var port) ? port : 5672;
-var rabbitmqUser = builder.Configuration["RabbitMQ:Username"] ?? "guest";
-var rabbitmqPassword = builder.Configuration["RabbitMQ:Password"] ?? "guest";
-var rabbitmqVhost = builder.Configuration["RabbitMQ:VirtualHost"] ?? "/";
-var rabbitmqEnabled = bool.TryParse(builder.Configuration["RabbitMQ:Enabled"], out var isRabbitmqEnabled) && isRabbitmqEnabled;
+var rabbitmqConnectionString = builder.Configuration.GetConnectionString("rabbitmq");
 
-if (rabbitmqEnabled && !builder.Environment.IsEnvironment("Testing"))
+if (!string.IsNullOrEmpty(rabbitmqConnectionString) && !builder.Environment.IsEnvironment("Testing"))
 {
     builder.Services.AddMassTransit(x =>
     {
@@ -79,21 +57,10 @@ if (rabbitmqEnabled && !builder.Environment.IsEnvironment("Testing"))
 
         x.UsingRabbitMq((context, cfg) =>
         {
-            cfg.Host(rabbitmqHost, (ushort)rabbitmqPort, rabbitmqVhost, h =>
-            {
-                h.Username(rabbitmqUser);
-                h.Password(rabbitmqPassword);
-            });
-
+            cfg.Host(rabbitmqConnectionString);
             cfg.ConfigureEndpoints(context);
         });
     });
-
-    Log.Information("MassTransit configured with RabbitMQ: {Host}:{Port}", rabbitmqHost, rabbitmqPort);
-}
-else
-{
-    Log.Information("RabbitMQ/MassTransit disabled by configuration");
 }
 
 // Database Configuration
@@ -103,7 +70,20 @@ if (!builder.Environment.IsEnvironment("Testing"))
         ?? throw new InvalidOperationException("Database connection string not configured");
 
     builder.Services.AddDbContext<AuthDbContext>(options =>
-        options.UseNpgsql(connectionString));
+    {
+        options.UseNpgsql(connectionString, npgsqlOptions =>
+        {
+            npgsqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(10),
+                errorCodesToAdd: null);
+        });
+
+        // Suppress "Failed executing DbCommand" logs (EventId 20102) which occur during migration checks
+        // Actual failures will still throw exceptions and be logged by the try-catch block
+        options.ConfigureWarnings(warnings => 
+            warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.CommandError));
+    });
 }
 
 // Services
@@ -116,14 +96,29 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 builder.Services.AddHttpClient();
 
+// CORS Configuration
+var corsOrigins = builder.Configuration["CORS:AllowedOrigins"]?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+    ?? new[] { "http://localhost:3000" };
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins(corsOrigins)
+              .AllowAnyMethod()
+              .AllowAnyHeader()
+              .AllowCredentials();
+    });
+});
+
 // Health Checks
 var healthChecksBuilder = builder.Services.AddHealthChecks()
-    .AddDbContextCheck<AuthDbContext>(tags: new[] { "readiness" });
+    .AddDbContextCheck<AuthDbContext>(tags: new[] { "db", "ready" });
 
 // Add Redis health check if enabled
-if (redisEnabled && !string.IsNullOrEmpty(redisConnectionString))
+if (!string.IsNullOrEmpty(redisConnectionString))
 {
-    healthChecksBuilder.AddRedis(redisConnectionString, "redis", tags: new[] { "readiness" });
+    healthChecksBuilder.AddRedis(redisConnectionString, "redis", tags: new[] { "db", "ready" });
 }
 
 // Application Services
@@ -135,15 +130,84 @@ builder.Services.AddScoped<IRateLimitService, RateLimitService>();
 builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 
 // Validators
-builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
-// Add service defaults for .NET Aspire
+
+// Add service defaults for .NET Aspire (includes OpenTelemetry logging)
 builder.AddServiceDefaults();
 
 var app = builder.Build();
 
+// Get logger for startup logging
+var logger = app.Services.GetRequiredService<ILogger<Program>>();
+
+// Run database migrations on startup (skip in Testing environment)
+if (!app.Environment.IsEnvironment("Testing"))
+{
+    using (var scope = app.Services.CreateScope())
+    {
+        try
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+            
+            // Use EF Core Execution Strategy (native resilience) for database migrations
+            var strategy = dbContext.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () => 
+            {
+                // Pre-check connectivity to avoid "Failed executing DbCommand" error logs
+                int retryCount = 0;
+                while (!await dbContext.Database.CanConnectAsync())
+                {
+                    if (retryCount >= 20) break;
+                    retryCount++;
+                    logger.LogInformation("Waiting for database connectivity (Attempt {Attempt})...", retryCount);
+                    await Task.Delay(TimeSpan.FromSeconds(1));
+                }
+
+                logger.LogInformation("Applying database migrations...");
+                await dbContext.Database.MigrateAsync();
+                logger.LogInformation("Database migrations applied successfully");
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to apply database migrations");
+            throw;
+        }
+    }
+}
+
+// Log startup configuration
+if (Directory.Exists(secretsPath))
+{
+    logger.LogInformation("Loaded secrets from Google Secret Manager at {SecretsPath}", secretsPath);
+}
+else
+{
+    logger.LogInformation("Secrets path {SecretsPath} not found. Using environment variables.", secretsPath);
+}
+
+if (!string.IsNullOrEmpty(redisConnectionString) && !builder.Environment.IsEnvironment("Testing"))
+{
+    logger.LogInformation("Redis distributed cache configured with connection string");
+}
+else
+{
+    logger.LogInformation("Redis connection string not found or environment is Testing - using in-memory cache only");
+}
+
+if (!string.IsNullOrEmpty(rabbitmqConnectionString) && !builder.Environment.IsEnvironment("Testing"))
+{
+    logger.LogInformation("MassTransit configured with RabbitMQ");
+}
+else
+{
+    logger.LogInformation("RabbitMQ connection string not found or environment is Testing - MassTransit disabled");
+}
+
+logger.LogInformation("CORS configured with origins: {Origins}", string.Join(", ", corsOrigins));
+
 // Configure base path for all routes
-app.UsePathBase("/auth");
+// app.UsePathBase("/auth");
 
 // Configure the HTTP request pipeline.
 
@@ -160,38 +224,43 @@ if (app.Environment.IsEnvironment("Testing"))
 app.UseMiddleware<Maliev.AuthService.Api.Middleware.CorrelationIdMiddleware>();
 app.UseMiddleware<Maliev.AuthService.Api.Middleware.ExceptionHandlingMiddleware>();
 
-// Scalar API Documentation (disabled in production)
-if (!app.Environment.IsProduction())
-{
-    app.MapOpenApi("/openapi/{documentName}.json");
-    // Map Scalar at /auth/scalar/v1 path (matches ingress /auth prefix)
-    app.MapScalarApiReference("/scalar/v1", options =>
-    {
-        options
-            .WithTitle("Maliev Auth Service API")
-            .WithTheme(ScalarTheme.Saturn)
-            .WithDefaultHttpClient(ScalarTarget.CSharp, ScalarClient.HttpClient)
-            .WithOpenApiRoutePattern("/openapi/{documentName}.json");
-    });
-
-    // Redirect root to Scalar
-    app.MapGet("/", () => Results.Redirect("/auth/scalar/v1")).ExcludeFromDescription();
-    app.MapGet("/scalar", () => Results.Redirect("/auth/scalar/v1")).ExcludeFromDescription();
-}
-
 app.UseHttpsRedirection();
+app.UseRouting();
+app.UseCors();
 app.UseAuthorization();
 
-// Health check endpoints (path base adds /auth prefix)
-app.MapGet("/liveness", () => "Healthy").AllowAnonymous();
-app.MapHealthChecks("/readiness", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+// Scalar API Documentation (development and staging only)
+if (app.Environment.IsDevelopment() || app.Environment.IsStaging())
+{
+    app.MapOpenApi("/auth/openapi/{documentName}.json");
+    app.MapScalarApiReference("/auth/scalar", options =>
+    {
+        options.WithOpenApiRoutePattern("/auth/openapi/{documentName}.json");
+    });
+
+    logger.LogInformation("OpenAPI available at: /auth/openapi/v1.json");
+    logger.LogInformation("Scalar API reference available at: /auth/scalar");
+}
+
+// Map controllers with /auth prefix
+app.MapControllers();
+
+// Map Aspire default endpoints (/health, /alive, /metrics)
+app.MapDefaultEndpoints();
+
+// Additional custom health checks with /auth prefix for ingress compatibility
+app.MapGet("/auth/liveness", () => "Healthy").AllowAnonymous();
+app.MapHealthChecks("/auth/readiness", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = healthCheck => healthCheck.Tags.Contains("readiness")
 });
 
-app.MapControllers();
+logger.LogInformation("AuthService started successfully");
 
 app.Run();
 
+/// <summary>
+/// Main program class for the application
+/// </summary>
 // Make Program class accessible to tests
 public partial class Program { }

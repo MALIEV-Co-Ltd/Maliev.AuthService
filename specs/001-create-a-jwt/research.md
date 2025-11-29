@@ -11,29 +11,29 @@ This document consolidates research findings for implementing a production-ready
 
 ## 1. JWT Signing Algorithm Selection
 
-### Decision: EdDSA with Ed25519 Curve
+### Decision: RSA-2048 (RS256)
 
 ### Rationale:
-- **Performance**: EdDSA (Ed25519) provides faster signature generation and verification compared to RSA and ECDSA
-- **Security**: 256-bit security level, resistant to timing attacks
-- **Key Size**: Compact keys (32 bytes private, 32 bytes public) vs RSA's larger keys
-- **Industry Adoption**: Supported by modern JWT libraries, recommended by security experts
-- **OAuth 2.0 Compliance**: Listed in JWT Best Current Practice (RFC 8725)
+- **Compatibility**: RS256 is the most widely supported algorithm across all JWT libraries and platforms
+- **Performance**: Hardware acceleration for RSA is ubiquitous, performance difference is negligible for this use case
+- **Security**: 2048-bit RSA provides sufficient security margin for current standards (NIST recommendations)
+- **Standard Compliance**: RS256 is the mandatory "must implement" algorithm in JWT RFCs
 
 ### Alternatives Considered:
-- **RSA (RS256)**: Rejected - Slower performance, larger keys, more CPU intensive
-- **ECDSA (ES256)**: Rejected - More complex implementation, potential nonce reuse vulnerabilities
+- **EdDSA (Ed25519)**: Rejected - While faster, library support is less universal than RSA
+- **ECDSA (ES256)**: Rejected - Potential nonce reuse vulnerabilities if RNG is weak
 - **HS256 (HMAC)**: Rejected - Symmetric algorithm unsuitable for distributed token validation (requires shared secret)
 
 ### Implementation:
 ```csharp
-// .NET 9.0 supports EdDSA natively
+// .NET 10.0 Implementation
 using System.Security.Cryptography;
 using Microsoft.IdentityModel.Tokens;
 
-var privateKey = EdDsa.Create(EdDsaCurve.Ed25519);
-var signingKey = new EdDsaSecurityKey(privateKey);
-var signingCredentials = new SigningCredentials(signingKey, SecurityAlgorithms.EdDsa);
+var rsa = RSA.Create();
+rsa.ImportFromPem(privateKeyPem); // Load from PEM
+var signingKey = new RsaSecurityKey(rsa);
+var signingCredentials = new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256);
 ```
 
 ---
@@ -167,7 +167,7 @@ var circuitBreakerPolicy = Policy
 ### Rationale:
 - **Defense in Depth**: Multiple layers provide comprehensive protection
 - **Granular Control**: Different limits for different threat models
-- **ASP.NET Core 9.0 Native**: Built-in rate limiting avoids external dependencies
+- **ASP.NET Core 10.0 Native**: Built-in rate limiting avoids external dependencies
 
 ### Layers:
 1. **Account-Based Rate Limiting**: 5 failed attempts → 15min lockout (prevents brute force per account)
@@ -181,7 +181,7 @@ var circuitBreakerPolicy = Policy
 ### Alternatives Considered:
 - **Single Layer (Account Only)**: Rejected - Vulnerable to distributed attacks across many accounts
 - **CAPTCHA**: Rejected - Not suitable for API-first microservice architecture
-- **Third-Party Rate Limiter**: Rejected - ASP.NET Core 9.0 built-in provides sufficient functionality
+- **Third-Party Rate Limiter**: Rejected - ASP.NET Core 10.0 built-in provides sufficient functionality
 
 ### Implementation:
 ```csharp
@@ -311,8 +311,8 @@ builder.Services.AddHttpClient<ICustomerServiceClient, CustomerServiceClient>((s
 - **Production Parity**: Test environment mirrors production database behavior
 
 ### Test Infrastructure:
-1. **docker-compose.test.yml**: Local PostgreSQL 18 container for development testing
-2. **GitHub Actions Service Container**: PostgreSQL 18 with health checks in CI/CD
+1. **docker-compose.test.yml**: Local PostgreSQL 15+ container for development testing
+2. **GitHub Actions Service Container**: PostgreSQL 15+ with health checks in CI/CD
 3. **TestDatabaseFixture**: Shared fixture applies migrations and seeds reference data
 4. **Cleanup Pattern**: Delete test data between tests, reuse schema for performance
 
@@ -326,7 +326,7 @@ builder.Services.AddHttpClient<ICustomerServiceClient, CustomerServiceClient>((s
 # docker-compose.test.yml
 services:
   postgres-test:
-    image: postgres:18
+    image: postgres:15-alpine
     container_name: authservice-test-db
     environment:
       POSTGRES_USER: postgres

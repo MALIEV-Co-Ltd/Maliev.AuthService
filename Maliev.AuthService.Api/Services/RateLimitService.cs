@@ -3,6 +3,9 @@ using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 
 namespace Maliev.AuthService.Api.Services;
+/// <summary>
+/// Service for RateLimit operations
+/// </summary>
 
 public class RateLimitService : IRateLimitService
 {
@@ -11,13 +14,18 @@ public class RateLimitService : IRateLimitService
     private const int MaxFailedAttempts = 20;
     private static readonly TimeSpan WindowDuration = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan BlockDuration = TimeSpan.FromMinutes(15);
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RateLimitService"/> class.
+    /// </summary>
+    /// <param name="dbContext">The database context</param>
+    /// <param name="logger">The logger instance</param>
 
     public RateLimitService(AuthDbContext dbContext, ILogger<RateLimitService> logger)
     {
         _dbContext = dbContext;
         _logger = logger;
     }
-
+    /// <inheritdoc/>
     public async Task<bool> IsRateLimitExceededAsync(string ipAddress)
     {
         var rateLimit = await _dbContext.IpRateLimits
@@ -58,7 +66,7 @@ public class RateLimitService : IRateLimitService
         // Check if rate limit exceeded in current window
         return rateLimit.FailedAttempts >= MaxFailedAttempts;
     }
-
+    /// <inheritdoc/>
     public async Task RecordFailedAttemptAsync(string ipAddress)
     {
         var rateLimit = await _dbContext.IpRateLimits
@@ -102,6 +110,7 @@ public class RateLimitService : IRateLimitService
         await _dbContext.SaveChangesAsync();
     }
 
+    /// <inheritdoc/>
     public async Task<DateTime?> GetBlockedUntilAsync(string ipAddress)
     {
         var rateLimit = await _dbContext.IpRateLimits

@@ -231,7 +231,44 @@ As a customer or employee of Maliev Co. Ltd., I need to securely authenticate wi
 - **FR-073**: System MUST provide security guidance in API documentation for token storage: refresh tokens should be stored in secure persistent client storage, access tokens should be stored in memory only not persistent storage, tokens MUST only be transmitted over HTTPS, and tokens MUST NOT be included in URL query parameters or fragments
 - **FR-074**: System MUST delete expired token revocation records daily where `expires_at < NOW()` to prevent unbounded table growth in the `revoked_tokens` table. Cleanup job failures MUST be logged with ERROR level but MUST NOT block token validation or revocation operations. Cleanup jobs SHOULD run during low-traffic periods (e.g., 2 AM UTC) and complete within 5 minutes for tables containing up to 1 million expired records
 
+**API Routing & Integration**
+
+- **FR-075**: System MUST serve all authentication endpoints under a `/auth` base path prefix to enable proper ingress routing and service isolation. All endpoints including health checks, documentation, and metrics MUST be accessible under this prefix
+- **FR-076**: System MUST support Cross-Origin Resource Sharing (CORS) with configurable allowed origins. The system MUST allow specified origins to make authenticated requests, support preflight OPTIONS requests, allow credentials in cross-origin requests, and reject requests from unauthorized origins
+- **FR-077**: System MUST implement centralized exception handling middleware that captures all unhandled exceptions, logs them with correlation IDs, and returns standardized error responses without exposing internal system details or stack traces to clients
+- **FR-078**: System MUST automatically generate and propagate correlation IDs for distributed tracing. The system MUST accept correlation IDs from request headers (X-Correlation-ID, X-Request-ID), generate RFC 4122 UUID v4 correlation IDs if not provided, include correlation IDs in all log entries and error responses, and propagate correlation IDs to all external service calls
+
+**Performance & Caching**
+
+- **FR-079**: System MUST implement distributed caching using Redis for token validation results to reduce database load. Successful token validations SHOULD be cached for 5-10 minutes. The system MUST fall back to in-memory caching when Redis is unavailable and MUST NOT fail requests due to cache unavailability
+- **FR-080**: System MUST provide an in-memory cache fallback when distributed caching (Redis) is unavailable, ensuring the system remains operational during cache infrastructure outages with acceptable performance degradation
+
+**Observability & Metrics**
+
+- **FR-081**: System MUST expose Prometheus-compatible metrics at `/metrics` endpoint including HTTP request duration, request count, active requests, and authentication-specific metrics (success/failure rates, token operations). Metrics MUST be exposed in OpenMetrics format compatible with Prometheus scraping
+- **FR-082**: System MUST expose OpenAPI documentation at `/auth/openapi/{documentName}.json` in development and staging environments. Documentation MUST accurately reflect all available endpoints, request/response schemas, authentication requirements, and error responses. Production environments MAY disable OpenAPI endpoints for security
+- **FR-083**: System MUST provide interactive API documentation using Scalar at `/auth/scalar` endpoint in development and staging environments, allowing developers to explore and test API endpoints directly from the documentation interface
+
+**Message Infrastructure (Event-Driven Architecture)**
+
+- **FR-084**: System MUST configure MassTransit with RabbitMQ transport for future event publishing capabilities. The message infrastructure MUST support connection string configuration, automatic endpoint configuration, and graceful handling when RabbitMQ is unavailable. Event publishing is NOT required in v1.0 but infrastructure MUST be in place for future enhancements
+
+**API Response Format**
+
+- **FR-085**: System MUST use snake_case naming convention for all JSON properties in API requests and responses (e.g., `user_id`, `access_token`, `refresh_token`) to maintain consistency with industry standards and frontend framework conventions
+
+**Testing & Development**
+
+- **FR-086**: System MUST support a dedicated Testing environment mode (ASPNETCORE_ENVIRONMENT=Testing) that: uses in-memory database instead of PostgreSQL, disables external service integrations (Redis, RabbitMQ), provides fake IP addresses for request context, and allows tests to run without external dependencies
+- **FR-087**: System MUST support local development using .NET user secrets for sensitive configuration (connection strings, JWT keys) to prevent accidental credential commits to source control while maintaining ease of development
+
+**Technology Stack**
+
+- **FR-088**: System MUST be built on .NET 10.0 runtime with ASP.NET Core, Entity Framework Core 10.0 for database access, and support PostgreSQL 15+ as the primary database
+- **FR-089**: System MUST integrate with Aspire ServiceDefaults library (Maliev.Aspire.ServiceDefaults) for standardized service configuration including OpenTelemetry logging, health checks, and distributed tracing
+
 ### Key Entities
+
 
 - **User Credentials**: Represents the authentication information provided by a user, including username, password, and user type designation (customer or employee)
 
@@ -317,7 +354,7 @@ As a customer or employee of Maliev Co. Ltd., I need to securely authenticate wi
 - [x] Key concepts extracted
 - [x] Ambiguities marked and resolved (9 clarification points)
 - [x] User scenarios defined (6 complete flows including token rotation and service auth)
-- [x] Requirements generated (73 functional requirements - enhanced from 50 to 73)
+- [x] Requirements generated (89 functional requirements - enhanced from 73 to 89 to reflect implementation)
 - [x] Entities identified (6 key entities)
 - [x] Clarifications resolved (5 questions answered, 2 updated based on security research)
 - [x] Security enhancements applied (OAuth 2.0 RFC 9700 compliance achieved)
@@ -326,9 +363,11 @@ As a customer or employee of Maliev Co. Ltd., I need to securely authenticate wi
 **Enhancement Summary:**
 
 - Added 23 new security requirements (FR-051 through FR-073)
+- Added 16 post-implementation requirements (FR-075 through FR-089)
 - Modified 5 critical requirements for security best practices
 - Added 2 new user scenario flows (reuse detection, service auth)
 - Added 10 new edge cases for complex security scenarios
-- Updated specification status: **READY FOR IMPLEMENTATION PLANNING**
+- Updated specification status: **IMPLEMENTED & PRODUCTION-READY**
+- Spec synchronized with .NET 10.0 implementation (2025-11-29)
 
 ---

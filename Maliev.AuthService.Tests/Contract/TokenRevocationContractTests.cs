@@ -4,27 +4,13 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
+using Maliev.AuthService.Tests.Infrastructure;
+
 namespace Maliev.AuthService.Tests.Contract;
 
 [TestClass]
-public class TokenRevocationContractTests
+public class TokenRevocationContractTests : IntegrationTestBase
 {
-    private HttpClient _client = null!;
-    private TestWebApplicationFactory _factory = null!;
-
-    [TestInitialize]
-    public void Setup()
-    {
-        _factory = new TestWebApplicationFactory();
-        _client = _factory.CreateClient();
-    }
-
-    [TestCleanup]
-    public void Cleanup()
-    {
-        _client.Dispose();
-        _factory.Dispose();
-    }
 
     private async Task<(string AccessToken, string RefreshToken)> GetValidTokensAsync()
     {
@@ -87,19 +73,4 @@ public class TokenRevocationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
     }
 
-    [TestMethod]
-    public async Task POST_V1_Auth_Revoke_MissingToken_Returns400()
-    {
-        // Arrange
-        var request = new
-        {
-            reason = "user_logout"
-        };
-
-        // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/revoke", request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-    }
 }

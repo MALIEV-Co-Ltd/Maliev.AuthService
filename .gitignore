@@ -45,10 +45,12 @@ packages/
 # Mac
 .DS_Store
 
-# Specification files (should not be in gitignore, but listed here for reference)
-# specs/ - DO NOT IGNORE, needed for feature documentation
-.claude/settings.local.json
 .claude/settings.local.json
 
-.gemini/
+
 gha-creds-*.json
+
+# Application Configuration
+appsettings.Development.json
+appsettings.Testing.json
+appsettings.Local.json

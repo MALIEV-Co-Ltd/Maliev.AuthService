@@ -3,6 +3,9 @@ using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 
 namespace Maliev.AuthService.Api.Services;
+/// <summary>
+/// Service for AccountLockout operations
+/// </summary>
 
 public class AccountLockoutService : IAccountLockoutService
 {
@@ -10,12 +13,18 @@ public class AccountLockoutService : IAccountLockoutService
     private readonly ILogger<AccountLockoutService> _logger;
     private const int MaxFailedAttempts = 5;
     private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AccountLockoutService"/> class.
+    /// </summary>
+    /// <param name="dbContext">The database context</param>
+    /// <param name="logger">The logger instance</param>
 
     public AccountLockoutService(AuthDbContext dbContext, ILogger<AccountLockoutService> logger)
     {
         _dbContext = dbContext;
         _logger = logger;
     }
+    /// <inheritdoc/>
 
     public async Task<bool> IsAccountLockedAsync(Guid userId, UserType userType)
     {
@@ -43,8 +52,28 @@ public class AccountLockoutService : IAccountLockoutService
 
         return false;
     }
+    /// <inheritdoc/>
 
     public async Task RecordFailedAttemptAsync(Guid userId, UserType userType)
+    {
+        try
+        {
+            await RecordFailedAttemptInternalAsync(userId, userType);
+        }
+        catch (DbUpdateException)
+        {
+            // Handle concurrency/duplicate key race condition
+            // If insert failed, it means the record was created by another process/thread
+            // Detach only AccountLockout entities to avoid losing other pending changes (e.g. RateLimit)
+            foreach (var entry in _dbContext.ChangeTracker.Entries<AccountLockout>().ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+            await RecordFailedAttemptInternalAsync(userId, userType);
+        }
+    }
+
+    private async Task RecordFailedAttemptInternalAsync(Guid userId, UserType userType)
     {
         var lockout = await _dbContext.AccountLockouts
             .FirstOrDefaultAsync(l => l.UserId == userId && l.UserType == userType);
@@ -78,6 +107,7 @@ public class AccountLockoutService : IAccountLockoutService
 
         await _dbContext.SaveChangesAsync();
     }
+    /// <inheritdoc/>
 
     public async Task ResetFailedAttemptsAsync(Guid userId, UserType userType)
     {
@@ -93,6 +123,7 @@ public class AccountLockoutService : IAccountLockoutService
         }
     }
 
+    /// <inheritdoc/>
     public async Task<DateTime?> GetLockedUntilAsync(Guid userId, UserType userType)
     {
         var lockout = await _dbContext.AccountLockouts

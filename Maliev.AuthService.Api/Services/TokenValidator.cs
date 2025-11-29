@@ -5,12 +5,21 @@ using Microsoft.IdentityModel.Tokens;
 using Maliev.AuthService.Data.DbContexts;
 
 namespace Maliev.AuthService.Api.Services;
+/// <summary>
+/// Validator for Token
+/// </summary>
 
 public class TokenValidator : ITokenValidator
 {
     private readonly IConfiguration _configuration;
     private readonly AuthDbContext _dbContext;
     private readonly ILogger<TokenValidator> _logger;
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TokenValidator"/> class.
+    /// </summary>
+    /// <param name="configuration">The configuration</param>
+    /// <param name="dbContext">The database context</param>
+    /// <param name="logger">The logger instance</param>
 
     public TokenValidator(IConfiguration configuration, AuthDbContext dbContext, ILogger<TokenValidator> logger)
     {
@@ -19,6 +28,7 @@ public class TokenValidator : ITokenValidator
         _logger = logger;
     }
 
+    /// <inheritdoc/>
     public Task<ClaimsPrincipal?> ValidateAccessTokenAsync(string token)
     {
         try
@@ -34,16 +44,19 @@ public class TokenValidator : ITokenValidator
             var rsa = System.Security.Cryptography.RSA.Create();
             rsa.ImportFromPem(publicKeyString);
 
+            var issuer = _configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer not found");
+            var audience = _configuration["Jwt:Audience"] ?? throw new InvalidOperationException("Jwt:Audience not found");
+
             var validationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,
                 ValidateAudience = true,
                 ValidateLifetime = true,
                 ValidateIssuerSigningKey = true,
-                ValidIssuer = _configuration["Jwt:Issuer"],
-                ValidAudience = _configuration["Jwt:Audience"],
+                ValidIssuer = issuer,
+                ValidAudience = audience,
                 IssuerSigningKey = new RsaSecurityKey(rsa),
-                ClockSkew = TimeSpan.Zero
+                ClockSkew = TimeSpan.FromMinutes(5)
             };
 
             // Disable claim type mapping to keep original claim names like "sub" instead of full URIs
@@ -70,7 +83,7 @@ public class TokenValidator : ITokenValidator
             return Task.FromResult<ClaimsPrincipal?>(null);
         }
     }
-
+    /// <inheritdoc/>
     public async Task<bool> IsTokenRevokedAsync(string jti)
     {
         return await _dbContext.RevokedTokens

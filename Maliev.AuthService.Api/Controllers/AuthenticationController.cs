@@ -1,4 +1,3 @@
-using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Maliev.AuthService.Api.Models.Request;
 using Maliev.AuthService.Api.Models.Response;
@@ -6,52 +5,44 @@ using Maliev.AuthService.Api.Services;
 
 namespace Maliev.AuthService.Api.Controllers;
 
+/// <summary>
+/// Handles user authentication, token management (login, refresh, validate, revoke, logout),
+/// and service-to-service authentication.
+/// </summary>
 [ApiController]
-[Route("v1")]
+[Route("auth/v1")]
 public class AuthenticationController : ControllerBase
 {
     private readonly IAuthenticationService _authenticationService;
-    private readonly IValidator<LoginRequest> _loginValidator;
-    private readonly IValidator<RefreshRequest> _refreshValidator;
-    private readonly IValidator<ValidateRequest> _validateValidator;
-    private readonly IValidator<RevokeRequest> _revokeValidator;
-    private readonly IValidator<LogoutRequest> _logoutValidator;
-    private readonly IValidator<ServiceLoginRequest> _serviceLoginValidator;
     private readonly ILogger<AuthenticationController> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AuthenticationController"/> class.
+    /// </summary>
+    /// <param name="authenticationService">The service responsible for authentication logic.</param>
+    /// <param name="logger">The logger for this controller.</param>
     public AuthenticationController(
         IAuthenticationService authenticationService,
-        IValidator<LoginRequest> loginValidator,
-        IValidator<RefreshRequest> refreshValidator,
-        IValidator<ValidateRequest> validateValidator,
-        IValidator<RevokeRequest> revokeValidator,
-        IValidator<LogoutRequest> logoutValidator,
-        IValidator<ServiceLoginRequest> serviceLoginValidator,
         ILogger<AuthenticationController> logger)
     {
         _authenticationService = authenticationService;
-        _loginValidator = loginValidator;
-        _refreshValidator = refreshValidator;
-        _validateValidator = validateValidator;
-        _revokeValidator = revokeValidator;
-        _logoutValidator = logoutValidator;
-        _serviceLoginValidator = serviceLoginValidator;
         _logger = logger;
     }
 
+    /// <summary>
+    /// Authenticates a user with email and password.
+    /// </summary>
+    /// <param name="request">The login request containing user credentials.</param>
+    /// <returns>
+    /// An <see cref="IActionResult"/> containing the authentication response with JWT and refresh tokens.
+    /// Returns <see cref="BadRequestResult"/> if validation fails.
+    /// Returns <see cref="UnauthorizedResult"/> for invalid credentials.
+    /// Returns a 423 (Locked) status code if the account is locked.
+    /// Returns a 429 (Too Many Requests) status code if rate limited.
+    /// </returns>
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
-        var validationResult = await _loginValidator.ValidateAsync(request);
-        if (!validationResult.IsValid)
-        {
-            return BadRequest(new
-            {
-                error = "validation_error",
-                error_description = "Validation failed",
-                errors = validationResult.Errors.Select(e => e.ErrorMessage).ToArray()
-            });
-        }
 
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
         var result = await _authenticationService.AuthenticateAsync(request, ipAddress);
@@ -93,18 +84,18 @@ public class AuthenticationController : ControllerBase
         return Ok(result.Response);
     }
 
+    /// <summary>
+    /// Refreshes an authentication token.
+    /// </summary>
+    /// <param name="request">The refresh request containing the refresh token.</param>
+    /// <returns>
+    /// An <see cref="IActionResult"/> containing a new set of JWT and refresh tokens.
+    /// Returns <see cref="BadRequestResult"/> if validation fails.
+    /// Returns <see cref="UnauthorizedResult"/> if the refresh token is invalid.
+    /// </returns>
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh([FromBody] RefreshRequest request)
     {
-        var validationResult = await _refreshValidator.ValidateAsync(request);
-        if (!validationResult.IsValid)
-        {
-            return BadRequest(new ErrorResponse
-            {
-                Error = "validation_error",
-                ErrorDescription = string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))
-            });
-        }
 
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
         var result = await _authenticationService.RefreshTokenAsync(request, ipAddress);
@@ -121,35 +112,35 @@ public class AuthenticationController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Validates a JWT access token.
+    /// </summary>
+    /// <param name="request">The validate request containing the access token.</param>
+    /// <returns>
+    /// An <see cref="IActionResult"/> with the validation result.
+    /// Returns <see cref="OkObjectResult"/> with a <see cref="ValidateResponse"/> indicating if the token is valid, along with its claims.
+    /// Returns <see cref="BadRequestResult"/> if validation of the request model fails.
+    /// </returns>
     [HttpPost("validate")]
     public async Task<IActionResult> Validate([FromBody] ValidateRequest request)
     {
-        var validationResult = await _validateValidator.ValidateAsync(request);
-        if (!validationResult.IsValid)
-        {
-            return BadRequest(new ErrorResponse
-            {
-                Error = "validation_error",
-                ErrorDescription = string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))
-            });
-        }
 
         var result = await _authenticationService.ValidateTokenAsync(request);
         return Ok(result);
     }
 
+    /// <summary>
+    /// Revokes a refresh token, invalidating it for future use.
+    /// </summary>
+    /// <param name="request">The revoke request containing the refresh token.</param>
+    /// <returns>
+    /// An <see cref="IActionResult"/>.
+    /// Returns <see cref="NoContentResult"/> on successful revocation.
+    /// Returns <see cref="BadRequestResult"/> if validation fails or the token cannot be revoked.
+    /// </returns>
     [HttpPost("revoke")]
     public async Task<IActionResult> Revoke([FromBody] RevokeRequest request)
     {
-        var validationResult = await _revokeValidator.ValidateAsync(request);
-        if (!validationResult.IsValid)
-        {
-            return BadRequest(new ErrorResponse
-            {
-                Error = "validation_error",
-                ErrorDescription = string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))
-            });
-        }
 
         var result = await _authenticationService.RevokeTokenAsync(request);
 
@@ -165,18 +156,19 @@ public class AuthenticationController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Logs a user out by invalidating their refresh token.
+    /// </summary>
+    /// <param name="request">The logout request containing the refresh token.</param>
+    /// <returns>
+    /// An <see cref="IActionResult"/>.
+    /// Returns <see cref="NoContentResult"/> on successful logout.
+    /// Returns <see cref="BadRequestResult"/> if validation fails.
+    /// Returns <see cref="UnauthorizedResult"/> if the token is invalid.
+    /// </returns>
     [HttpPost("logout")]
     public async Task<IActionResult> Logout([FromBody] LogoutRequest request)
     {
-        var validationResult = await _logoutValidator.ValidateAsync(request);
-        if (!validationResult.IsValid)
-        {
-            return BadRequest(new ErrorResponse
-            {
-                Error = "validation_error",
-                ErrorDescription = string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))
-            });
-        }
 
         var result = await _authenticationService.LogoutAsync(request);
 
@@ -192,18 +184,18 @@ public class AuthenticationController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Authenticates a service using client credentials (client_id and client_secret).
+    /// </summary>
+    /// <param name="request">The service login request containing client credentials.</param>
+    /// <returns>
+    /// An <see cref="IActionResult"/> containing the service authentication response with a JWT.
+    /// Returns <see cref="BadRequestResult"/> if validation fails.
+    /// Returns <see cref="UnauthorizedResult"/> for invalid credentials.
+    /// </returns>
     [HttpPost("service/login")]
     public async Task<IActionResult> ServiceLogin([FromBody] ServiceLoginRequest request)
     {
-        var validationResult = await _serviceLoginValidator.ValidateAsync(request);
-        if (!validationResult.IsValid)
-        {
-            return BadRequest(new ErrorResponse
-            {
-                Error = "validation_error",
-                ErrorDescription = string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))
-            });
-        }
 
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
         var result = await _authenticationService.AuthenticateServiceAsync(request, ipAddress);

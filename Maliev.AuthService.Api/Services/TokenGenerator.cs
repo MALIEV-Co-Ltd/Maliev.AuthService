@@ -5,18 +5,26 @@ using System.Text;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Maliev.AuthService.Api.Services;
+/// <summary>
+/// Represents a TokenGenerator
+/// </summary>
 
 public class TokenGenerator : ITokenGenerator
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<TokenGenerator> _logger;
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TokenGenerator"/> class.
+    /// </summary>
+    /// <param name="configuration">The configuration</param>
+    /// <param name="logger">The logger instance</param>
 
     public TokenGenerator(IConfiguration configuration, ILogger<TokenGenerator> logger)
     {
         _configuration = configuration;
         _logger = logger;
     }
-
+    /// <inheritdoc/>
     public string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null)
     {
         var claims = new List<Claim>
@@ -51,12 +59,15 @@ public class TokenGenerator : ITokenGenerator
         var securityKey = new RsaSecurityKey(rsa);
         var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.RsaSha256);
 
+        var issuer = _configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer not found");
+        var audience = _configuration["Jwt:Audience"] ?? throw new InvalidOperationException("Jwt:Audience not found");
+
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
             Expires = DateTime.UtcNow.AddMinutes(15),
-            Issuer = _configuration["Jwt:Issuer"],
-            Audience = _configuration["Jwt:Audience"],
+            Issuer = issuer,
+            Audience = audience,
             SigningCredentials = credentials
         };
 
@@ -65,7 +76,7 @@ public class TokenGenerator : ITokenGenerator
 
         return tokenHandler.WriteToken(token);
     }
-
+    /// <inheritdoc/>
     public string GenerateRefreshToken()
     {
         var randomBytes = new byte[32];
@@ -73,14 +84,14 @@ public class TokenGenerator : ITokenGenerator
         rng.GetBytes(randomBytes);
         return Convert.ToBase64String(randomBytes);
     }
-
+    /// <inheritdoc/>
     public string HashToken(string token)
     {
         using var sha256 = SHA256.Create();
         var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(token));
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
-
+    /// <inheritdoc/>
     public Task<string> GenerateServiceAccessTokenAsync(string clientId, string serviceName)
     {
         var claims = new List<Claim>
@@ -106,12 +117,15 @@ public class TokenGenerator : ITokenGenerator
         var securityKey = new RsaSecurityKey(rsa);
         var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.RsaSha256);
 
+        var issuer = _configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer not found");
+        var audience = _configuration["Jwt:Audience"] ?? throw new InvalidOperationException("Jwt:Audience not found");
+
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
             Expires = DateTime.UtcNow.AddHours(1),
-            Issuer = _configuration["Jwt:Issuer"],
-            Audience = _configuration["Jwt:Audience"],
+            Issuer = issuer,
+            Audience = audience,
             SigningCredentials = credentials
         };
 

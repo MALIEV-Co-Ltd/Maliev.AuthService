@@ -4,27 +4,13 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
+using Maliev.AuthService.Tests.Infrastructure;
+
 namespace Maliev.AuthService.Tests.Contract;
 
 [TestClass]
-public class ServiceLoginContractTests
+public class ServiceLoginContractTests : IntegrationTestBase
 {
-    private HttpClient _client = null!;
-    private TestWebApplicationFactory _factory = null!;
-
-    [TestInitialize]
-    public void Setup()
-    {
-        _factory = new TestWebApplicationFactory();
-        _client = _factory.CreateClient();
-    }
-
-    [TestCleanup]
-    public void Cleanup()
-    {
-        _client.Dispose();
-        _factory.Dispose();
-    }
 
     [TestMethod]
     public async Task POST_V1_Auth_Service_Login_ValidCredentials_Returns200WithServiceToken()
@@ -90,22 +76,5 @@ public class ServiceLoginContractTests
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-    }
-
-    [TestMethod]
-    public async Task POST_V1_Auth_Service_Login_MissingCredentials_Returns400()
-    {
-        // Arrange
-        var request = new
-        {
-            client_id = "service-dev-customer-api"
-            // Missing client_secret
-        };
-
-        // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/service/login", request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 }

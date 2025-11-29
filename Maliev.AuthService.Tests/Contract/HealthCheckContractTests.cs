@@ -2,27 +2,13 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
 
+using Maliev.AuthService.Tests.Infrastructure;
+
 namespace Maliev.AuthService.Tests.Contract;
 
 [TestClass]
-public class HealthCheckContractTests
+public class HealthCheckContractTests : IntegrationTestBase
 {
-    private HttpClient _client = null!;
-    private TestWebApplicationFactory _factory = null!;
-
-    [TestInitialize]
-    public void Setup()
-    {
-        _factory = new TestWebApplicationFactory();
-        _client = _factory.CreateClient();
-    }
-
-    [TestCleanup]
-    public void Cleanup()
-    {
-        _client.Dispose();
-        _factory.Dispose();
-    }
 
     [TestMethod]
     public async Task GET_Liveness_Returns200()

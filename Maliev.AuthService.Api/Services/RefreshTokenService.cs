@@ -3,12 +3,21 @@ using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 
 namespace Maliev.AuthService.Api.Services;
+/// <summary>
+/// Service for RefreshToken operations
+/// </summary>
 
 public class RefreshTokenService : IRefreshTokenService
 {
     private readonly AuthDbContext _dbContext;
     private readonly ITokenGenerator _tokenGenerator;
     private readonly ILogger<RefreshTokenService> _logger;
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RefreshTokenService"/> class.
+    /// </summary>
+    /// <param name="dbContext">The database context</param>
+    /// <param name="tokenGenerator">The token generator</param>
+    /// <param name="logger">The logger instance</param>
 
     public RefreshTokenService(
         AuthDbContext dbContext,
@@ -20,6 +29,7 @@ public class RefreshTokenService : IRefreshTokenService
         _logger = logger;
     }
 
+    /// <inheritdoc/>
     public async Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(Guid userId, UserType userType, string? ipAddress)
     {
         var familyId = Guid.NewGuid();
@@ -57,6 +67,7 @@ public class RefreshTokenService : IRefreshTokenService
         return (refreshToken, tokenValue);
     }
 
+    /// <inheritdoc/>
     public async Task<RefreshToken?> ValidateRefreshTokenAsync(string token)
     {
         var tokenHash = _tokenGenerator.HashToken(token);
@@ -88,6 +99,7 @@ public class RefreshTokenService : IRefreshTokenService
         return refreshToken;
     }
 
+    /// <inheritdoc/>
     public async Task<(RefreshToken Entity, string TokenValue)> RotateRefreshTokenAsync(RefreshToken oldToken, string? ipAddress)
     {
         oldToken.IsUsed = true;
@@ -119,7 +131,7 @@ public class RefreshTokenService : IRefreshTokenService
 
         return (newToken, tokenValue);
     }
-
+    /// <inheritdoc/>
     public async Task RevokeTokenFamilyAsync(Guid familyId, string reason)
     {
         var family = await _dbContext.TokenFamilies
@@ -143,7 +155,7 @@ public class RefreshTokenService : IRefreshTokenService
         _logger.LogWarning("Revoked token family {FamilyId} for user {UserId}. Reason: {Reason}",
             familyId, family.UserId, reason);
     }
-
+    /// <inheritdoc/>
     public async Task<bool> IsTokenReuseDetectedAsync(string tokenHash)
     {
         var token = await _dbContext.RefreshTokens

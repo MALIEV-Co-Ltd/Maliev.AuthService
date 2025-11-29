@@ -8,6 +8,9 @@ using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 
 namespace Maliev.AuthService.Api.Services;
+/// <summary>
+/// Service for Authentication operations
+/// </summary>
 
 public class AuthenticationService : IAuthenticationService
 {
@@ -20,6 +23,9 @@ public class AuthenticationService : IAuthenticationService
     private readonly ILogger<AuthenticationService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AuthenticationService"/> class.
+    /// </summary>
 
     public AuthenticationService(
         AuthDbContext dbContext,
@@ -42,7 +48,7 @@ public class AuthenticationService : IAuthenticationService
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
     }
-
+    /// <inheritdoc/>
     public async Task<AuthenticationResult> AuthenticateAsync(LoginRequest request, string? ipAddress)
     {
         var userType = request.UserType.ToLowerInvariant() == "customer" ? UserType.Customer : UserType.Employee;
@@ -131,6 +137,7 @@ public class AuthenticationService : IAuthenticationService
         };
     }
 
+    /// <inheritdoc/>
     public async Task<TokenResponse?> RefreshTokenAsync(RefreshRequest request, string? ipAddress)
     {
         var refreshToken = await _refreshTokenService.ValidateRefreshTokenAsync(request.RefreshToken);
@@ -154,7 +161,7 @@ public class AuthenticationService : IAuthenticationService
             ExpiresIn = 900
         };
     }
-
+    /// <inheritdoc/>
     public async Task<ValidateResponse> ValidateTokenAsync(ValidateRequest request)
     {
         var principal = await _tokenValidator.ValidateAccessTokenAsync(request.AccessToken);
@@ -188,7 +195,7 @@ public class AuthenticationService : IAuthenticationService
             UserType = userType
         };
     }
-
+    /// <inheritdoc/>
     public async Task<bool> RevokeTokenAsync(RevokeRequest request)
     {
         var principal = await _tokenValidator.ValidateAccessTokenAsync(request.Token);
@@ -205,6 +212,12 @@ public class AuthenticationService : IAuthenticationService
         if (string.IsNullOrEmpty(jtiClaim) || string.IsNullOrEmpty(userIdClaim))
         {
             return false;
+        }
+
+        // Check if already revoked (idempotency)
+        if (await _tokenValidator.IsTokenRevokedAsync(jtiClaim))
+        {
+            return true;
         }
 
         var userId = Guid.Parse(userIdClaim);
@@ -233,7 +246,7 @@ public class AuthenticationService : IAuthenticationService
 
         return true;
     }
-
+    /// <inheritdoc/>
     public async Task<bool> LogoutAsync(LogoutRequest request)
     {
         var refreshToken = await _refreshTokenService.ValidateRefreshTokenAsync(request.RefreshToken);
@@ -249,6 +262,7 @@ public class AuthenticationService : IAuthenticationService
         return true;
     }
 
+    /// <inheritdoc/>
     public async Task<LoginResponse?> AuthenticateServiceAsync(ServiceLoginRequest request, string? ipAddress)
     {
         var serviceCredential = await _dbContext.ServiceCredentials

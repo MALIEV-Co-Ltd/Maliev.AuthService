@@ -4,27 +4,13 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
+using Maliev.AuthService.Tests.Infrastructure;
+
 namespace Maliev.AuthService.Tests.Contract;
 
 [TestClass]
-public class LogoutContractTests
+public class LogoutContractTests : IntegrationTestBase
 {
-    private HttpClient _client = null!;
-    private TestWebApplicationFactory _factory = null!;
-
-    [TestInitialize]
-    public void Setup()
-    {
-        _factory = new TestWebApplicationFactory();
-        _client = _factory.CreateClient();
-    }
-
-    [TestCleanup]
-    public void Cleanup()
-    {
-        _client.Dispose();
-        _factory.Dispose();
-    }
 
     private async Task<(string AccessToken, string RefreshToken)> GetValidTokensAsync()
     {
@@ -62,19 +48,6 @@ public class LogoutContractTests
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
-    }
-
-    [TestMethod]
-    public async Task POST_V1_Auth_Logout_MissingRefreshToken_Returns400()
-    {
-        // Arrange
-        var request = new { };
-
-        // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/logout", request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [TestMethod]

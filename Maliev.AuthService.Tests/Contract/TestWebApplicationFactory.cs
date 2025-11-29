@@ -2,25 +2,38 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Tests.Infrastructure;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
-using System.Net.Http;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Hosting;
 
 namespace Maliev.AuthService.Tests.Contract;
 
 public class TestWebApplicationFactory : WebApplicationFactory<Program>
 {
-    private readonly string _databaseName = $"TestDb_{Guid.NewGuid()}";
+    // Each factory instance gets its own database fixture for complete isolation
+    private readonly TestDatabaseFixture _databaseFixture;
+    // Shared RSA keys across all tests to ensure token compatibility
+    private static readonly (string PublicKey, string PrivateKey) _sharedKeys = GenerateRsaKeyPair();
+
+    public TestWebApplicationFactory()
+    {
+        Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Testing");
+        
+        // Create a unique database fixture for THIS test instance
+        _databaseFixture = new TestDatabaseFixture();
+        _databaseFixture.InitializeAsync().GetAwaiter().GetResult();
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureServices(services =>
         {
-            // Remove ALL existing DbContext registrations
+            // Remove existing DbContext registrations
             var descriptorsToRemove = services.Where(d =>
                 d.ServiceType == typeof(DbContextOptions<AuthDbContext>) ||
                 d.ServiceType == typeof(DbContextOptions) ||
@@ -32,138 +45,181 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
                 services.Remove(descriptor);
             }
 
-            // Add in-memory database for testing
-            // Use a unique database name per factory instance for test isolation
+            // Add PostgreSQL test database with THIS instance's connection string
             services.AddDbContext<AuthDbContext>(options =>
             {
-                options.UseInMemoryDatabase(_databaseName);
+                options.UseNpgsql(_databaseFixture.ConnectionString);
             });
 
-            // Remove ALL existing HttpClient-related registrations
-            var httpDescriptors = services.Where(d =>
-                d.ServiceType == typeof(IHttpClientFactory) ||
-                d.ServiceType == typeof(HttpClient) ||
-                d.ServiceType.FullName?.Contains("HttpClient") == true ||
-                d.ImplementationType?.FullName?.Contains("HttpClient") == true).ToList();
+            // Replace HTTP client with mock handler for all external service calls
+            var httpClientFactoryDescriptors = services
+                .Where(d => d.ServiceType == typeof(IHttpMessageHandlerFactory) ||
+                           d.ServiceType == typeof(IHttpClientFactory) ||
+                           d.ImplementationType?.Name.Contains("HttpClient") == true)
+                .ToList();
 
-            foreach (var descriptor in httpDescriptors)
+            foreach (var descriptor in httpClientFactoryDescriptors)
             {
                 services.Remove(descriptor);
             }
 
-            // Add mock HttpClient factory - must be FIRST before any other HTTP registrations
-            services.AddSingleton<IHttpClientFactory, MockHttpClientFactory>();
+            // Add a single mock HTTP client that handles all requests
+            services.AddHttpClient(Options.DefaultName)
+                .ConfigurePrimaryHttpMessageHandler(() => new SmartMockHttpMessageHandler());
+        });
 
-            // Ensure HttpClient itself uses our factory
-            services.AddTransient(sp =>
+        builder.ConfigureAppConfiguration((context, config) =>
+        {
+            // Use SHARED RSA keys so tokens created in one part of test can be validated in another
+            config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                var factory = sp.GetRequiredService<IHttpClientFactory>();
-                return factory.CreateClient();
+                { "Jwt:PublicKey", _sharedKeys.PublicKey },
+                { "Jwt:PrivateKey", _sharedKeys.PrivateKey },
+                { "Jwt:Issuer", "https://auth.test.local" },
+                { "Jwt:Audience", "https://api.test.local" },
+                { "ExternalServices:CustomerService:BaseUrl", "http://mock-customer-service" },
+                { "ExternalServices:CustomerService:ValidationEndpoint", "/validate" },
+                { "ExternalServices:CustomerService:TimeoutInSeconds", "30" },
+                { "ExternalServices:EmployeeService:BaseUrl", "http://mock-employee-service" },
+                { "ExternalServices:EmployeeService:ValidationEndpoint", "/validate" },
+                { "ExternalServices:EmployeeService:TimeoutInSeconds", "30" }
             });
-
-            // Build the service provider
-            var sp = services.BuildServiceProvider();
-
-            // Create a scope to obtain a reference to the database context
-            using (var scope = sp.CreateScope())
-            {
-                var scopedServices = scope.ServiceProvider;
-                var db = scopedServices.GetRequiredService<AuthDbContext>();
-
-                // Ensure the database is created
-                db.Database.EnsureCreated();
-
-                // Seed test service credential
-                // Secret: "valid_service_secret" -> SHA256 hash
-                var testServiceCredential = new Maliev.AuthService.Data.Entities.ServiceCredential
-                {
-                    Id = Guid.NewGuid(),
-                    ClientId = "service-dev-customer-api",
-                    ClientSecretHash = "536cd80fe9c61705de47dacb3fc7c4d3c4c331841afe942a9966abc5e4ad70ef", // SHA256("valid_service_secret")
-                    ServiceName = "Customer API",
-                    IsActive = true,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-
-                db.ServiceCredentials.Add(testServiceCredential);
-                db.SaveChanges();
-            }
         });
 
         builder.UseEnvironment("Testing");
     }
-}
 
-public class MockHttpClientFactory : IHttpClientFactory
-{
-    public HttpClient CreateClient(string name)
+    /// <summary>
+    /// Generates a new RSA key pair for testing (2048-bit)
+    /// </summary>
+    /// <returns>Tuple of (Base64-encoded public key PEM, Base64-encoded private key PEM)</returns>
+    private static (string PublicKeyPem, string PrivateKeyPem) GenerateRsaKeyPair()
     {
-        var handler = new MockHttpMessageHandler();
-        return new HttpClient(handler);
+        using var rsa = RSA.Create(2048);
+        
+        // Export keys to PEM format
+        var publicKeyPem = rsa.ExportRSAPublicKeyPem();
+        var privateKeyPem = rsa.ExportRSAPrivateKeyPem();
+        
+        // Convert to Base64 for configuration (matching production format)
+        var publicKeyBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(publicKeyPem));
+        var privateKeyBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(privateKeyPem));
+        
+        return (publicKeyBase64, privateKeyBase64);
+    }
+
+    public async Task ResetDatabaseAsync()
+    {
+        await _databaseFixture.ClearDatabaseAsync();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _databaseFixture?.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        _databaseFixture?.Dispose();
+        await base.DisposeAsync();
     }
 }
 
-public class MockHttpMessageHandler : HttpMessageHandler
+/// <summary>
+/// Mock HTTP message handler for testing external service calls.
+/// Intelligently routes requests to mock responses based on URL patterns.
+/// </summary>
+public class SmartMockHttpMessageHandler : HttpMessageHandler
 {
-    private static Guid GenerateConsistentUserId(string? username)
-    {
-        if (string.IsNullOrEmpty(username))
-            return Guid.NewGuid();
-
-        // Generate a consistent GUID from the username using a simple hash
-        using var md5 = System.Security.Cryptography.MD5.Create();
-        var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(username));
-        return new Guid(hash);
-    }
-
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        // Mock credential validation
-        if (request.RequestUri?.PathAndQuery.Contains("/validate") == true)
+        var url = request.RequestUri?.ToString() ?? string.Empty;
+        
+        // Read request body to check credentials
+        string requestBody = "";
+        if (request.Content != null)
         {
-            // Read the request body to check credentials
-            var requestBody = await request.Content!.ReadAsStringAsync(cancellationToken);
-            using var doc = JsonDocument.Parse(requestBody);
-            var username = doc.RootElement.GetProperty("username").GetString();
-            var password = doc.RootElement.GetProperty("password").GetString();
-
-            // Determine if credentials are valid
-            // Invalid: "invalid@example.com", "locked@example.com", "ratelimit@example.com" with wrong password
-            // Valid: anything with "ValidPassword123!"
-            var isValid = password == "ValidPassword123!" || password == "Password123!";
-
-            // Use consistent UserId per username for lockout tracking
-            var userId = GenerateConsistentUserId(username);
-
-            object response;
-            if (isValid)
+            requestBody = await request.Content.ReadAsStringAsync(cancellationToken);
+        }
+        
+        // Check if this is a customer service validation request
+        if (url.Contains("/validate") && (url.Contains("customer") || url.Contains("5001")))
+        {
+            var (userId, username) = GetDeterministicUser(requestBody);
+            
+            // Simple check for "Wrong" or "Invalid" in the password field within the JSON body
+            bool isInvalidPassword = requestBody.Contains("Wrong") || requestBody.Contains("Invalid");
+            
+            var response = new
             {
-                response = new
-                {
-                    IsValid = true,
-                    UserId = userId,
-                    Email = username,
-                    Name = "Test User"
-                };
-            }
-            else
+                isValid = !isInvalidPassword,
+                userId = userId,
+                email = username,
+                name = $"Test {username}"
+            };
+            
+            var jsonResponse = JsonSerializer.Serialize(response, new JsonSerializerOptions
             {
-                response = new
-                {
-                    IsValid = false,
-                    UserId = userId,  // Include UserId even for failed attempts to enable lockout tracking
-                    Email = (string?)null,
-                    Name = (string?)null
-                };
-            }
-
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+            
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(JsonSerializer.Serialize(response), System.Text.Encoding.UTF8, "application/json")
+                Content = new StringContent(jsonResponse, Encoding.UTF8, "application/json")
             };
         }
+        
+        // Check if this is an employee service validation request
+        if (url.Contains("/validate") && (url.Contains("employee") || url.Contains("5002")))
+        {
+            var (userId, username) = GetDeterministicUser(requestBody);
 
+            bool isInvalidPassword = requestBody.Contains("Wrong") || requestBody.Contains("Invalid");
+
+            var response = new
+            {
+                isValid = !isInvalidPassword,
+                userId = userId,
+                email = username,
+                name = $"Test {username}"
+            };
+            
+            var jsonResponse = JsonSerializer.Serialize(response, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+            
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(jsonResponse, Encoding.UTF8, "application/json")
+            };
+        }
+        
+        // Default 404 response for unmocked paths
         return new HttpResponseMessage(HttpStatusCode.NotFound);
+    }
+
+    private (Guid UserId, string Username) GetDeterministicUser(string jsonBody)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonBody);
+            if (doc.RootElement.TryGetProperty("username", out var usernameProp))
+            {
+                var username = usernameProp.GetString() ?? "unknown";
+                var hash = MD5.HashData(Encoding.UTF8.GetBytes(username));
+                return (new Guid(hash), username);
+            }
+        }
+        catch
+        {
+            // Ignore parsing errors
+        }
+        
+        return (Guid.NewGuid(), "unknown");
     }
 }

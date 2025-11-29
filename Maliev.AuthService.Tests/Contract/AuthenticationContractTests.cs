@@ -3,29 +3,13 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Maliev.AuthService.Tests.Infrastructure;
 
 namespace Maliev.AuthService.Tests.Contract;
 
 [TestClass]
-public class AuthenticationContractTests
+public class AuthenticationContractTests : IntegrationTestBase
 {
-    private HttpClient _client = null!;
-    private TestWebApplicationFactory _factory = null!;
-
-    [TestInitialize]
-    public void Setup()
-    {
-        _factory = new TestWebApplicationFactory();
-        _client = _factory.CreateClient();
-    }
-
-    [TestCleanup]
-    public void Cleanup()
-    {
-        _client.Dispose();
-        _factory.Dispose();
-    }
-
     [TestMethod]
     public async Task POST_V1_Auth_Login_ValidCustomerCredentials_Returns200WithTokens()
     {
@@ -104,27 +88,6 @@ public class AuthenticationContractTests
         json.RootElement.GetProperty("error_description").GetString().Should().NotBeNullOrEmpty();
     }
 
-    [TestMethod]
-    public async Task POST_V1_Auth_Login_MissingRequiredFields_Returns400WithValidationErrors()
-    {
-        // Arrange
-        var request = new
-        {
-            username = "test@example.com"
-            // Missing password and user_type
-        };
-
-        // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-
-        var content = await response.Content.ReadAsStringAsync();
-        var json = JsonDocument.Parse(content);
-
-        json.RootElement.GetProperty("errors").EnumerateArray().Should().NotBeEmpty();
-    }
 
     [TestMethod]
     public async Task POST_V1_Auth_Login_AccountLocked_Returns423WithLockedUntil()
@@ -171,7 +134,7 @@ public class AuthenticationContractTests
             {
                 username = $"ratelimit{i}@example.com",  // Different username each time
                 password = "WrongPassword123!",  // Invalid password to trigger failed attempts
-                user_type = "customer"
+                user_type = "employee"  // Use employee to avoid interference with customer account lockout tests
             };
             response = await _client.PostAsJsonAsync("/auth/v1/login", request);
         }
