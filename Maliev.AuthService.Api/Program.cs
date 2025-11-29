@@ -28,7 +28,7 @@ using var loggerFactory = LoggerFactory.Create(loggingBuilder =>
         options.UseUtcTimestamp = true;
     });
 });
-var bootstrapLogger = loggerFactory.CreateLogger<Program>();
+var bootstrapLogger = loggerFactory.CreateLogger("Maliev.AuthService.Startup");
 
 try
 {
