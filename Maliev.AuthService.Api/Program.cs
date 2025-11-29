@@ -98,10 +98,27 @@ try
 
             x.UsingRabbitMq((context, cfg) =>
             {
-                cfg.Host(rabbitmqConnectionString);
+                cfg.Host(rabbitmqConnectionString, h =>
+                {
+                    // Set shorter timeouts to fail fast and not block startup
+                    h.RequestedConnectionTimeout(TimeSpan.FromSeconds(5));
+                    h.RequestedHeartbeat(TimeSpan.FromSeconds(10));
+                });
                 cfg.ConfigureEndpoints(context);
             });
+            
+            // Don't wait indefinitely for bus to start - fail fast
+            x.SetBusFactory(new RabbitMqBusFactory());
         });
+        
+        // Configure MassTransit hosted service to not block startup
+        builder.Services.Configure<MassTransit.MassTransitHostOptions>(options =>
+        {
+            options.WaitUntilStarted = false; // Don't block app startup waiting for bus
+            options.StartTimeout = TimeSpan.FromSeconds(10); // Timeout if bus doesn't start in 10s
+            options.StopTimeout = TimeSpan.FromSeconds(30);
+        });
+        
         bootstrapLogger.LogInformation("MassTransit configured successfully");
     }
     else
