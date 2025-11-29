@@ -162,10 +162,14 @@ var healthChecksBuilder = builder.Services.AddHealthChecks()
     .AddDbContextCheck<AuthDbContext>(tags: new[] { "db", "ready" });
 
 // Add Redis health check if enabled
+// NOTE: AddServiceDefaults() already adds a Redis health check if the "redis" connection string is present.
+// We don't need to add it again here to avoid "Duplicate health checks were registered with the name(s): redis" exception.
+/*
 if (!string.IsNullOrEmpty(redisConnectionString))
 {
     healthChecksBuilder.AddRedis(redisConnectionString, "redis", tags: new[] { "db", "ready" });
 }
+*/
 
 // Application Services
 builder.Services.AddScoped<ITokenGenerator, TokenGenerator>();
