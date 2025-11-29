@@ -9,15 +9,27 @@ using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Create early logger for startup diagnostics
+using var loggerFactory = LoggerFactory.Create(loggingBuilder => loggingBuilder.AddConsole());
+var startupLogger = loggerFactory.CreateLogger<Program>();
+
+startupLogger.LogInformation("===== AuthService Starting =====");
+
 // Load secrets from Google Secret Manager (Kubernetes /mnt/secrets volume mount)
 var secretsPath = "/mnt/secrets";
 if (Directory.Exists(secretsPath))
 {
     builder.Configuration.AddKeyPerFile(directoryPath: secretsPath, optional: true);
+    startupLogger.LogInformation("Loaded secrets from {SecretsPath}", secretsPath);
+}
+else
+{
+    startupLogger.LogInformation("Secrets path {SecretsPath} not found, using environment variables", secretsPath);
 }
 
 // Redis Distributed Cache Configuration
 var redisConnectionString = builder.Configuration.GetConnectionString("redis");
+startupLogger.LogInformation("Configuring Redis cache (connection string present: {HasRedis})", !string.IsNullOrEmpty(redisConnectionString));
 
 if (!builder.Environment.IsEnvironment("Testing"))
 {
@@ -25,6 +37,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
     {
         try
         {
+            startupLogger.LogInformation("Connecting to Redis at {RedisConnection}", redisConnectionString);
             var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
             redisOptions.ConnectTimeout = 5000; // 5 second timeout
             redisOptions.SyncTimeout = 5000;
@@ -38,12 +51,16 @@ if (!builder.Environment.IsEnvironment("Testing"))
 
             var redis = ConnectionMultiplexer.Connect(redisOptions);
             builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
+            startupLogger.LogInformation("Redis connection established successfully");
         }
         catch (Exception ex)
         {
-            // Log warning but don't crash - fall back to in-memory cache
-            Console.WriteLine($"Warning: Failed to connect to Redis: {ex.Message}. Using in-memory cache.");
+            startupLogger.LogWarning(ex, "Failed to connect to Redis, falling back to in-memory cache");
         }
+    }
+    else
+    {
+        startupLogger.LogInformation("Redis connection string not configured, using in-memory cache only");
     }
 }
 
@@ -54,6 +71,7 @@ var rabbitmqConnectionString = builder.Configuration.GetConnectionString("rabbit
 
 if (!string.IsNullOrEmpty(rabbitmqConnectionString) && !builder.Environment.IsEnvironment("Testing"))
 {
+    startupLogger.LogInformation("Configuring MassTransit with RabbitMQ");
     builder.Services.AddMassTransit(x =>
     {
         // Add consumers here if needed in the future
@@ -65,11 +83,17 @@ if (!string.IsNullOrEmpty(rabbitmqConnectionString) && !builder.Environment.IsEn
             cfg.ConfigureEndpoints(context);
         });
     });
+    startupLogger.LogInformation("MassTransit configured successfully");
+}
+else
+{
+    startupLogger.LogInformation("RabbitMQ not configured (connection string: {HasRabbitMQ})", !string.IsNullOrEmpty(rabbitmqConnectionString));
 }
 
 // Database Configuration
 if (!builder.Environment.IsEnvironment("Testing"))
 {
+    startupLogger.LogInformation("Configuring database connection");
     var connectionString = builder.Configuration.GetConnectionString("AuthDbContext")
         ?? throw new InvalidOperationException("Database connection string not configured");
 
@@ -88,6 +112,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
         options.ConfigureWarnings(warnings => 
             warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.CommandError));
     });
+    startupLogger.LogInformation("Database context configured successfully");
 }
 
 // Services
@@ -137,9 +162,12 @@ builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 
 
 // Add service defaults for .NET Aspire (includes OpenTelemetry logging)
+startupLogger.LogInformation("Adding Aspire service defaults");
 builder.AddServiceDefaults();
 
+startupLogger.LogInformation("Building application");
 var app = builder.Build();
+startupLogger.LogInformation("Application built successfully");
 
 // Get logger for startup logging
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
