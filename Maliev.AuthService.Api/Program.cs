@@ -315,19 +315,10 @@ try
     app.MapControllers();
     logger.LogInformation("Controllers mapped successfully");
 
-    // Map Aspire default endpoints (/health, /alive, /metrics)
-    logger.LogInformation("Mapping Aspire default endpoints...");
-    app.MapDefaultEndpoints();
-    logger.LogInformation("Aspire default endpoints mapped successfully");
-
-    // Additional custom health checks with /auth prefix for ingress compatibility
-    logger.LogInformation("Mapping custom health checks...");
-    app.MapGet("/auth/liveness", () => "Healthy").AllowAnonymous();
-    app.MapHealthChecks("/auth/readiness", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
-    {
-        Predicate = healthCheck => healthCheck.Tags.Contains("readiness")
-    });
-    logger.LogInformation("Custom health checks mapped successfully");
+    // Map Aspire default endpoints (/health, /alive, /metrics) and service-specific endpoints (/auth/liveness, /auth/readiness)
+    logger.LogInformation("Mapping default endpoints...");
+    app.MapDefaultEndpoints(servicePrefix: "auth");
+    logger.LogInformation("Default endpoints mapped successfully");
 
     logger.LogInformation("AuthService started successfully");
 
