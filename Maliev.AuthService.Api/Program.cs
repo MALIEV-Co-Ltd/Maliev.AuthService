@@ -101,8 +101,8 @@ try
                 cfg.Host(rabbitmqConnectionString, h =>
                 {
                     // Set shorter timeouts to fail fast if RabbitMQ is truly unavailable
-                    h.RequestedConnectionTimeout(TimeSpan.FromSeconds(30));
-                    h.RequestedHeartbeat(TimeSpan.FromSeconds(60));
+                    // h.RequestedConnectionTimeout(TimeSpan.FromSeconds(30)); // Not available in this version
+                    h.Heartbeat(TimeSpan.FromSeconds(60));
                 });
                 cfg.ConfigureEndpoints(context);
             });
