@@ -170,7 +170,9 @@ startupLogger.LogInformation("Application built successfully");
 // Get logger for startup logging
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 
+// TEMPORARILY DISABLED - Testing if migrations are causing startup hang
 // Run database migrations on startup (skip in Testing environment)
+/*
 if (!app.Environment.IsEnvironment("Testing"))
 {
     startupLogger.LogInformation("Starting database migration process");
@@ -189,7 +191,7 @@ if (!app.Environment.IsEnvironment("Testing"))
             
             startupLogger.LogInformation("Executing migration strategy");
 
-            await strategy.ExecuteAsync(async () =>
+            await strategy.ExecuteAsync(async () => 
             {
                 // Pre-check connectivity to avoid "Failed executing DbCommand" error logs
                 int retryCount = 0;
@@ -219,6 +221,8 @@ if (!app.Environment.IsEnvironment("Testing"))
     }
     startupLogger.LogInformation("Database migration process completed");
 }
+*/
+startupLogger.LogInformation("Database migrations SKIPPED for testing");
 
 // Log startup configuration
 if (Directory.Exists(secretsPath))
