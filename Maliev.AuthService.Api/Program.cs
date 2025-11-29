@@ -7,27 +7,36 @@ using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Create early logger for startup diagnostics
-using var loggerFactory = LoggerFactory.Create(loggingBuilder => loggingBuilder.AddConsole());
-var startupLogger = loggerFactory.CreateLogger<Program>();
+// Configure simple console logging for consistent output throughout startup
+builder.Logging.ClearProviders();
+builder.Logging.AddSimpleConsole(options =>
+{
+    options.SingleLine = true;
+    options.IncludeScopes = false;
+    options.TimestampFormat = "yyyy-MM-dd HH:mm:ss ";
+    options.UseUtcTimestamp = true;
+});
 
-startupLogger.LogInformation("===== AuthService Starting =====");
+// Create logger for use throughout application lifecycle
+var logger = builder.Services.BuildServiceProvider().GetRequiredService<ILogger<Program>>();
+
+logger.LogInformation("===== AuthService Starting =====");
 
 // Load secrets from Google Secret Manager (Kubernetes /mnt/secrets volume mount)
 var secretsPath = "/mnt/secrets";
 if (Directory.Exists(secretsPath))
 {
     builder.Configuration.AddKeyPerFile(directoryPath: secretsPath, optional: true);
-    startupLogger.LogInformation("Loaded secrets from {SecretsPath}", secretsPath);
+    logger.LogInformation("Loaded secrets from {SecretsPath}", secretsPath);
 }
 else
 {
-    startupLogger.LogInformation("Secrets path {SecretsPath} not found, using environment variables", secretsPath);
+    logger.LogInformation("Secrets path {SecretsPath} not found, using environment variables", secretsPath);
 }
 
 // Redis Distributed Cache Configuration
 var redisConnectionString = builder.Configuration.GetConnectionString("redis");
-startupLogger.LogInformation("Configuring Redis cache (connection string present: {HasRedis})", !string.IsNullOrEmpty(redisConnectionString));
+logger.LogInformation("Configuring Redis cache (connection string present: {HasRedis})", !string.IsNullOrEmpty(redisConnectionString));
 
 if (!builder.Environment.IsEnvironment("Testing"))
 {
@@ -35,7 +44,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
     {
         try
         {
-            startupLogger.LogInformation("Configuring Redis distributed cache at {RedisConnection}", redisConnectionString);
+            logger.LogInformation("Configuring Redis distributed cache at {RedisConnection}", redisConnectionString);
             var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
             redisOptions.ConnectTimeout = 5000; // 5 second timeout
             redisOptions.SyncTimeout = 5000;
@@ -49,16 +58,16 @@ if (!builder.Environment.IsEnvironment("Testing"))
 
             // Note: IConnectionMultiplexer removed - distributed cache will connect lazily
             // Can add back later if direct Redis access is needed
-            startupLogger.LogInformation("Redis distributed cache configured (will connect on first use)");
+            logger.LogInformation("Redis distributed cache configured (will connect on first use)");
         }
         catch (Exception ex)
         {
-            startupLogger.LogWarning(ex, "Failed to configure Redis, falling back to in-memory cache");
+            logger.LogWarning(ex, "Failed to configure Redis, falling back to in-memory cache");
         }
     }
     else
     {
-        startupLogger.LogInformation("Redis connection string not configured, using in-memory cache only");
+        logger.LogInformation("Redis connection string not configured, using in-memory cache only");
     }
 }
 
@@ -69,7 +78,7 @@ var rabbitmqConnectionString = builder.Configuration.GetConnectionString("rabbit
 
 if (!string.IsNullOrEmpty(rabbitmqConnectionString) && !builder.Environment.IsEnvironment("Testing"))
 {
-    startupLogger.LogInformation("Configuring MassTransit with RabbitMQ");
+    logger.LogInformation("Configuring MassTransit with RabbitMQ");
     builder.Services.AddMassTransit(x =>
     {
         // Add consumers here if needed in the future
@@ -81,17 +90,17 @@ if (!string.IsNullOrEmpty(rabbitmqConnectionString) && !builder.Environment.IsEn
             cfg.ConfigureEndpoints(context);
         });
     });
-    startupLogger.LogInformation("MassTransit configured successfully");
+    logger.LogInformation("MassTransit configured successfully");
 }
 else
 {
-    startupLogger.LogInformation("RabbitMQ not configured (connection string: {HasRabbitMQ})", !string.IsNullOrEmpty(rabbitmqConnectionString));
+    logger.LogInformation("RabbitMQ not configured (connection string: {HasRabbitMQ})", !string.IsNullOrEmpty(rabbitmqConnectionString));
 }
 
 // Database Configuration
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    startupLogger.LogInformation("Configuring database connection");
+    logger.LogInformation("Configuring database connection");
     var connectionString = builder.Configuration.GetConnectionString("AuthDbContext")
         ?? throw new InvalidOperationException("Database connection string not configured");
 
@@ -110,7 +119,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
         options.ConfigureWarnings(warnings =>
             warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.CommandError));
     });
-    startupLogger.LogInformation("Database context configured successfully");
+    logger.LogInformation("Database context configured successfully");
 }
 
 // Services
@@ -160,69 +169,66 @@ builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 
 
 // Add service defaults for .NET Aspire (includes OpenTelemetry logging)
-startupLogger.LogInformation("Adding Aspire service defaults");
+logger.LogInformation("Adding Aspire service defaults");
 builder.AddServiceDefaults();
 
-startupLogger.LogInformation("Building application");
+logger.LogInformation("Building application");
 var app = builder.Build();
-startupLogger.LogInformation("Application built successfully");
-
-// Get logger for startup logging
-var logger = app.Services.GetRequiredService<ILogger<Program>>();
+logger.LogInformation("Application built successfully");
 
 // TEMPORARILY DISABLED - Testing if migrations are causing startup hang
 // Run database migrations on startup (skip in Testing environment)
 /*
 if (!app.Environment.IsEnvironment("Testing"))
 {
-    startupLogger.LogInformation("Starting database migration process");
+    logger.LogInformation("Starting database migration process");
     using (var scope = app.Services.CreateScope())
     {
         try
         {
-            startupLogger.LogInformation("Resolving AuthDbContext");
+            logger.LogInformation("Resolving AuthDbContext");
             var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-            startupLogger.LogInformation("AuthDbContext resolved successfully");
+            logger.LogInformation("AuthDbContext resolved successfully");
             
             // Use EF Core Execution Strategy (native resilience) for database migrations
-            startupLogger.LogInformation("Creating execution strategy");
+            logger.LogInformation("Creating execution strategy");
             var strategy = dbContext.Database.CreateExecutionStrategy();
-            startupLogger.LogInformation("Execution strategy created successfully");
+            logger.LogInformation("Execution strategy created successfully");
             
-            startupLogger.LogInformation("Executing migration strategy");
+            logger.LogInformation("Executing migration strategy");
 
             await strategy.ExecuteAsync(async () => 
             {
                 // Pre-check connectivity to avoid "Failed executing DbCommand" error logs
                 int retryCount = 0;
-                startupLogger.LogInformation("Checking database connectivity");
+                logger.LogInformation("Checking database connectivity");
                 while (!await dbContext.Database.CanConnectAsync())
                 {
                     if (retryCount >= 20)
                     {
-                        startupLogger.LogWarning("Database connectivity check failed after 20 attempts");
+                        logger.LogWarning("Database connectivity check failed after 20 attempts");
                         break;
                     }
                     retryCount++;
-                    startupLogger.LogInformation("Waiting for database connectivity (Attempt {Attempt})...", retryCount);
+                    logger.LogInformation("Waiting for database connectivity (Attempt {Attempt})...", retryCount);
                     await Task.Delay(TimeSpan.FromSeconds(1));
                 }
 
-                startupLogger.LogInformation("Applying database migrations...");
+                logger.LogInformation("Applying database migrations...");
                 await dbContext.Database.MigrateAsync();
-                startupLogger.LogInformation("Database migrations applied successfully");
+                logger.LogInformation("Database migrations applied successfully");
             });
         }
         catch (Exception ex)
         {
-            startupLogger.LogError(ex, "Failed to apply database migrations");
+            logger.LogError(ex, "Failed to apply database migrations");
             throw;
         }
     }
-    startupLogger.LogInformation("Database migration process completed");
+    logger.LogInformation("Database migration process completed");
 }
 */
-startupLogger.LogInformation("Database migrations SKIPPED for testing");
+logger.LogInformation("Database migrations SKIPPED for testing");
 
 // Log startup configuration
 if (Directory.Exists(secretsPath))
@@ -286,17 +292,23 @@ if (app.Environment.IsDevelopment() || app.Environment.IsStaging())
 }
 
 // Map controllers with /auth prefix
+logger.LogInformation("Mapping controllers...");
 app.MapControllers();
+logger.LogInformation("Controllers mapped successfully");
 
 // Map Aspire default endpoints (/health, /alive, /metrics)
+logger.LogInformation("Mapping Aspire default endpoints...");
 app.MapDefaultEndpoints();
+logger.LogInformation("Aspire default endpoints mapped successfully");
 
 // Additional custom health checks with /auth prefix for ingress compatibility
+logger.LogInformation("Mapping custom health checks...");
 app.MapGet("/auth/liveness", () => "Healthy").AllowAnonymous();
 app.MapHealthChecks("/auth/readiness", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = healthCheck => healthCheck.Tags.Contains("readiness")
 });
+logger.LogInformation("Custom health checks mapped successfully");
 
 logger.LogInformation("AuthService started successfully");
 
