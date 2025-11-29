@@ -173,37 +173,47 @@ var logger = app.Services.GetRequiredService<ILogger<Program>>();
 // Run database migrations on startup (skip in Testing environment)
 if (!app.Environment.IsEnvironment("Testing"))
 {
+    startupLogger.LogInformation("Starting database migration process");
     using (var scope = app.Services.CreateScope())
     {
         try
         {
+            startupLogger.LogInformation("Resolving AuthDbContext");
             var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
 
             // Use EF Core Execution Strategy (native resilience) for database migrations
             var strategy = dbContext.Database.CreateExecutionStrategy();
+            startupLogger.LogInformation("Executing migration strategy");
+
             await strategy.ExecuteAsync(async () =>
             {
                 // Pre-check connectivity to avoid "Failed executing DbCommand" error logs
                 int retryCount = 0;
+                startupLogger.LogInformation("Checking database connectivity");
                 while (!await dbContext.Database.CanConnectAsync())
                 {
-                    if (retryCount >= 20) break;
+                    if (retryCount >= 20)
+                    {
+                        startupLogger.LogWarning("Database connectivity check failed after 20 attempts");
+                        break;
+                    }
                     retryCount++;
-                    logger.LogInformation("Waiting for database connectivity (Attempt {Attempt})...", retryCount);
+                    startupLogger.LogInformation("Waiting for database connectivity (Attempt {Attempt})...", retryCount);
                     await Task.Delay(TimeSpan.FromSeconds(1));
                 }
 
-                logger.LogInformation("Applying database migrations...");
+                startupLogger.LogInformation("Applying database migrations...");
                 await dbContext.Database.MigrateAsync();
-                logger.LogInformation("Database migrations applied successfully");
+                startupLogger.LogInformation("Database migrations applied successfully");
             });
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to apply database migrations");
+            startupLogger.LogError(ex, "Failed to apply database migrations");
             throw;
         }
     }
+    startupLogger.LogInformation("Database migration process completed");
 }
 
 // Log startup configuration
