@@ -17,26 +17,36 @@ builder.Logging.AddSimpleConsole(options =>
     options.UseUtcTimestamp = true;
 });
 
-// Create logger for use throughout application lifecycle
-var logger = builder.Services.BuildServiceProvider().GetRequiredService<ILogger<Program>>();
+// Create bootstrap logger for pre-build diagnostics (safe, doesn't use DI container)
+using var loggerFactory = LoggerFactory.Create(loggingBuilder =>
+{
+    loggingBuilder.AddSimpleConsole(options =>
+    {
+        options.SingleLine = true;
+        options.IncludeScopes = false;
+        options.TimestampFormat = "yyyy-MM-dd HH:mm:ss ";
+        options.UseUtcTimestamp = true;
+    });
+});
+var bootstrapLogger = loggerFactory.CreateLogger<Program>();
 
-logger.LogInformation("===== AuthService Starting =====");
+bootstrapLogger.LogInformation("===== AuthService Starting =====");
 
 // Load secrets from Google Secret Manager (Kubernetes /mnt/secrets volume mount)
 var secretsPath = "/mnt/secrets";
 if (Directory.Exists(secretsPath))
 {
     builder.Configuration.AddKeyPerFile(directoryPath: secretsPath, optional: true);
-    logger.LogInformation("Loaded secrets from {SecretsPath}", secretsPath);
+    bootstrapLogger.LogInformation("Loaded secrets from {SecretsPath}", secretsPath);
 }
 else
 {
-    logger.LogInformation("Secrets path {SecretsPath} not found, using environment variables", secretsPath);
+    bootstrapLogger.LogInformation("Secrets path {SecretsPath} not found, using environment variables", secretsPath);
 }
 
 // Redis Distributed Cache Configuration
 var redisConnectionString = builder.Configuration.GetConnectionString("redis");
-logger.LogInformation("Configuring Redis cache (connection string present: {HasRedis})", !string.IsNullOrEmpty(redisConnectionString));
+bootstrapLogger.LogInformation("Configuring Redis cache (connection string present: {HasRedis})", !string.IsNullOrEmpty(redisConnectionString));
 
 if (!builder.Environment.IsEnvironment("Testing"))
 {
@@ -44,7 +54,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
     {
         try
         {
-            logger.LogInformation("Configuring Redis distributed cache at {RedisConnection}", redisConnectionString);
+            bootstrapLogger.LogInformation("Configuring Redis distributed cache at {RedisConnection}", redisConnectionString);
             var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
             redisOptions.ConnectTimeout = 5000; // 5 second timeout
             redisOptions.SyncTimeout = 5000;
@@ -58,16 +68,16 @@ if (!builder.Environment.IsEnvironment("Testing"))
 
             // Note: IConnectionMultiplexer removed - distributed cache will connect lazily
             // Can add back later if direct Redis access is needed
-            logger.LogInformation("Redis distributed cache configured (will connect on first use)");
+            bootstrapLogger.LogInformation("Redis distributed cache configured (will connect on first use)");
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to configure Redis, falling back to in-memory cache");
+            bootstrapLogger.LogWarning(ex, "Failed to configure Redis, falling back to in-memory cache");
         }
     }
     else
     {
-        logger.LogInformation("Redis connection string not configured, using in-memory cache only");
+        bootstrapLogger.LogInformation("Redis connection string not configured, using in-memory cache only");
     }
 }
 
@@ -78,7 +88,7 @@ var rabbitmqConnectionString = builder.Configuration.GetConnectionString("rabbit
 
 if (!string.IsNullOrEmpty(rabbitmqConnectionString) && !builder.Environment.IsEnvironment("Testing"))
 {
-    logger.LogInformation("Configuring MassTransit with RabbitMQ");
+    bootstrapLogger.LogInformation("Configuring MassTransit with RabbitMQ");
     builder.Services.AddMassTransit(x =>
     {
         // Add consumers here if needed in the future
@@ -90,17 +100,17 @@ if (!string.IsNullOrEmpty(rabbitmqConnectionString) && !builder.Environment.IsEn
             cfg.ConfigureEndpoints(context);
         });
     });
-    logger.LogInformation("MassTransit configured successfully");
+    bootstrapLogger.LogInformation("MassTransit configured successfully");
 }
 else
 {
-    logger.LogInformation("RabbitMQ not configured (connection string: {HasRabbitMQ})", !string.IsNullOrEmpty(rabbitmqConnectionString));
+    bootstrapLogger.LogInformation("RabbitMQ not configured (connection string: {HasRabbitMQ})", !string.IsNullOrEmpty(rabbitmqConnectionString));
 }
 
 // Database Configuration
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    logger.LogInformation("Configuring database connection");
+    bootstrapLogger.LogInformation("Configuring database connection");
     var connectionString = builder.Configuration.GetConnectionString("AuthDbContext")
         ?? throw new InvalidOperationException("Database connection string not configured");
 
@@ -119,7 +129,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
         options.ConfigureWarnings(warnings =>
             warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.CommandError));
     });
-    logger.LogInformation("Database context configured successfully");
+    bootstrapLogger.LogInformation("Database context configured successfully");
 }
 
 // Services
@@ -169,11 +179,14 @@ builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 
 
 // Add service defaults for .NET Aspire (includes OpenTelemetry logging)
-logger.LogInformation("Adding Aspire service defaults");
+bootstrapLogger.LogInformation("Adding Aspire service defaults");
 builder.AddServiceDefaults();
 
-logger.LogInformation("Building application");
+bootstrapLogger.LogInformation("Building application");
 var app = builder.Build();
+
+// Get final logger from the built application (safe, uses final DI container)
+var logger = app.Services.GetRequiredService<ILogger<Program>>();
 logger.LogInformation("Application built successfully");
 
 // TEMPORARILY DISABLED - Testing if migrations are causing startup hang
