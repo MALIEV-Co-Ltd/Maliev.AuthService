@@ -21,25 +21,29 @@ var redisConnectionString = builder.Configuration.GetConnectionString("redis");
 
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    if (string.IsNullOrEmpty(redisConnectionString))
+    if (!string.IsNullOrEmpty(redisConnectionString))
     {
-        throw new InvalidOperationException("Redis connection string not found. Expected 'ConnectionStrings:redis'");
-    }
-
-    try
-    {
-        builder.Services.AddStackExchangeRedisCache(options =>
+        try
         {
-            options.Configuration = redisConnectionString;
-            options.InstanceName = "Auth:";
-        });
+            var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
+            redisOptions.ConnectTimeout = 5000; // 5 second timeout
+            redisOptions.SyncTimeout = 5000;
+            redisOptions.AbortOnConnectFail = false; // Don't throw on failure
+            
+            builder.Services.AddStackExchangeRedisCache(options =>
+            {
+                options.ConfigurationOptions = redisOptions;
+                options.InstanceName = "Auth:";
+            });
 
-        var redis = ConnectionMultiplexer.Connect(redisConnectionString);
-        builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
-    }
-    catch (Exception ex)
-    {
-        throw new InvalidOperationException("Failed to connect to Redis", ex);
+            var redis = ConnectionMultiplexer.Connect(redisOptions);
+            builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
+        }
+        catch (Exception ex)
+        {
+            // Log warning but don't crash - fall back to in-memory cache
+            Console.WriteLine($"Warning: Failed to connect to Redis: {ex.Message}. Using in-memory cache.");
+        }
     }
 }
 
