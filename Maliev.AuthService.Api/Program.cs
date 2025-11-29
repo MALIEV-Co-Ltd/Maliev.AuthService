@@ -88,6 +88,9 @@ try
     // RabbitMQ Configuration (MassTransit)
     var rabbitmqConnectionString = builder.Configuration.GetConnectionString("rabbitmq");
 
+    // TEMPORARILY DISABLED - MassTransit is blocking startup even with WaitUntilStarted=false
+    // TODO: Re-enable once RabbitMQ connectivity is stable or find alternative configuration
+    /*
     if (!string.IsNullOrEmpty(rabbitmqConnectionString) && !builder.Environment.IsEnvironment("Testing"))
     {
         bootstrapLogger.LogInformation("Configuring MassTransit with RabbitMQ");
@@ -125,6 +128,8 @@ try
     {
         bootstrapLogger.LogInformation("RabbitMQ not configured (connection string: {HasRabbitMQ})", !string.IsNullOrEmpty(rabbitmqConnectionString));
     }
+    */
+    bootstrapLogger.LogInformation("MassTransit DISABLED - temporarily commented out to allow startup");
 
     // Database Configuration
     if (!builder.Environment.IsEnvironment("Testing"))
