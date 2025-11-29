@@ -1,10 +1,8 @@
+using Maliev.AuthService.Api.Services;
+using Maliev.AuthService.Data.DbContexts;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
-using Maliev.AuthService.Data.DbContexts;
-using Maliev.AuthService.Api.Services;
-using Maliev.AuthService.Api.Models.Request;
 using Scalar.AspNetCore;
-using Prometheus;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -37,25 +35,25 @@ if (!builder.Environment.IsEnvironment("Testing"))
     {
         try
         {
-            startupLogger.LogInformation("Connecting to Redis at {RedisConnection}", redisConnectionString);
+            startupLogger.LogInformation("Configuring Redis distributed cache at {RedisConnection}", redisConnectionString);
             var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
             redisOptions.ConnectTimeout = 5000; // 5 second timeout
             redisOptions.SyncTimeout = 5000;
             redisOptions.AbortOnConnectFail = false; // Don't throw on failure
-            
+
             builder.Services.AddStackExchangeRedisCache(options =>
             {
                 options.ConfigurationOptions = redisOptions;
                 options.InstanceName = "Auth:";
             });
 
-            var redis = ConnectionMultiplexer.Connect(redisOptions);
-            builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
-            startupLogger.LogInformation("Redis connection established successfully");
+            // Note: IConnectionMultiplexer removed - distributed cache will connect lazily
+            // Can add back later if direct Redis access is needed
+            startupLogger.LogInformation("Redis distributed cache configured (will connect on first use)");
         }
         catch (Exception ex)
         {
-            startupLogger.LogWarning(ex, "Failed to connect to Redis, falling back to in-memory cache");
+            startupLogger.LogWarning(ex, "Failed to configure Redis, falling back to in-memory cache");
         }
     }
     else
@@ -109,7 +107,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
 
         // Suppress "Failed executing DbCommand" logs (EventId 20102) which occur during migration checks
         // Actual failures will still throw exceptions and be logged by the try-catch block
-        options.ConfigureWarnings(warnings => 
+        options.ConfigureWarnings(warnings =>
             warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.CommandError));
     });
     startupLogger.LogInformation("Database context configured successfully");
@@ -180,10 +178,10 @@ if (!app.Environment.IsEnvironment("Testing"))
         try
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-            
+
             // Use EF Core Execution Strategy (native resilience) for database migrations
             var strategy = dbContext.Database.CreateExecutionStrategy();
-            await strategy.ExecuteAsync(async () => 
+            await strategy.ExecuteAsync(async () =>
             {
                 // Pre-check connectivity to avoid "Failed executing DbCommand" error logs
                 int retryCount = 0;
@@ -237,11 +235,6 @@ else
 }
 
 logger.LogInformation("CORS configured with origins: {Origins}", string.Join(", ", corsOrigins));
-
-// Configure base path for all routes
-// app.UsePathBase("/auth");
-
-// Configure the HTTP request pipeline.
 
 // For testing: Set a fake IP address
 if (app.Environment.IsEnvironment("Testing"))
