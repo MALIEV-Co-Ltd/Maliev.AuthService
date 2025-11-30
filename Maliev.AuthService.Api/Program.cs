@@ -69,8 +69,8 @@ app.UseAuthorization();
 
 // --- Endpoints ---
 app.MapControllers();
-app.MapDefaultEndpoints(servicePrefix: "auth"); // Health checks and metrics
-app.MapApiDocumentation(servicePrefix: "auth"); // OpenAPI + Scalar at /auth/openapi and /auth/scalar
+app.MapDefaultEndpoints(servicePrefix: "auth"); // Health checks: /auth/liveness, /auth/readiness
+app.MapApiDocumentation(servicePrefix: "auth"); // OpenAPI at /auth/openapi/v1.json, Scalar UI at /scalar
 
 logger.LogInformation("AuthService started successfully on {Environment} environment", app.Environment.EnvironmentName);
 
