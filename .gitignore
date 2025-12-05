@@ -54,3 +54,21 @@ gha-creds-*.json
 appsettings.Development.json
 appsettings.Testing.json
 appsettings.Local.json
+
+# Temporary/debug files
+*.bak
+*.log
+*.sql
+build_errors.txt
+docker-compose.test.yml
+docker-compose.dev.yml
+
+# OpenAPI exports
+*-openapi.json
+*-openapi-*.json
+
+# Temporary tracking docs
+*MIGRATION*.md
+*SUMMARY*.md
+*AUDIT*.md
+*.Improvements.md
