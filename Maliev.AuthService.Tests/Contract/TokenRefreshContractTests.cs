@@ -1,14 +1,11 @@
-using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-
 using Maliev.AuthService.Tests.Infrastructure;
+using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
-[TestClass]
 public class TokenRefreshContractTests : IntegrationTestBase
 {
 
@@ -33,7 +30,7 @@ public class TokenRefreshContractTests : IntegrationTestBase
         );
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Refresh_ValidRefreshToken_Returns200WithNewTokens()
     {
         // Arrange - Get real tokens from login
@@ -47,17 +44,19 @@ public class TokenRefreshContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrEmpty();
-        json.RootElement.GetProperty("refresh_token").GetString().Should().NotBeNullOrEmpty();
-        json.RootElement.GetProperty("token_type").GetString().Should().Be("Bearer");
+        Assert.NotNull(json.RootElement.GetProperty("access_token").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("access_token").GetString()!);
+        Assert.NotNull(json.RootElement.GetProperty("refresh_token").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("refresh_token").GetString()!);
+        Assert.Equal("Bearer", json.RootElement.GetProperty("token_type").GetString());
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Refresh_ExpiredRefreshToken_Returns401()
     {
         // Arrange - Use an invalid token string (not a real JWT)
@@ -70,15 +69,16 @@ public class TokenRefreshContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("error").GetString().Should().NotBeNullOrEmpty();
+        Assert.NotNull(json.RootElement.GetProperty("error").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("error").GetString()!);
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Refresh_ReusedRefreshToken_Returns401AndInvalidatesFamily()
     {
         // Arrange - Get real tokens and use refresh token twice
@@ -90,18 +90,19 @@ public class TokenRefreshContractTests : IntegrationTestBase
 
         // First use - should succeed
         var firstResponse = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
-        firstResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
 
         // Act - Reuse the same token (should fail)
         var response = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("error").GetString().Should().NotBeNullOrEmpty();
+        Assert.NotNull(json.RootElement.GetProperty("error").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("error").GetString()!);
     }
 
 }

@@ -1,18 +1,15 @@
-using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-
 using Maliev.AuthService.Tests.Infrastructure;
+using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
-[TestClass]
 public class ServiceLoginContractTests : IntegrationTestBase
 {
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Service_Login_ValidCredentials_Returns200WithServiceToken()
     {
         // Arrange
@@ -26,20 +23,21 @@ public class ServiceLoginContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/service/login", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrEmpty();
-        json.RootElement.GetProperty("token_type").GetString().Should().Be("Bearer");
-        json.RootElement.GetProperty("expires_in").GetInt32().Should().BeGreaterThan(0);
+        Assert.NotNull(json.RootElement.GetProperty("access_token").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("access_token").GetString()!);
+        Assert.Equal("Bearer", json.RootElement.GetProperty("token_type").GetString());
+        Assert.True(json.RootElement.GetProperty("expires_in").GetInt32() > 0);
 
         // Service tokens should not have refresh tokens
-        json.RootElement.TryGetProperty("refresh_token", out _).Should().BeFalse();
+        Assert.False(json.RootElement.TryGetProperty("refresh_token", out _));
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Service_Login_InvalidClientId_Returns401()
     {
         // Arrange - Use properly formatted but non-existent client ID
@@ -53,15 +51,16 @@ public class ServiceLoginContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/service/login", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("error").GetString().Should().NotBeNullOrEmpty();
+        Assert.NotNull(json.RootElement.GetProperty("error").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("error").GetString()!);
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Service_Login_InvalidClientSecret_Returns401()
     {
         // Arrange
@@ -75,6 +74,6 @@ public class ServiceLoginContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/service/login", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }

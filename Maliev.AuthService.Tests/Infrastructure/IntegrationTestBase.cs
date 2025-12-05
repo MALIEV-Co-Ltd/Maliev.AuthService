@@ -1,27 +1,18 @@
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Maliev.AuthService.Tests.Contract;
-using System.Net.Http;
-using System.Threading.Tasks;
+using Xunit;
 
 namespace Maliev.AuthService.Tests.Infrastructure;
 
 /// <summary>
-/// Base class for integration tests with proper disposal ordering
-/// Factory is disposed BEFORE database cleanup to prevent race conditions
+/// Base class for integration tests with proper disposal ordering using xUnit's IAsyncLifetime.
+/// Factory is disposed BEFORE database cleanup to prevent race conditions.
 /// </summary>
-public abstract class IntegrationTestBase
+public abstract class IntegrationTestBase : IAsyncLifetime
 {
     protected HttpClient _client = null!;
     protected TestWebApplicationFactory _factory = null!;
 
-    [TestInitialize]
-    public void Setup()
-    {
-        // Synchronous setup to avoid MSTest async timing issues
-        SetupAsync().GetAwaiter().GetResult();
-    }
-
-    private async Task SetupAsync()
+    public async Task InitializeAsync()
     {
         // Clear connection pools FIRST to remove any ambient transaction contamination
         Npgsql.NpgsqlConnection.ClearAllPools();
@@ -31,14 +22,7 @@ public abstract class IntegrationTestBase
         _client = _factory.CreateClient();
     }
 
-    [TestCleanup]
-    public void Cleanup()
-    {
-        // Synchronous cleanup to ensure proper ordering
-        CleanupAsync().GetAwaiter().GetResult();
-    }
-
-    private async Task CleanupAsync()
+    public async Task DisposeAsync()
     {
         try
         {

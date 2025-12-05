@@ -1,38 +1,36 @@
-using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
-
 using Maliev.AuthService.Tests.Infrastructure;
+using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
-[TestClass]
 public class HealthCheckContractTests : IntegrationTestBase
 {
 
-    [TestMethod]
+    [Fact]
     public async Task GET_Liveness_Returns200()
     {
         // Act
         var response = await _client.GetAsync("/auth/liveness");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
-        content.Should().NotBeNullOrEmpty();
+        Assert.NotNull(content);
+        Assert.NotEmpty(content);
     }
 
-    [TestMethod]
+    [Fact]
     public async Task GET_Readiness_DatabaseHealthy_Returns200()
     {
         // Act
         var response = await _client.GetAsync("/auth/readiness");
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
-        content.Should().Contain("Healthy");
+        Assert.Contains("Healthy", content);
     }
 }

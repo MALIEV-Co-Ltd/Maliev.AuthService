@@ -1,8 +1,10 @@
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Tests.Infrastructure;
@@ -13,6 +15,10 @@ using System.Text.Json;
 
 namespace Maliev.AuthService.Tests.Contract;
 
+/// <summary>
+/// Test factory that configures the AuthService for integration testing.
+/// Handles database isolation, JWT configuration, and mock HTTP clients.
+/// </summary>
 public class TestWebApplicationFactory : WebApplicationFactory<Program>
 {
     // Each factory instance gets its own database fixture for complete isolation
@@ -66,6 +72,10 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
             // Add a single mock HTTP client that handles all requests
             services.AddHttpClient(Options.DefaultName)
                 .ConfigurePrimaryHttpMessageHandler(() => new SmartMockHttpMessageHandler());
+
+            // Register startup filter to inject test IP address middleware
+            // This is needed because RateLimitService tracks login attempts by IP
+            services.AddSingleton<IStartupFilter, TestIpAddressStartupFilter>();
         });
 
         builder.ConfigureAppConfiguration((context, config) =>
@@ -126,6 +136,29 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>
     {
         _databaseFixture?.Dispose();
         await base.DisposeAsync();
+    }
+}
+
+/// <summary>
+/// Startup filter that injects test IP address middleware.
+/// Used for rate limiting tests that need a consistent IP address.
+/// </summary>
+public class TestIpAddressStartupFilter : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
+    {
+        return app =>
+        {
+            // Inject test IP address FIRST so it's set before any other middleware
+            app.Use(async (context, nextMiddleware) =>
+            {
+                context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("192.168.1.100");
+                await nextMiddleware();
+            });
+            
+            // Continue with the rest of the middleware pipeline
+            next(app);
+        };
     }
 }
 

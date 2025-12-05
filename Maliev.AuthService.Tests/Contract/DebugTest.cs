@@ -1,17 +1,14 @@
-using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
 using System.Net.Http.Json;
-
 using Maliev.AuthService.Tests.Infrastructure;
+using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
-[TestClass]
 public class DebugTest : IntegrationTestBase
 {
 
-    [TestMethod]
+    [Fact]
     public async Task Debug_Login_ShowActualResponse()
     {
         var request = new
@@ -28,6 +25,6 @@ public class DebugTest : IntegrationTestBase
         Console.WriteLine($"Body: {body}");
 
         // Just output, don't fail
-        true.Should().BeTrue();
+        Assert.True(true);
     }
 }

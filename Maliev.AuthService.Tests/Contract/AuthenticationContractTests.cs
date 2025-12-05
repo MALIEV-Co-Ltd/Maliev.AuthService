@@ -1,16 +1,14 @@
-using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Maliev.AuthService.Tests.Infrastructure;
+using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
-[TestClass]
 public class AuthenticationContractTests : IntegrationTestBase
 {
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Login_ValidCustomerCredentials_Returns200WithTokens()
     {
         // Arrange
@@ -25,22 +23,25 @@ public class AuthenticationContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrEmpty();
-        json.RootElement.GetProperty("refresh_token").GetString().Should().NotBeNullOrEmpty();
-        json.RootElement.GetProperty("token_type").GetString().Should().Be("Bearer");
-        json.RootElement.GetProperty("expires_in").GetInt32().Should().Be(900); // 15 minutes
+        Assert.NotNull(json.RootElement.GetProperty("access_token").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("access_token").GetString()!);
+        Assert.NotNull(json.RootElement.GetProperty("refresh_token").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("refresh_token").GetString()!);
+        Assert.Equal("Bearer", json.RootElement.GetProperty("token_type").GetString());
+        Assert.Equal(900, json.RootElement.GetProperty("expires_in").GetInt32()); // 15 minutes
 
         var user = json.RootElement.GetProperty("user");
-        user.GetProperty("user_id").GetString().Should().NotBeNullOrEmpty();
-        user.GetProperty("user_type").GetString().Should().Be("customer");
+        Assert.NotNull(user.GetProperty("user_id").GetString());
+        Assert.NotEmpty(user.GetProperty("user_id").GetString()!);
+        Assert.Equal("customer", user.GetProperty("user_type").GetString());
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Login_ValidEmployeeCredentials_Returns200WithCorrectUserType()
     {
         // Arrange
@@ -55,16 +56,16 @@ public class AuthenticationContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
         var user = json.RootElement.GetProperty("user");
-        user.GetProperty("user_type").GetString().Should().Be("employee");
+        Assert.Equal("employee", user.GetProperty("user_type").GetString());
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Login_InvalidCredentials_Returns401()
     {
         // Arrange
@@ -79,17 +80,19 @@ public class AuthenticationContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("error").GetString().Should().NotBeNullOrEmpty();
-        json.RootElement.GetProperty("error_description").GetString().Should().NotBeNullOrEmpty();
+        Assert.NotNull(json.RootElement.GetProperty("error").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("error").GetString()!);
+        Assert.NotNull(json.RootElement.GetProperty("error_description").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("error_description").GetString()!);
     }
 
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Login_AccountLocked_Returns423WithLockedUntil()
     {
         // Arrange - Simulate account lockout by making 5 failed attempts first
@@ -110,16 +113,17 @@ public class AuthenticationContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/login", failedRequest);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Locked); // 423
+        Assert.Equal(HttpStatusCode.Locked, response.StatusCode); // 423
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("locked_until").GetString().Should().NotBeNullOrEmpty();
-        json.RootElement.GetProperty("error").GetString().Should().Contain("locked");
+        Assert.NotNull(json.RootElement.GetProperty("locked_until").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("locked_until").GetString()!);
+        Assert.Contains("locked", json.RootElement.GetProperty("error").GetString());
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Login_RateLimitExceeded_Returns429WithRetryAfter()
     {
         // Arrange - Make 20+ failed requests from same IP to trigger rate limit
@@ -140,7 +144,7 @@ public class AuthenticationContractTests : IntegrationTestBase
         }
 
         // Assert - 21st request should be rate limited
-        response!.StatusCode.Should().Be(HttpStatusCode.TooManyRequests); // 429
-        response.Headers.Should().ContainKey("Retry-After");
+        Assert.Equal(HttpStatusCode.TooManyRequests, response!.StatusCode); // 429
+        Assert.True(response.Headers.Contains("Retry-After"));
     }
 }

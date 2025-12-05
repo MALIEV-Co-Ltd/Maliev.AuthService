@@ -1,14 +1,11 @@
-using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-
 using Maliev.AuthService.Tests.Infrastructure;
+using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
-[TestClass]
 public class LogoutContractTests : IntegrationTestBase
 {
 
@@ -33,7 +30,7 @@ public class LogoutContractTests : IntegrationTestBase
         );
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Logout_ValidRefreshToken_Returns204AndRevokesTokens()
     {
         // Arrange - Get real tokens from login
@@ -47,10 +44,10 @@ public class LogoutContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/logout", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Logout_InvalidRefreshToken_Returns401()
     {
         // Arrange - Use an invalid token string
@@ -63,6 +60,6 @@ public class LogoutContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/logout", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 }

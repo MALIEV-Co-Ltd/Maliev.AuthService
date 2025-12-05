@@ -1,14 +1,11 @@
-using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-
 using Maliev.AuthService.Tests.Infrastructure;
+using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
-[TestClass]
 public class TokenValidationContractTests : IntegrationTestBase
 {
 
@@ -33,7 +30,7 @@ public class TokenValidationContractTests : IntegrationTestBase
         );
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Validate_ValidToken_Returns200WithUserIdentity()
     {
         // Arrange - Get real tokens from login
@@ -47,17 +44,19 @@ public class TokenValidationContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("valid").GetBoolean().Should().BeTrue();
-        json.RootElement.GetProperty("user_id").GetString().Should().NotBeNullOrEmpty();
-        json.RootElement.GetProperty("user_type").GetString().Should().Match(x => x == "customer" || x == "employee");
+        Assert.True(json.RootElement.GetProperty("valid").GetBoolean());
+        Assert.NotNull(json.RootElement.GetProperty("user_id").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("user_id").GetString()!);
+        var userType = json.RootElement.GetProperty("user_type").GetString();
+        Assert.True(userType == "customer" || userType == "employee");
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Validate_ExpiredToken_Returns200WithValidFalse()
     {
         // Arrange - Use an invalid token string
@@ -70,16 +69,17 @@ public class TokenValidationContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("valid").GetBoolean().Should().BeFalse();
-        json.RootElement.GetProperty("error").GetString().Should().NotBeNullOrEmpty();
+        Assert.False(json.RootElement.GetProperty("valid").GetBoolean());
+        Assert.NotNull(json.RootElement.GetProperty("error").GetString());
+        Assert.NotEmpty(json.RootElement.GetProperty("error").GetString()!);
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Validate_RevokedToken_Returns200WithValidFalse()
     {
         // Arrange - Get real token, revoke it, then validate
@@ -101,16 +101,16 @@ public class TokenValidationContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("valid").GetBoolean().Should().BeFalse();
-        json.RootElement.GetProperty("error").GetString().Should().Contain("revoked");
+        Assert.False(json.RootElement.GetProperty("valid").GetBoolean());
+        Assert.Contains("revoked", json.RootElement.GetProperty("error").GetString());
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Validate_InvalidSignature_Returns200WithValidFalse()
     {
         // Arrange - Get a real token and tamper with it
@@ -128,11 +128,11 @@ public class TokenValidationContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        json.RootElement.GetProperty("valid").GetBoolean().Should().BeFalse();
+        Assert.False(json.RootElement.GetProperty("valid").GetBoolean());
     }
 }

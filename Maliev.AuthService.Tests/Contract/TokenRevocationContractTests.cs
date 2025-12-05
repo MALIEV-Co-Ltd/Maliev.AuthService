@@ -1,14 +1,11 @@
-using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-
 using Maliev.AuthService.Tests.Infrastructure;
+using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
-[TestClass]
 public class TokenRevocationContractTests : IntegrationTestBase
 {
 
@@ -33,7 +30,7 @@ public class TokenRevocationContractTests : IntegrationTestBase
         );
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Revoke_ValidToken_Returns204()
     {
         // Arrange - Get real tokens from login
@@ -48,10 +45,10 @@ public class TokenRevocationContractTests : IntegrationTestBase
         var response = await _client.PostAsJsonAsync("/auth/v1/revoke", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
     }
 
-    [TestMethod]
+    [Fact]
     public async Task POST_V1_Auth_Revoke_AlreadyRevokedToken_Returns204Idempotent()
     {
         // Arrange - Get real tokens from login
@@ -64,13 +61,13 @@ public class TokenRevocationContractTests : IntegrationTestBase
 
         // Act - First revocation
         var firstResponse = await _client.PostAsJsonAsync("/auth/v1/revoke", request);
-        firstResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        Assert.Equal(HttpStatusCode.NoContent, firstResponse.StatusCode);
 
         // Act - Second revocation (idempotent)
         var response = await _client.PostAsJsonAsync("/auth/v1/revoke", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
     }
 
 }
