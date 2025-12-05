@@ -1,3 +1,4 @@
+using Maliev.AuthService.Api.Middleware;
 using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.Data.DbContexts;
 
@@ -8,13 +9,32 @@ builder.AddGoogleSecretManagerVolume(); // Load secrets from /mnt/secrets if ava
 
 // --- Infrastructure & Observability ---
 builder.AddServiceDefaults(); // OpenTelemetry, health checks, resilience
+builder.AddServiceMeters("auth"); // Register service meters for OpenTelemetry business metrics
+
 builder.AddRedisDistributedCache(instanceName: "Auth:"); // Redis with in-memory fallback
 builder.AddMassTransitWithRabbitMq(); // RabbitMQ message bus (non-blocking startup)
-builder.AddPostgresDbContext<AuthDbContext>(); // PostgreSQL with retry logic
+builder.AddPostgresDbContext<AuthDbContext>(connectionStringName: "AuthDbContext"); // PostgreSQL with retry logic
 
 // --- API Configuration ---
 builder.AddDefaultCors(); // CORS from CORS:AllowedOrigins config
-builder.AddApiDocumentation(); // OpenAPI + Scalar (dev/staging only)
+builder.AddDefaultApiVersioning(); // API versioning with URL segment reader
+
+// Add OpenAPI (must be in Program.cs for XML comments to work via source generator)
+if (!builder.Environment.IsProduction())
+{
+    builder.Services.AddEndpointsApiExplorer();
+    builder.Services.AddOpenApi("v1", options =>
+    {
+        options.AddDocumentTransformer((document, context, cancellationToken) =>
+        {
+            document.Info.Title = "MALIEV Auth Service API";
+            document.Info.Version = "v1";
+            document.Info.Description = "Centralized authentication service for the Maliev platform. Provides user login with email/password, JWT access token issuance, refresh token rotation, token validation for service-to-service calls, and session management including logout and token revocation.";
+            return Task.CompletedTask;
+        });
+    });
+}
+
 builder.Services.AddHttpClient();
 
 builder.Services.AddControllers()
@@ -49,19 +69,9 @@ if (!app.Environment.IsEnvironment("Testing"))
     }
 }
 
-// --- Testing Environment Setup ---
-if (app.Environment.IsEnvironment("Testing"))
-{
-    app.Use(async (context, next) =>
-    {
-        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("192.168.1.100");
-        await next(context);
-    });
-}
-
 // --- Middleware Pipeline ---
-app.UseMiddleware<Maliev.AuthService.Api.Middleware.CorrelationIdMiddleware>();
-app.UseMiddleware<Maliev.AuthService.Api.Middleware.ExceptionHandlingMiddleware>();
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseHttpsRedirection();
 app.UseRouting();
 app.UseCors();
@@ -70,7 +80,7 @@ app.UseAuthorization();
 // --- Endpoints ---
 app.MapControllers();
 app.MapDefaultEndpoints(servicePrefix: "auth"); // Health checks: /auth/liveness, /auth/readiness
-app.MapApiDocumentation(servicePrefix: "auth"); // OpenAPI at /auth/openapi/v1.json, Scalar UI at /scalar
+app.MapApiDocumentation(servicePrefix: "auth"); // OpenAPI: /auth/openapi/v1.json, Scalar UI: /auth/scalar
 
 logger.LogInformation("AuthService started successfully on {Environment} environment", app.Environment.EnvironmentName);
 

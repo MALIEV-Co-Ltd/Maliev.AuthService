@@ -3,10 +3,10 @@ using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 
 namespace Maliev.AuthService.Api.Services;
+
 /// <summary>
 /// Service for RateLimit operations
 /// </summary>
-
 public class RateLimitService : IRateLimitService
 {
     private readonly AuthDbContext _dbContext;
