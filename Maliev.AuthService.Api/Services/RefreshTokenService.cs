@@ -62,7 +62,7 @@ public class RefreshTokenService : IRefreshTokenService
         _dbContext.RefreshTokens.Add(refreshToken);
         await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("Created refresh token for user {UserId}, family {FamilyId}", userId, familyId);
+        _logger.LogDebug("Created refresh token for user {UserId}, family {FamilyId}", userId, familyId);
 
         return (refreshToken, tokenValue);
     }
@@ -126,7 +126,7 @@ public class RefreshTokenService : IRefreshTokenService
         _dbContext.RefreshTokens.Add(newToken);
         await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("Rotated refresh token for user {UserId}, family {FamilyId}",
+        _logger.LogDebug("Rotated refresh token for user {UserId}, family {FamilyId}",
             oldToken.UserId, oldToken.FamilyId);
 
         return (newToken, tokenValue);
