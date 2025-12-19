@@ -4,47 +4,38 @@ using Xunit;
 namespace Maliev.AuthService.Tests.Infrastructure;
 
 /// <summary>
-/// Base class for integration tests with proper disposal ordering using xUnit's IAsyncLifetime.
-/// Factory is disposed BEFORE database cleanup to prevent race conditions.
+/// Base class for integration tests using shared factory via IClassFixture.
+/// Factory is shared across all tests in a class to avoid Docker container exhaustion.
 /// </summary>
-public abstract class IntegrationTestBase : IAsyncLifetime
+public abstract class IntegrationTestBase : IClassFixture<TestWebApplicationFactory>, IAsyncLifetime
 {
-    protected HttpClient _client = null!;
-    protected TestWebApplicationFactory _factory = null!;
+    protected readonly TestWebApplicationFactory Factory;
+    protected readonly HttpClient Client;
 
-    public async Task InitializeAsync()
+    protected static readonly string[] AdminRoles = { "admin" };
+
+    protected IntegrationTestBase(TestWebApplicationFactory factory)
     {
-        // Clear connection pools FIRST to remove any ambient transaction contamination
-        Npgsql.NpgsqlConnection.ClearAllPools();
-        
-        _factory = new TestWebApplicationFactory();
-        await _factory.ResetDatabaseAsync();
-        _client = _factory.CreateClient();
+        Factory = factory;
+        Client = Factory.CreateAuthenticatedClient("test-admin", AdminRoles);
+        // Set a consistent IP address for rate limiting tests
+        Client.DefaultRequestHeaders.Add("X-Test-Client-IP", "127.0.0.1");
     }
+
+    public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync()
     {
-        try
-        {
-            // Step 1: Dispose client first
-            _client?.Dispose();
-        }
-        finally
-        {
-            try
-            {
-                // Step 2: Dispose factory BEFORE database cleanup
-                // This ensures no pending async operations can write to DB during reset
-                if (_factory != null)
-                {
-                    await _factory.DisposeAsync();
-                }
-            }
-            finally
-            {
-                // Step 3: Clear connection pools to ensure clean state for next test
-                Npgsql.NpgsqlConnection.ClearAllPools();
-            }
-        }
+        // Clean database after all tests in this class complete
+        await Factory.CleanDatabaseAsync();
+    }
+
+    /// <summary>
+    /// Cleans the database to ensure test isolation.
+    /// Call this at the start of each test method to ensure a clean state.
+    /// </summary>
+    protected async Task CleanDatabaseAsync()
+    {
+        await Factory.CleanDatabaseAsync();
     }
 }

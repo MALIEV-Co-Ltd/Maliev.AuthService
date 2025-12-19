@@ -6,11 +6,17 @@ using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
+[Collection("AuthService Collection")]
 public class AuthenticationContractTests : IntegrationTestBase
 {
+    public AuthenticationContractTests(TestWebApplicationFactory factory) : base(factory)
+    {
+    }
+
     [Fact]
     public async Task POST_V1_Auth_Login_ValidCustomerCredentials_Returns200WithTokens()
     {
+        await CleanDatabaseAsync();
         // Arrange
         var request = new
         {
@@ -20,7 +26,7 @@ public class AuthenticationContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/login", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -44,6 +50,7 @@ public class AuthenticationContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Login_ValidEmployeeCredentials_Returns200WithCorrectUserType()
     {
+        await CleanDatabaseAsync();
         // Arrange
         var request = new
         {
@@ -53,7 +60,7 @@ public class AuthenticationContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/login", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -68,6 +75,7 @@ public class AuthenticationContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Login_InvalidCredentials_Returns401()
     {
+        await CleanDatabaseAsync();
         // Arrange
         var request = new
         {
@@ -77,7 +85,7 @@ public class AuthenticationContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/login", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/login", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -95,6 +103,7 @@ public class AuthenticationContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Login_AccountLocked_Returns423WithLockedUntil()
     {
+        await CleanDatabaseAsync();
         // Arrange - Simulate account lockout by making 5 failed attempts first
         var failedRequest = new
         {
@@ -106,11 +115,11 @@ public class AuthenticationContractTests : IntegrationTestBase
         // Make 5 failed attempts to trigger lockout
         for (int i = 0; i < 5; i++)
         {
-            await _client.PostAsJsonAsync("/auth/v1/login", failedRequest);
+            await Client.PostAsJsonAsync("/auth/v1/login", failedRequest);
         }
 
         // Act - 6th attempt should return 423
-        var response = await _client.PostAsJsonAsync("/auth/v1/login", failedRequest);
+        var response = await Client.PostAsJsonAsync("/auth/v1/login", failedRequest);
 
         // Assert
         Assert.Equal(HttpStatusCode.Locked, response.StatusCode); // 423
@@ -126,6 +135,7 @@ public class AuthenticationContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Login_RateLimitExceeded_Returns429WithRetryAfter()
     {
+        await CleanDatabaseAsync();
         // Arrange - Make 20+ failed requests from same IP to trigger rate limit
         // Use different usernames to avoid account lockout (5 attempts per user)
         // but same IP to trigger IP-based rate limiting (20 attempts per IP)
@@ -140,7 +150,7 @@ public class AuthenticationContractTests : IntegrationTestBase
                 password = "WrongPassword123!",  // Invalid password to trigger failed attempts
                 user_type = "employee"  // Use employee to avoid interference with customer account lockout tests
             };
-            response = await _client.PostAsJsonAsync("/auth/v1/login", request);
+            response = await Client.PostAsJsonAsync("/auth/v1/login", request);
         }
 
         // Assert - 21st request should be rate limited

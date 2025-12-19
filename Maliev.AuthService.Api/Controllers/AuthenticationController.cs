@@ -1,3 +1,4 @@
+using Asp.Versioning;
 using Microsoft.AspNetCore.Mvc;
 using Maliev.AuthService.Api.Models.Request;
 using Maliev.AuthService.Api.Models.Response;
@@ -10,7 +11,8 @@ namespace Maliev.AuthService.Api.Controllers;
 /// and service-to-service authentication.
 /// </summary>
 [ApiController]
-[Route("auth/v1")]
+[ApiVersion("1.0")]
+[Route("auth/v{version:apiVersion}")]
 public class AuthenticationController : ControllerBase
 {
     private readonly IAuthenticationService _authenticationService;

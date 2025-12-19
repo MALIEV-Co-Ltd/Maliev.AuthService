@@ -6,8 +6,12 @@ using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
+[Collection("AuthService Collection")]
 public class TokenRefreshContractTests : IntegrationTestBase
 {
+    public TokenRefreshContractTests(TestWebApplicationFactory factory) : base(factory)
+    {
+    }
 
     private async Task<(string AccessToken, string RefreshToken)> GetValidTokensAsync()
     {
@@ -18,7 +22,7 @@ public class TokenRefreshContractTests : IntegrationTestBase
             user_type = "customer"
         };
 
-        var response = await _client.PostAsJsonAsync("/auth/v1/login", loginRequest);
+        var response = await Client.PostAsJsonAsync("/auth/v1/login", loginRequest);
         response.EnsureSuccessStatusCode();
 
         var content = await response.Content.ReadAsStringAsync();
@@ -33,6 +37,7 @@ public class TokenRefreshContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Refresh_ValidRefreshToken_Returns200WithNewTokens()
     {
+        await CleanDatabaseAsync();
         // Arrange - Get real tokens from login
         var (_, refreshToken) = await GetValidTokensAsync();
         var request = new
@@ -41,7 +46,7 @@ public class TokenRefreshContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/refresh", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -59,6 +64,7 @@ public class TokenRefreshContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Refresh_ExpiredRefreshToken_Returns401()
     {
+        await CleanDatabaseAsync();
         // Arrange - Use an invalid token string (not a real JWT)
         var request = new
         {
@@ -66,7 +72,7 @@ public class TokenRefreshContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/refresh", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -81,6 +87,7 @@ public class TokenRefreshContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Refresh_ReusedRefreshToken_Returns401AndInvalidatesFamily()
     {
+        await CleanDatabaseAsync();
         // Arrange - Get real tokens and use refresh token twice
         var (_, refreshToken) = await GetValidTokensAsync();
         var request = new
@@ -89,11 +96,11 @@ public class TokenRefreshContractTests : IntegrationTestBase
         };
 
         // First use - should succeed
-        var firstResponse = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
+        var firstResponse = await Client.PostAsJsonAsync("/auth/v1/refresh", request);
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
 
         // Act - Reuse the same token (should fail)
-        var response = await _client.PostAsJsonAsync("/auth/v1/refresh", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/refresh", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);

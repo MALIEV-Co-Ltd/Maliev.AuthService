@@ -6,8 +6,12 @@ using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
+[Collection("AuthService Collection")]
 public class TokenValidationContractTests : IntegrationTestBase
 {
+    public TokenValidationContractTests(TestWebApplicationFactory factory) : base(factory)
+    {
+    }
 
     private async Task<(string AccessToken, string RefreshToken)> GetValidTokensAsync()
     {
@@ -18,7 +22,7 @@ public class TokenValidationContractTests : IntegrationTestBase
             user_type = "customer"
         };
 
-        var response = await _client.PostAsJsonAsync("/auth/v1/login", loginRequest);
+        var response = await Client.PostAsJsonAsync("/auth/v1/login", loginRequest);
         response.EnsureSuccessStatusCode();
 
         var content = await response.Content.ReadAsStringAsync();
@@ -33,6 +37,7 @@ public class TokenValidationContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Validate_ValidToken_Returns200WithUserIdentity()
     {
+        await CleanDatabaseAsync();
         // Arrange - Get real tokens from login
         var (accessToken, _) = await GetValidTokensAsync();
         var request = new
@@ -41,7 +46,7 @@ public class TokenValidationContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -59,6 +64,7 @@ public class TokenValidationContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Validate_ExpiredToken_Returns200WithValidFalse()
     {
+        await CleanDatabaseAsync();
         // Arrange - Use an invalid token string
         var request = new
         {
@@ -66,7 +72,7 @@ public class TokenValidationContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -82,6 +88,7 @@ public class TokenValidationContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Validate_RevokedToken_Returns200WithValidFalse()
     {
+        await CleanDatabaseAsync();
         // Arrange - Get real token, revoke it, then validate
         var (accessToken, _) = await GetValidTokensAsync();
 
@@ -91,14 +98,14 @@ public class TokenValidationContractTests : IntegrationTestBase
             token = accessToken,
             reason = "test_revocation"
         };
-        await _client.PostAsJsonAsync("/auth/v1/revoke", revokeRequest);
+        await Client.PostAsJsonAsync("/auth/v1/revoke", revokeRequest);
 
         // Act - Try to validate the revoked token
         var request = new
         {
             access_token = accessToken
         };
-        var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -113,6 +120,7 @@ public class TokenValidationContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Validate_InvalidSignature_Returns200WithValidFalse()
     {
+        await CleanDatabaseAsync();
         // Arrange - Get a real token and tamper with it
         var (accessToken, _) = await GetValidTokensAsync();
 
@@ -125,7 +133,7 @@ public class TokenValidationContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/validate", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/validate", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

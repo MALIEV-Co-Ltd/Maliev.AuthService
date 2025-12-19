@@ -56,6 +56,18 @@ Each microservice must be **self-contained**:
 * Structured JSON logging with traceable user/action IDs
 * Immutable audit logs retained per policy
 * Health checks for liveness/readiness
+* **Mandatory Log Level Configuration**: `appsettings.json` MUST use the following LogLevel configuration to reduce noise:
+  ```json
+  "LogLevel": {
+    "Default": "Information",
+    "Microsoft.AspNetCore": "Warning",
+    "Microsoft.EntityFrameworkCore": "Warning",
+    "Microsoft.AspNetCore.Watch.BrowserRefresh": "None",
+    "Microsoft.Hosting.Lifetime": "Information",
+    "Microsoft.AspNetCore.Watch": "Warning",
+    "System": "Warning"
+  }
+  ```
 
 **Rationale:** Enables compliance, diagnostics, and operational insight.
 

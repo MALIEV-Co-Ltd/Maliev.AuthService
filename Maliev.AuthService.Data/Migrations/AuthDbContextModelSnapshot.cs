@@ -17,7 +17,7 @@ namespace Maliev.AuthService.Data.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "9.0.9")
+                .HasAnnotation("ProductVersion", "10.0.0")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -74,7 +74,8 @@ namespace Maliev.AuthService.Data.Migrations
                         .HasColumnName("version")
                         .HasDefaultValueSql("'\\x0000000000000000'::bytea");
 
-                    b.HasKey("Id");
+                    b.HasKey("Id")
+                        .HasName("pk_account_lockouts");
 
                     b.HasIndex("LockedUntil")
                         .HasDatabaseName("idx_account_lockouts_locked_until");
@@ -137,7 +138,8 @@ namespace Maliev.AuthService.Data.Migrations
                         .HasColumnType("text")
                         .HasColumnName("user_type");
 
-                    b.HasKey("Id");
+                    b.HasKey("Id")
+                        .HasName("pk_auth_audit_logs");
 
                     b.HasIndex("CorrelationId")
                         .HasDatabaseName("idx_auth_audit_logs_correlation_id");
@@ -203,7 +205,8 @@ namespace Maliev.AuthService.Data.Migrations
                         .HasColumnName("window_start")
                         .HasDefaultValueSql("NOW()");
 
-                    b.HasKey("Id");
+                    b.HasKey("Id")
+                        .HasName("pk_ip_rate_limits");
 
                     b.HasIndex("BlockedUntil")
                         .HasDatabaseName("idx_ip_rate_limits_blocked_until");
@@ -266,7 +269,8 @@ namespace Maliev.AuthService.Data.Migrations
                         .HasColumnType("text")
                         .HasColumnName("user_type");
 
-                    b.HasKey("Id");
+                    b.HasKey("Id")
+                        .HasName("pk_refresh_tokens");
 
                     b.HasIndex("ExpiresAt")
                         .HasDatabaseName("idx_refresh_tokens_expires_at");
@@ -322,7 +326,8 @@ namespace Maliev.AuthService.Data.Migrations
                         .HasColumnType("text")
                         .HasColumnName("user_type");
 
-                    b.HasKey("Id");
+                    b.HasKey("Id")
+                        .HasName("pk_revoked_tokens");
 
                     b.HasIndex("ExpiresAt")
                         .HasDatabaseName("idx_revoked_tokens_expires_at");
@@ -380,7 +385,8 @@ namespace Maliev.AuthService.Data.Migrations
                         .HasColumnName("updated_at")
                         .HasDefaultValueSql("NOW()");
 
-                    b.HasKey("Id");
+                    b.HasKey("Id")
+                        .HasName("pk_service_credentials");
 
                     b.HasIndex("ClientId")
                         .IsUnique()
@@ -420,7 +426,8 @@ namespace Maliev.AuthService.Data.Migrations
                         .HasColumnType("text")
                         .HasColumnName("user_type");
 
-                    b.HasKey("FamilyId");
+                    b.HasKey("FamilyId")
+                        .HasName("pk_token_families");
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("idx_token_families_user_id");

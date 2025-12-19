@@ -6,12 +6,17 @@ using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
+[Collection("AuthService Collection")]
 public class ServiceLoginContractTests : IntegrationTestBase
 {
+    public ServiceLoginContractTests(TestWebApplicationFactory factory) : base(factory)
+    {
+    }
 
     [Fact]
     public async Task POST_V1_Auth_Service_Login_ValidCredentials_Returns200WithServiceToken()
     {
+        await CleanDatabaseAsync();
         // Arrange
         var request = new
         {
@@ -20,7 +25,7 @@ public class ServiceLoginContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/service/login", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/service/login", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -40,6 +45,7 @@ public class ServiceLoginContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Service_Login_InvalidClientId_Returns401()
     {
+        await CleanDatabaseAsync();
         // Arrange - Use properly formatted but non-existent client ID
         var request = new
         {
@@ -48,7 +54,7 @@ public class ServiceLoginContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/service/login", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/service/login", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
@@ -63,6 +69,7 @@ public class ServiceLoginContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Service_Login_InvalidClientSecret_Returns401()
     {
+        await CleanDatabaseAsync();
         // Arrange
         var request = new
         {
@@ -71,7 +78,7 @@ public class ServiceLoginContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/service/login", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/service/login", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);

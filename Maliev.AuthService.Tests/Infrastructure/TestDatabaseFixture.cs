@@ -1,17 +1,23 @@
 using Maliev.AuthService.Data.DbContexts;
 using Microsoft.EntityFrameworkCore;
 using Testcontainers.PostgreSql;
+using Testcontainers.Redis;
+using Testcontainers.RabbitMq;
 
 namespace Maliev.AuthService.Tests.Infrastructure;
 
 /// <summary>
-/// Manages PostgreSQL test database lifecycle using Testcontainers
-/// Provides clean database for each test class
+/// Manages PostgreSQL, Redis, and RabbitMQ test containers using Testcontainers
+/// Provides clean infrastructure for each test class
 /// </summary>
 public class TestDatabaseFixture : IDisposable
 {
     private PostgreSqlContainer? _postgresContainer;
+    private RedisContainer? _redisContainer;
+    private RabbitMqContainer? _rabbitmqContainer;
     public string ConnectionString { get; private set; } = string.Empty;
+    public string RedisConnectionString { get; private set; } = string.Empty;
+    public string RabbitMqConnectionString { get; private set; } = string.Empty;
     private bool _initialized = false;
 
     public async Task InitializeAsync()
@@ -19,14 +25,36 @@ public class TestDatabaseFixture : IDisposable
         if (_initialized) return;
 
         _postgresContainer = new PostgreSqlBuilder()
-            .WithImage("postgres:18")
+            .WithImage("postgres:18-alpine")
             .WithDatabase("auth_test_db")
             .WithUsername("postgres")
             .WithPassword("test_password")
             .Build();
 
-        await _postgresContainer.StartAsync();
+        _redisContainer = new RedisBuilder()
+            .WithImage("redis:7-alpine")
+            .Build();
+
+        _rabbitmqContainer = new RabbitMqBuilder()
+            .WithImage("rabbitmq:4.2.1-alpine")
+            .Build();
+
+        // Start all containers in parallel
+        await Task.WhenAll(
+            _postgresContainer.StartAsync(),
+            _redisContainer.StartAsync(),
+            _rabbitmqContainer.StartAsync()
+        );
+
         ConnectionString = _postgresContainer.GetConnectionString();
+        RedisConnectionString = _redisContainer.GetConnectionString();
+        RabbitMqConnectionString = _rabbitmqContainer.GetConnectionString();
+
+        // Wait for Redis to be ready
+        using (var connection = await StackExchange.Redis.ConnectionMultiplexer.ConnectAsync(RedisConnectionString))
+        {
+            await connection.GetDatabase().PingAsync();
+        }
 
         await using var context = CreateDbContext();
         await context.Database.MigrateAsync();
@@ -64,6 +92,14 @@ public class TestDatabaseFixture : IDisposable
         {
             _postgresContainer.DisposeAsync().AsTask().Wait();
         }
+        if (_redisContainer != null)
+        {
+            _redisContainer.DisposeAsync().AsTask().Wait();
+        }
+        if (_rabbitmqContainer != null)
+        {
+            _rabbitmqContainer.DisposeAsync().AsTask().Wait();
+        }
     }
 
     public AuthDbContext CreateDbContext()
@@ -86,13 +122,13 @@ public class TestDatabaseFixture : IDisposable
             await context.Database.ExecuteSqlRawAsync("DELETE FROM account_lockouts");
             await context.Database.ExecuteSqlRawAsync("DELETE FROM ip_rate_limits");
             await context.Database.ExecuteSqlRawAsync("DELETE FROM auth_audit_logs");
-            
+
             // Do NOT delete service_credentials as they are static test data
-            
+
             await context.SaveChangesAsync();
             context.ChangeTracker.Clear(); // Ensure no entities are tracked
         }
-        
+
         // Clear all connection pools to ensure clean state for next test
         // This prevents connection leakage and ensures full isolation
         await Task.Delay(100); // Small delay to ensure context is fully disposed

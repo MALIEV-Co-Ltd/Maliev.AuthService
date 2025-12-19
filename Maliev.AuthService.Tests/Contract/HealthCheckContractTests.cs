@@ -4,14 +4,19 @@ using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
+[Collection("AuthService Collection")]
 public class HealthCheckContractTests : IntegrationTestBase
 {
+    public HealthCheckContractTests(TestWebApplicationFactory factory) : base(factory)
+    {
+    }
 
     [Fact]
     public async Task GET_Liveness_Returns200()
     {
+        await CleanDatabaseAsync();
         // Act
-        var response = await _client.GetAsync("/auth/liveness");
+        var response = await Client.GetAsync("/auth/liveness");
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -24,8 +29,9 @@ public class HealthCheckContractTests : IntegrationTestBase
     [Fact]
     public async Task GET_Readiness_DatabaseHealthy_Returns200()
     {
+        await CleanDatabaseAsync();
         // Act
-        var response = await _client.GetAsync("/auth/readiness");
+        var response = await Client.GetAsync("/auth/readiness");
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

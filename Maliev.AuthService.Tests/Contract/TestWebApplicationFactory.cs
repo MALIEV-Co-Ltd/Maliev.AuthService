@@ -1,258 +1,201 @@
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Options;
 using Maliev.AuthService.Data.DbContexts;
-using Maliev.AuthService.Tests.Infrastructure;
+using Maliev.AuthService.Tests.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.Tokens;
 using System.Net;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 namespace Maliev.AuthService.Tests.Contract;
 
-/// <summary>
-/// Test factory that configures the AuthService for integration testing.
-/// Handles database isolation, JWT configuration, and mock HTTP clients.
-/// </summary>
-public class TestWebApplicationFactory : WebApplicationFactory<Program>
+public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, AuthDbContext>
 {
-    // Each factory instance gets its own database fixture for complete isolation
-    private readonly TestDatabaseFixture _databaseFixture;
-    // Shared RSA keys across all tests to ensure token compatibility
-    private static readonly (string PublicKey, string PrivateKey) _sharedKeys = GenerateRsaKeyPair();
-
-    public TestWebApplicationFactory()
+    /// <summary>
+    /// Override CleanDatabaseAsync to seed required test data after cleanup and clear Redis
+    /// </summary>
+    public new async Task CleanDatabaseAsync()
     {
-        Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Testing");
-        
-        // Create a unique database fixture for THIS test instance
-        _databaseFixture = new TestDatabaseFixture();
-        _databaseFixture.InitializeAsync().GetAwaiter().GetResult();
-    }
-
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
-    {
-        builder.ConfigureServices(services =>
-        {
-            // Remove existing DbContext registrations
-            var descriptorsToRemove = services.Where(d =>
-                d.ServiceType == typeof(DbContextOptions<AuthDbContext>) ||
-                d.ServiceType == typeof(DbContextOptions) ||
-                d.ImplementationType?.Name.Contains("AuthDbContext") == true ||
-                d.ServiceType == typeof(AuthDbContext)).ToList();
-
-            foreach (var descriptor in descriptorsToRemove)
-            {
-                services.Remove(descriptor);
-            }
-
-            // Add PostgreSQL test database with THIS instance's connection string
-            services.AddDbContext<AuthDbContext>(options =>
-            {
-                options.UseNpgsql(_databaseFixture.ConnectionString);
-            });
-
-            // Replace HTTP client with mock handler for all external service calls
-            var httpClientFactoryDescriptors = services
-                .Where(d => d.ServiceType == typeof(IHttpMessageHandlerFactory) ||
-                           d.ServiceType == typeof(IHttpClientFactory) ||
-                           d.ImplementationType?.Name.Contains("HttpClient") == true)
-                .ToList();
-
-            foreach (var descriptor in httpClientFactoryDescriptors)
-            {
-                services.Remove(descriptor);
-            }
-
-            // Add a single mock HTTP client that handles all requests
-            services.AddHttpClient(Options.DefaultName)
-                .ConfigurePrimaryHttpMessageHandler(() => new SmartMockHttpMessageHandler());
-
-            // Register startup filter to inject test IP address middleware
-            // This is needed because RateLimitService tracks login attempts by IP
-            services.AddSingleton<IStartupFilter, TestIpAddressStartupFilter>();
-        });
-
-        builder.ConfigureAppConfiguration((context, config) =>
-        {
-            // Use SHARED RSA keys so tokens created in one part of test can be validated in another
-            config.AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                { "Jwt:PublicKey", _sharedKeys.PublicKey },
-                { "Jwt:PrivateKey", _sharedKeys.PrivateKey },
-                { "Jwt:Issuer", "https://auth.test.local" },
-                { "Jwt:Audience", "https://api.test.local" },
-                { "ExternalServices:CustomerService:BaseUrl", "http://mock-customer-service" },
-                { "ExternalServices:CustomerService:ValidationEndpoint", "/validate" },
-                { "ExternalServices:CustomerService:TimeoutInSeconds", "30" },
-                { "ExternalServices:EmployeeService:BaseUrl", "http://mock-employee-service" },
-                { "ExternalServices:EmployeeService:ValidationEndpoint", "/validate" },
-                { "ExternalServices:EmployeeService:TimeoutInSeconds", "30" }
-            });
-        });
-
-        builder.UseEnvironment("Testing");
+        await base.CleanDatabaseAsync();
+        await ClearRedisAsync();
+        await SeedTestDataAsync();
     }
 
     /// <summary>
-    /// Generates a new RSA key pair for testing (2048-bit)
+    /// Clears all Redis keys to ensure clean state between tests
     /// </summary>
-    /// <returns>Tuple of (Base64-encoded public key PEM, Base64-encoded private key PEM)</returns>
-    private static (string PublicKeyPem, string PrivateKeyPem) GenerateRsaKeyPair()
+    private async Task ClearRedisAsync()
     {
-        using var rsa = RSA.Create(2048);
-        
-        // Export keys to PEM format
-        var publicKeyPem = rsa.ExportRSAPublicKeyPem();
-        var privateKeyPem = rsa.ExportRSAPrivateKeyPem();
-        
-        // Convert to Base64 for configuration (matching production format)
-        var publicKeyBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(publicKeyPem));
-        var privateKeyBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(privateKeyPem));
-        
-        return (publicKeyBase64, privateKeyBase64);
-    }
-
-    public async Task ResetDatabaseAsync()
-    {
-        await _databaseFixture.ClearDatabaseAsync();
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
+        var redisConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__redis");
+        if (!string.IsNullOrEmpty(redisConnectionString))
         {
-            _databaseFixture?.Dispose();
+            // Add allowAdmin=true to enable FLUSHALL command
+            var connectionString = $"{redisConnectionString},allowAdmin=true";
+            await using var connection = await StackExchange.Redis.ConnectionMultiplexer.ConnectAsync(connectionString);
+            var server = connection.GetServer(connection.GetEndPoints().First());
+            await server.FlushAllDatabasesAsync();
         }
-        base.Dispose(disposing);
     }
 
-    public override async ValueTask DisposeAsync()
+    /// <summary>
+    /// Seeds required test data for AuthService tests
+    /// </summary>
+    private async Task SeedTestDataAsync()
     {
-        _databaseFixture?.Dispose();
-        await base.DisposeAsync();
-    }
-}
+        await using var context = GetDbContext();
 
-/// <summary>
-/// Startup filter that injects test IP address middleware.
-/// Used for rate limiting tests that need a consistent IP address.
-/// </summary>
-public class TestIpAddressStartupFilter : IStartupFilter
-{
-    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
-    {
-        return app =>
+        // Seed service credentials for service login tests
+        var serviceCredential = new Maliev.AuthService.Data.Entities.ServiceCredential
         {
-            // Inject test IP address FIRST so it's set before any other middleware
-            app.Use(async (context, nextMiddleware) =>
-            {
-                context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("192.168.1.100");
-                await nextMiddleware();
-            });
-            
-            // Continue with the rest of the middleware pipeline
-            next(app);
+            Id = Guid.NewGuid(),
+            ClientId = "service-dev-customer-api",
+            ClientSecretHash = ComputeSha256Hash("valid_service_secret"),
+            ServiceName = "Customer API Service",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
         };
-    }
-}
 
-/// <summary>
-/// Mock HTTP message handler for testing external service calls.
-/// Intelligently routes requests to mock responses based on URL patterns.
-/// </summary>
-public class SmartMockHttpMessageHandler : HttpMessageHandler
-{
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        var url = request.RequestUri?.ToString() ?? string.Empty;
-        
-        // Read request body to check credentials
-        string requestBody = "";
-        if (request.Content != null)
-        {
-            requestBody = await request.Content.ReadAsStringAsync(cancellationToken);
-        }
-        
-        // Check if this is a customer service validation request
-        if (url.Contains("/validate") && (url.Contains("customer") || url.Contains("5001")))
-        {
-            var (userId, username) = GetDeterministicUser(requestBody);
-            
-            // Simple check for "Wrong" or "Invalid" in the password field within the JSON body
-            bool isInvalidPassword = requestBody.Contains("Wrong") || requestBody.Contains("Invalid");
-            
-            var response = new
-            {
-                isValid = !isInvalidPassword,
-                userId = userId,
-                email = username,
-                name = $"Test {username}"
-            };
-            
-            var jsonResponse = JsonSerializer.Serialize(response, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            });
-            
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(jsonResponse, Encoding.UTF8, "application/json")
-            };
-        }
-        
-        // Check if this is an employee service validation request
-        if (url.Contains("/validate") && (url.Contains("employee") || url.Contains("5002")))
-        {
-            var (userId, username) = GetDeterministicUser(requestBody);
-
-            bool isInvalidPassword = requestBody.Contains("Wrong") || requestBody.Contains("Invalid");
-
-            var response = new
-            {
-                isValid = !isInvalidPassword,
-                userId = userId,
-                email = username,
-                name = $"Test {username}"
-            };
-            
-            var jsonResponse = JsonSerializer.Serialize(response, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            });
-            
-            return new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(jsonResponse, Encoding.UTF8, "application/json")
-            };
-        }
-        
-        // Default 404 response for unmocked paths
-        return new HttpResponseMessage(HttpStatusCode.NotFound);
+        context.Set<Maliev.AuthService.Data.Entities.ServiceCredential>().Add(serviceCredential);
+        await context.SaveChangesAsync();
     }
 
-    private (Guid UserId, string Username) GetDeterministicUser(string jsonBody)
+    /// <summary>
+    /// Computes SHA-256 hash of a string
+    /// </summary>
+    private static string ComputeSha256Hash(string input)
     {
-        try
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var bytes = System.Text.Encoding.UTF8.GetBytes(input);
+        var hash = sha256.ComputeHash(bytes);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    protected override void ConfigureEnvironmentVariables()
+    {
+        // Set external service URLs via environment variables for testing
+        Environment.SetEnvironmentVariable("ExternalServices__CustomerService__BaseUrl", "http://localhost:5001");
+        Environment.SetEnvironmentVariable("ExternalServices__EmployeeService__BaseUrl", "http://localhost:5002");
+
+        // Export RSA private and public keys for JWT token generation and validation
+        // The base factory provides _testRsa through SigningCredentials property
+        var rsa = (SigningCredentials.Key as RsaSecurityKey)?.Rsa;
+        if (rsa != null)
         {
-            using var doc = JsonDocument.Parse(jsonBody);
-            if (doc.RootElement.TryGetProperty("username", out var usernameProp))
+            // Export private key for token generation
+            var privateKeyPem = rsa.ExportRSAPrivateKeyPem();
+            var privateKeyBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(privateKeyPem));
+            Environment.SetEnvironmentVariable("Jwt__PrivateKey", privateKeyBase64);
+
+            // Export public key for token validation
+            var publicKeyPem = rsa.ExportRSAPublicKeyPem();
+            var publicKeyBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(publicKeyPem));
+            Environment.SetEnvironmentVariable("Jwt__PublicKey", publicKeyBase64);
+        }
+    }
+
+    protected override void ConfigureAdditionalServices(IServiceCollection services)
+    {
+        // Remove existing HttpClient registration
+        var httpClientDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IHttpClientFactory));
+        if (httpClientDescriptor != null)
+        {
+            services.Remove(httpClientDescriptor);
+        }
+
+        // Add mock HTTP client factory that returns successful validation responses
+        services.AddSingleton<IHttpClientFactory>(sp => new MockHttpClientFactory());
+    }
+
+    private class MockHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name)
+        {
+            var handler = new MockHttpMessageHandler();
+            return new HttpClient(handler)
             {
-                var username = usernameProp.GetString() ?? "unknown";
-                var hash = MD5.HashData(Encoding.UTF8.GetBytes(username));
-                return (new Guid(hash), username);
+                BaseAddress = new Uri("http://localhost")
+            };
+        }
+    }
+
+    private class MockHttpMessageHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            // Mock external service validation responses
+            if (request.RequestUri?.PathAndQuery.Contains("/validate") == true)
+            {
+                // Read the request body to get username and password
+                string? username = null;
+                string? password = null;
+
+                if (request.Content != null)
+                {
+                    var requestBody = await request.Content.ReadAsStringAsync(cancellationToken);
+                    var jsonDoc = JsonDocument.Parse(requestBody);
+
+                    if (jsonDoc.RootElement.TryGetProperty("username", out var usernameElement))
+                        username = usernameElement.GetString();
+                    if (jsonDoc.RootElement.TryGetProperty("password", out var passwordElement))
+                        password = passwordElement.GetString();
+                }
+
+                // Only validate specific test users with correct password
+                var validUsers = new Dictionary<string, string>
+                {
+                    { "customer@example.com", "ValidPassword123!" },
+                    { "employee@maliev.com", "ValidPassword123!" }
+                };
+
+                if (username != null && validUsers.TryGetValue(username, out var expectedPassword) && password == expectedPassword)
+                {
+                    var response = new
+                    {
+                        IsValid = true,
+                        UserId = Guid.NewGuid(),
+                        Email = username,
+                        Name = "Test User"
+                    };
+
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = JsonContent.Create(response)
+                    };
+                }
+
+                // Return invalid response for all other users
+                // Generate a consistent UserId based on username hash for account lockout tracking
+                // This allows the same username to accumulate failed attempts
+                Guid generatedUserId;
+                if (!string.IsNullOrEmpty(username))
+                {
+                    // Create deterministic GUID from username hash
+                    using var sha256 = System.Security.Cryptography.SHA256.Create();
+                    var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(username));
+                    var guidBytes = new byte[16];
+                    Array.Copy(hashBytes, guidBytes, 16);
+                    generatedUserId = new Guid(guidBytes);
+                }
+                else
+                {
+                    generatedUserId = Guid.NewGuid();
+                }
+
+                var invalidResponse = new
+                {
+                    IsValid = false,
+                    UserId = generatedUserId,
+                    Error = "Invalid credentials"
+                };
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(invalidResponse)
+                };
             }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
-        catch
-        {
-            // Ignore parsing errors
-        }
-        
-        return (Guid.NewGuid(), "unknown");
     }
 }

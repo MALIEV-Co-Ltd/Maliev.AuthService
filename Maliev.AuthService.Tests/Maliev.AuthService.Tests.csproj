@@ -21,6 +21,8 @@
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.8.1" />
+    <PackageReference Include="Testcontainers.Redis" Version="4.8.1" />
+    <PackageReference Include="Testcontainers.RabbitMq" Version="4.8.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.1">
       <PrivateAssets>all</PrivateAssets>
@@ -35,6 +37,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Maliev.AuthService.Api\Maliev.AuthService.Api.csproj" />
     <ProjectReference Include="..\Maliev.AuthService.Data\Maliev.AuthService.Data.csproj" />
+    <ProjectReference Include="..\..\Maliev.Aspire\Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" />
   </ItemGroup>
 
 </Project>

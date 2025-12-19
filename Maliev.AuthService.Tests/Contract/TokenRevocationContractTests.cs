@@ -6,8 +6,12 @@ using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
 
+[Collection("AuthService Collection")]
 public class TokenRevocationContractTests : IntegrationTestBase
 {
+    public TokenRevocationContractTests(TestWebApplicationFactory factory) : base(factory)
+    {
+    }
 
     private async Task<(string AccessToken, string RefreshToken)> GetValidTokensAsync()
     {
@@ -18,7 +22,7 @@ public class TokenRevocationContractTests : IntegrationTestBase
             user_type = "customer"
         };
 
-        var response = await _client.PostAsJsonAsync("/auth/v1/login", loginRequest);
+        var response = await Client.PostAsJsonAsync("/auth/v1/login", loginRequest);
         response.EnsureSuccessStatusCode();
 
         var content = await response.Content.ReadAsStringAsync();
@@ -33,6 +37,7 @@ public class TokenRevocationContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Revoke_ValidToken_Returns204()
     {
+        await CleanDatabaseAsync();
         // Arrange - Get real tokens from login
         var (accessToken, _) = await GetValidTokensAsync();
         var request = new
@@ -42,7 +47,7 @@ public class TokenRevocationContractTests : IntegrationTestBase
         };
 
         // Act
-        var response = await _client.PostAsJsonAsync("/auth/v1/revoke", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/revoke", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
@@ -51,6 +56,7 @@ public class TokenRevocationContractTests : IntegrationTestBase
     [Fact]
     public async Task POST_V1_Auth_Revoke_AlreadyRevokedToken_Returns204Idempotent()
     {
+        await CleanDatabaseAsync();
         // Arrange - Get real tokens from login
         var (accessToken, _) = await GetValidTokensAsync();
         var request = new
@@ -60,11 +66,11 @@ public class TokenRevocationContractTests : IntegrationTestBase
         };
 
         // Act - First revocation
-        var firstResponse = await _client.PostAsJsonAsync("/auth/v1/revoke", request);
+        var firstResponse = await Client.PostAsJsonAsync("/auth/v1/revoke", request);
         Assert.Equal(HttpStatusCode.NoContent, firstResponse.StatusCode);
 
         // Act - Second revocation (idempotent)
-        var response = await _client.PostAsJsonAsync("/auth/v1/revoke", request);
+        var response = await Client.PostAsJsonAsync("/auth/v1/revoke", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);

@@ -9,11 +9,21 @@ builder.AddGoogleSecretManagerVolume(); // Load secrets from /mnt/secrets if ava
 
 // --- Infrastructure & Observability ---
 builder.AddServiceDefaults(); // OpenTelemetry, health checks, resilience
-builder.AddServiceMeters("auth"); // Register service meters for OpenTelemetry business metrics
+builder.AddServiceMeters("auth-meter"); // Register service meters for OpenTelemetry business metrics
 
-builder.AddRedisDistributedCache(instanceName: "Auth:"); // Redis with in-memory fallback
-builder.AddMassTransitWithRabbitMq(); // RabbitMQ message bus (non-blocking startup)
+// Register DbContext for all environments (test factory provides connection string via environment variables)
 builder.AddPostgresDbContext<AuthDbContext>(connectionStringName: "AuthDbContext"); // PostgreSQL with retry logic
+
+// Only add Redis and MassTransit when not in Testing environment
+// In testing, the TestWebApplicationFactory handles these configurations separately
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.AddRedisDistributedCache(instanceName: "auth:"); // Redis with in-memory fallback
+    builder.AddMassTransitWithRabbitMq(); // RabbitMQ message bus (non-blocking startup)
+}
+
+// JWT Authentication
+builder.AddJwtAuthentication();
 
 // --- API Configuration ---
 builder.AddDefaultCors(); // CORS from CORS:AllowedOrigins config
@@ -70,6 +80,22 @@ if (!app.Environment.IsEnvironment("Testing"))
 }
 
 // --- Middleware Pipeline ---
+// In testing environment, allow setting IP address from header for rate limiting tests
+if (app.Environment.IsEnvironment("Testing"))
+{
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Headers.TryGetValue("X-Test-Client-IP", out var ipValue))
+        {
+            if (System.Net.IPAddress.TryParse(ipValue.ToString(), out var ipAddress))
+            {
+                context.Connection.RemoteIpAddress = ipAddress;
+            }
+        }
+        await next();
+    });
+}
+
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseHttpsRedirection();
