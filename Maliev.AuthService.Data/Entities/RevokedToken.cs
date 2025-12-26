@@ -1,7 +1,7 @@
 namespace Maliev.AuthService.Data.Entities;
 
 /// <summary>
-/// Represents a revoked access token for distributed validation (supports <2s propagation via Redis + DB fallback).
+/// Represents a revoked access token for distributed validation (supports less than 2s propagation via Redis + DB fallback).
 /// </summary>
 public class RevokedToken
 {

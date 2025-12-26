@@ -46,7 +46,7 @@ packages/
 .DS_Store
 
 .claude/settings.local.json
-
+.gemini/settings.local.json
 
 gha-creds-*.json
 
@@ -72,3 +72,12 @@ docker-compose.dev.yml
 *SUMMARY*.md
 *AUDIT*.md
 *.Improvements.md
+# Test Outputs
+*test-output.txt
+*_error.txt
+
+
+# Test Outputs
+*test-output.txt
+*_error.txt
+

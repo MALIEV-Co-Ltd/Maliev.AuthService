@@ -46,7 +46,7 @@ RUN chown -R app:app /app
 USER app
 
 # Copy published application (now owned by app)
-COPY --from=publish /app/publish .
+COPY --chown=app:app --from=publish /app/publish .
 
 # Set environment variables
 ENV ASPNETCORE_URLS=http://+:8080

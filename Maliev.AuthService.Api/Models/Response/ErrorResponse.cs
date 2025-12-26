@@ -24,4 +24,9 @@ public class ErrorResponse
     /// Locked until timestamp (for 423 Locked)
     /// </summary>
     public DateTime? LockedUntil { get; set; }
+
+    /// <summary>
+    /// Detailed exception information (only populated in development)
+    /// </summary>
+    public string? Details { get; set; }
 }

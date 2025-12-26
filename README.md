@@ -12,6 +12,7 @@ Production-ready JWT token-based authentication service with OAuth 2.0 token rot
   - IP rate limiting (20 requests / 15 minutes)
   - Progressive delay on failed attempts
 - **Service-to-Service Authentication**: Dedicated auth flow for microservices
+- **IAM Integration**: Fine-grained authorization via permissions and roles embedded in JWT tokens (resolved from IAM service)
 - **Complete Token Lifecycle**: Generation, validation, refresh, revocation with audit logging
 - **Production-Ready**: Structured logging, health checks, correlation IDs, error handling
 

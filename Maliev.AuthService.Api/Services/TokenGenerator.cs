@@ -25,7 +25,7 @@ public class TokenGenerator : ITokenGenerator
         _logger = logger;
     }
     /// <inheritdoc/>
-    public string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null)
+    public string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null)
     {
         var claims = new List<Claim>
         {
@@ -43,6 +43,22 @@ public class TokenGenerator : ITokenGenerator
         if (!string.IsNullOrEmpty(name))
         {
             claims.Add(new Claim(JwtRegisteredClaimNames.Name, name));
+        }
+
+        if (permissions != null)
+        {
+            foreach (var permission in permissions)
+            {
+                claims.Add(new Claim("permissions", permission));
+            }
+        }
+
+        if (roles != null)
+        {
+            foreach (var role in roles)
+            {
+                claims.Add(new Claim("roles", role));
+            }
         }
 
         var privateKeyPem = _configuration["Jwt:PrivateKey"]
@@ -92,7 +108,7 @@ public class TokenGenerator : ITokenGenerator
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
     /// <inheritdoc/>
-    public Task<string> GenerateServiceAccessTokenAsync(string clientId, string serviceName)
+    public Task<string> GenerateServiceAccessTokenAsync(string clientId, string serviceName, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null)
     {
         var claims = new List<Claim>
         {
@@ -102,6 +118,22 @@ public class TokenGenerator : ITokenGenerator
             new("user_type", "service"),
             new(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
         };
+
+        if (permissions != null)
+        {
+            foreach (var permission in permissions)
+            {
+                claims.Add(new Claim("permissions", permission));
+            }
+        }
+
+        if (roles != null)
+        {
+            foreach (var role in roles)
+            {
+                claims.Add(new Claim("roles", role));
+            }
+        }
 
         var privateKeyPem = _configuration["Jwt:PrivateKey"]
             ?? throw new InvalidOperationException("JWT private key not configured");
