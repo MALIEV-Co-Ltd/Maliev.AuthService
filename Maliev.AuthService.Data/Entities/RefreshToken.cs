@@ -21,6 +21,12 @@ public class RefreshToken
     public Guid UserId { get; set; }
 
     /// <summary>
+    /// Principal identifier from IAM service (universal identity)
+    /// Used for permission resolution. May differ from UserId when IAM manages a separate principal.
+    /// </summary>
+    public Guid PrincipalId { get; set; }
+
+    /// <summary>
     /// Distinguishes customer vs employee users
     /// </summary>
     public UserType UserType { get; set; }

@@ -1,4 +1,3 @@
-using Maliev.AuthService.Api.Middleware;
 using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.Data.DbContexts;
 
@@ -9,10 +8,14 @@ builder.AddGoogleSecretManagerVolume(); // Load secrets from /mnt/secrets if ava
 
 // --- Infrastructure & Observability ---
 builder.AddServiceDefaults(); // OpenTelemetry, health checks, resilience
+builder.AddStandardMiddleware(options =>
+{
+    options.EnableRequestLogging = true;
+});
 builder.AddServiceMeters("auth-meter"); // Register service meters for OpenTelemetry business metrics
 
 // Register DbContext for all environments (test factory provides connection string via environment variables)
-builder.AddPostgresDbContext<AuthDbContext>(connectionStringName: "AuthDbContext"); // PostgreSQL with retry logic
+builder.AddPostgresDbContext<AuthDbContext>(connectionName: "AuthDbContext"); // PostgreSQL with retry logic
 
 // Only add Redis and MassTransit when not in Testing environment
 // In testing, the TestWebApplicationFactory handles these configurations separately
@@ -32,17 +35,9 @@ builder.AddDefaultApiVersioning(); // API versioning with URL segment reader
 // Add OpenAPI (must be in Program.cs for XML comments to work via source generator)
 if (!builder.Environment.IsProduction())
 {
-    builder.Services.AddEndpointsApiExplorer();
-    builder.Services.AddOpenApi("v1", options =>
-    {
-        options.AddDocumentTransformer((document, context, cancellationToken) =>
-        {
-            document.Info.Title = "MALIEV Auth Service API";
-            document.Info.Version = "v1";
-            document.Info.Description = "Centralized authentication service for the Maliev platform. Provides user login with email/password, JWT access token issuance, refresh token rotation, token validation for service-to-service calls, and session management including logout and token revocation.";
-            return Task.CompletedTask;
-        });
-    });
+    builder.AddStandardOpenApi(
+        title: "MALIEV Auth Service API",
+        description: "Centralized authentication service for the Maliev platform. Provides user login with email/password, JWT access token issuance with IAM-resolved permissions and roles, refresh token rotation, token validation for service-to-service calls, and session management including logout and token revocation.");
 }
 
 builder.Services.AddHttpClient();
@@ -54,6 +49,8 @@ builder.Services.AddControllers()
     });
 
 // --- Application Services ---
+builder.AddServiceClient<IIAMClient, IAMClient>("IAM");
+
 builder.Services.AddScoped<ITokenGenerator, TokenGenerator>();
 builder.Services.AddScoped<ITokenValidator, TokenValidator>();
 builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
@@ -96,8 +93,7 @@ if (app.Environment.IsEnvironment("Testing"))
     });
 }
 
-app.UseMiddleware<CorrelationIdMiddleware>();
-app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseStandardMiddleware();
 app.UseHttpsRedirection();
 app.UseRouting();
 app.UseCors();

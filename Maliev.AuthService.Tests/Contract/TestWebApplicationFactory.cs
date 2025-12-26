@@ -1,6 +1,7 @@
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Tests.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using System.Net;
 using System.Net.Http.Json;
@@ -49,6 +50,7 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         {
             Id = Guid.NewGuid(),
             ClientId = "service-dev-customer-api",
+            PrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111"), // Test principal ID for IAM integration
             ClientSecretHash = ComputeSha256Hash("valid_service_secret"),
             ServiceName = "Customer API Service",
             IsActive = true,
@@ -74,8 +76,8 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
     protected override void ConfigureEnvironmentVariables()
     {
         // Set external service URLs via environment variables for testing
-        Environment.SetEnvironmentVariable("ExternalServices__CustomerService__BaseUrl", "http://localhost:5001");
-        Environment.SetEnvironmentVariable("ExternalServices__EmployeeService__BaseUrl", "http://localhost:5002");
+        Environment.SetEnvironmentVariable("CustomerService__BaseUrl", "http://localhost:5001");
+        Environment.SetEnvironmentVariable("EmployeeService__BaseUrl", "http://localhost:5002");
 
         // Export RSA private and public keys for JWT token generation and validation
         // The base factory provides _testRsa through SigningCredentials property
@@ -104,18 +106,35 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         }
 
         // Add mock HTTP client factory that returns successful validation responses
-        services.AddSingleton<IHttpClientFactory>(sp => new MockHttpClientFactory());
+        services.AddSingleton<IHttpClientFactory>(sp => new MockHttpClientFactory(sp.GetRequiredService<IConfiguration>()));
     }
 
     private class MockHttpClientFactory : IHttpClientFactory
     {
+        private readonly IConfiguration _configuration;
+
+        public MockHttpClientFactory(IConfiguration configuration)
+        {
+            _configuration = configuration;
+        }
+
         public HttpClient CreateClient(string name)
         {
             var handler = new MockHttpMessageHandler();
-            return new HttpClient(handler)
+            var client = new HttpClient(handler);
+
+            // Try to get BaseAddress from configuration, default to localhost if not found
+            var iamBaseUrl = _configuration["IAM:BaseUrl"];
+            if (!string.IsNullOrEmpty(iamBaseUrl))
             {
-                BaseAddress = new Uri("http://localhost")
-            };
+                client.BaseAddress = new Uri(iamBaseUrl);
+            }
+            else
+            {
+                client.BaseAddress = new Uri("http://localhost");
+            }
+
+            return client;
         }
     }
 
@@ -126,7 +145,6 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
             // Mock external service validation responses
             if (request.RequestUri?.PathAndQuery.Contains("/validate") == true)
             {
-                // Read the request body to get username and password
                 string? username = null;
                 string? password = null;
 
@@ -141,7 +159,6 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                         password = passwordElement.GetString();
                 }
 
-                // Only validate specific test users with correct password
                 var validUsers = new Dictionary<string, string>
                 {
                     { "customer@example.com", "ValidPassword123!" },
@@ -164,13 +181,9 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                     };
                 }
 
-                // Return invalid response for all other users
-                // Generate a consistent UserId based on username hash for account lockout tracking
-                // This allows the same username to accumulate failed attempts
                 Guid generatedUserId;
                 if (!string.IsNullOrEmpty(username))
                 {
-                    // Create deterministic GUID from username hash
                     using var sha256 = System.Security.Cryptography.SHA256.Create();
                     var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(username));
                     var guidBytes = new byte[16];
@@ -192,6 +205,37 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = JsonContent.Create(invalidResponse)
+                };
+            }
+
+            // Mock IAM resolution response
+            if (request.RequestUri?.PathAndQuery.Contains("/iam/v1/auth/resolve-permissions") == true)
+            {
+                if (request.RequestUri.Port == 5101)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                }
+
+                string? principalId = null;
+                if (request.Content != null)
+                {
+                    var requestBody = await request.Content.ReadAsStringAsync(cancellationToken);
+                    var jsonDoc = JsonDocument.Parse(requestBody);
+                    if (jsonDoc.RootElement.TryGetProperty("principalId", out var principalIdElement))
+                        principalId = principalIdElement.GetString();
+                }
+
+                var response = new
+                {
+                    principalId = principalId ?? Guid.NewGuid().ToString(),
+                    permissions = new[] { "auth.api_keys.manage", "auth.users.read" },
+                    roles = new[] { "security_admin" },
+                    resolvedAt = DateTime.UtcNow
+                };
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(response)
                 };
             }
 

@@ -16,6 +16,13 @@ public class ServiceCredential
     public string ClientId { get; set; } = string.Empty;
 
     /// <summary>
+    /// Principal identifier in IAM service for permission resolution.
+    /// Links this service credential to an IAM Principal for RBAC.
+    /// Nullable for backward compatibility with services not yet registered in IAM.
+    /// </summary>
+    public Guid? PrincipalId { get; set; }
+
+    /// <summary>
     /// SHA-256 hash of client secret (64 characters hex)
     /// </summary>
     public string ClientSecretHash { get; set; } = string.Empty;

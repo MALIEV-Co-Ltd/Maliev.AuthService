@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Maliev.AuthService.Tests.Infrastructure;
 using Xunit;
 
@@ -156,5 +157,107 @@ public class AuthenticationContractTests : IntegrationTestBase
         // Assert - 21st request should be rate limited
         Assert.Equal(HttpStatusCode.TooManyRequests, response!.StatusCode); // 429
         Assert.True(response.Headers.Contains("Retry-After"));
+    }
+
+    [Fact]
+    public async Task POST_V1_Auth_Login_WithIAMEnabled_ReturnsJWTWithPermissions()
+    {
+        await CleanDatabaseAsync();
+        // Arrange
+        // Use WithWebHostBuilder to override configuration for this specific test
+        using var customFactory = Factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((context, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Features:IAMIntegrationEnabled"] = "true",
+                    ["IAM:BaseUrl"] = "http://localhost:5100"
+                });
+            });
+        });
+
+        var client = customFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-Client-IP", "127.0.0.1");
+
+        var request = new
+        {
+            username = "customer@example.com",
+            password = "ValidPassword123!",
+            user_type = "customer"
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/auth/v1/login", request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var content = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(content);
+        var accessToken = json.RootElement.GetProperty("access_token").GetString();
+
+        Assert.NotNull(accessToken);
+
+        // Decode JWT to check for permissions and roles claims
+        var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+        var token = handler.ReadJwtToken(accessToken);
+
+        var permissionClaims = token.Claims.Where(c => c.Type == "permissions").Select(c => c.Value).ToList();
+        var roleClaims = token.Claims.Where(c => c.Type == "roles").Select(c => c.Value).ToList();
+
+        Assert.Contains("auth.api_keys.manage", permissionClaims);
+        Assert.Contains("auth.users.read", permissionClaims);
+        Assert.Contains("security_admin", roleClaims);
+    }
+
+    [Fact]
+    public async Task POST_V1_Auth_Login_IAMServiceDown_ReturnsJWTWithEmptyPermissions()
+    {
+        await CleanDatabaseAsync();
+        // Arrange
+        using var customFactory = Factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((context, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Features:IAMIntegrationEnabled"] = "true",
+                    ["IAM:BaseUrl"] = "http://localhost:5101" // Wrong port to simulate failure
+                });
+            });
+        });
+
+        var client = customFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-Client-IP", "127.0.0.1");
+
+        var request = new
+        {
+            username = "customer@example.com",
+            password = "ValidPassword123!",
+            user_type = "customer"
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/auth/v1/login", request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var content = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(content);
+        var accessToken = json.RootElement.GetProperty("access_token").GetString();
+
+        Assert.NotNull(accessToken);
+
+        // Decode JWT to check for empty permissions
+        var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+        var token = handler.ReadJwtToken(accessToken);
+
+        var permissionClaims = token.Claims.Where(c => c.Type == "permissions").ToList();
+        var roleClaims = token.Claims.Where(c => c.Type == "roles").ToList();
+
+        Assert.Empty(permissionClaims);
+        Assert.Empty(roleClaims);
     }
 }

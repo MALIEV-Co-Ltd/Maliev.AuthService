@@ -30,7 +30,7 @@ public class RefreshTokenService : IRefreshTokenService
     }
 
     /// <inheritdoc/>
-    public async Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(Guid userId, UserType userType, string? ipAddress)
+    public async Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(Guid userId, Guid principalId, UserType userType, string? ipAddress)
     {
         var familyId = Guid.NewGuid();
         var tokenValue = _tokenGenerator.GenerateRefreshToken();
@@ -50,6 +50,7 @@ public class RefreshTokenService : IRefreshTokenService
             Id = Guid.NewGuid(),
             FamilyId = familyId,
             UserId = userId,
+            PrincipalId = principalId,
             UserType = userType,
             TokenHash = tokenHash,
             IsUsed = false,
@@ -113,6 +114,7 @@ public class RefreshTokenService : IRefreshTokenService
             Id = Guid.NewGuid(),
             FamilyId = oldToken.FamilyId,
             UserId = oldToken.UserId,
+            PrincipalId = oldToken.PrincipalId,
             UserType = oldToken.UserType,
             TokenHash = tokenHash,
             IsUsed = false,

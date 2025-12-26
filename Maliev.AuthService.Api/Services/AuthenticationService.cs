@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Maliev.AuthService.Api.Models.Request;
 using Maliev.AuthService.Api.Models.Response;
+using Maliev.AuthService.Api.Models.IAM;
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 
@@ -20,6 +21,7 @@ public class AuthenticationService : IAuthenticationService
     private readonly IRefreshTokenService _refreshTokenService;
     private readonly IAccountLockoutService _accountLockoutService;
     private readonly IRateLimitService _rateLimitService;
+    private readonly IIAMClient _iamClient;
     private readonly ILogger<AuthenticationService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
@@ -34,6 +36,7 @@ public class AuthenticationService : IAuthenticationService
         IRefreshTokenService refreshTokenService,
         IAccountLockoutService accountLockoutService,
         IRateLimitService rateLimitService,
+        IIAMClient iamClient,
         ILogger<AuthenticationService> logger,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration)
@@ -44,6 +47,7 @@ public class AuthenticationService : IAuthenticationService
         _refreshTokenService = refreshTokenService;
         _accountLockoutService = accountLockoutService;
         _rateLimitService = rateLimitService;
+        _iamClient = iamClient;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
@@ -108,18 +112,44 @@ public class AuthenticationService : IAuthenticationService
         }
 
         var userId = validationResult.UserId!.Value;
+        var principalId = validationResult.PrincipalId ?? userId;
 
         // Validate credentials succeeded, reset lockout
         await _accountLockoutService.ResetFailedAttemptsAsync(userId, userType);
 
-        var accessToken = _tokenGenerator.GenerateAccessToken(userId, request.UserType, validationResult.Email, validationResult.Name);
-        var (refreshTokenEntity, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(userId, userType, ipAddress);
+        // Resolve permissions from IAM if enabled
+        IEnumerable<string>? permissions = null;
+        IEnumerable<string>? roles = null;
+
+        var iamEnabled = _configuration.GetValue<bool>("Features:IAMIntegrationEnabled");
+        if (iamEnabled)
+        {
+            try
+            {
+                var iamResponse = await _iamClient.ResolvePermissionsAsync(principalId);
+                permissions = iamResponse.Permissions;
+                roles = iamResponse.Roles;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to resolve permissions from IAM for user {UserId}. Issuing token without permissions.", userId);
+                // Fail open: Issue token without permissions rather than block login
+            }
+        }
+        else
+        {
+            _logger.LogInformation("IAM integration disabled by feature flag for principal {PrincipalId}", principalId);
+        }
+
+        var accessToken = _tokenGenerator.GenerateAccessToken(principalId, request.UserType, validationResult.Email, validationResult.Name, permissions, roles);
+        var (refreshTokenEntity, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(userId, principalId, userType, ipAddress);
 
         await LogAuditAsync(userId, userType, "login", ipAddress, true, null);
 
         return new AuthenticationResult
         {
             Success = true,
+            PrincipalId = principalId,
             Response = new LoginResponse
             {
                 AccessToken = accessToken,
@@ -128,7 +158,7 @@ public class AuthenticationService : IAuthenticationService
                 ExpiresIn = 900,
                 User = new UserIdentityResponse
                 {
-                    UserId = userId.ToString(),
+                    UserId = principalId.ToString(),
                     UserType = request.UserType,
                     Email = validationResult.Email,
                     Name = validationResult.Name
@@ -149,7 +179,28 @@ public class AuthenticationService : IAuthenticationService
 
         var (newRefreshTokenEntity, newRefreshTokenValue) = await _refreshTokenService.RotateRefreshTokenAsync(refreshToken, ipAddress);
         var userTypeString = refreshToken.UserType == UserType.Customer ? "customer" : "employee";
-        var accessToken = _tokenGenerator.GenerateAccessToken(refreshToken.UserId, userTypeString);
+
+        // Resolve permissions from IAM if enabled (Polish T028)
+        IEnumerable<string>? permissions = null;
+        IEnumerable<string>? roles = null;
+
+        if (_configuration.GetValue<bool>("Features:IAMIntegrationEnabled"))
+        {
+            try
+            {
+                // Use the stored PrincipalId for consistent permission resolution across token lifecycle
+                var iamResponse = await _iamClient.ResolvePermissionsAsync(refreshToken.PrincipalId);
+                permissions = iamResponse.Permissions;
+                roles = iamResponse.Roles;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to resolve permissions from IAM during token refresh for user {UserId}. Issuing token without permissions.", refreshToken.UserId);
+                // Fail open: Issue token without permissions rather than block refresh
+            }
+        }
+
+        var accessToken = _tokenGenerator.GenerateAccessToken(refreshToken.PrincipalId, userTypeString, permissions: permissions, roles: roles);
 
         await LogAuditAsync(refreshToken.UserId, refreshToken.UserType, "token_refresh", ipAddress, true, null);
 
@@ -281,7 +332,34 @@ public class AuthenticationService : IAuthenticationService
             return null;
         }
 
-        var accessToken = await _tokenGenerator.GenerateServiceAccessTokenAsync(request.ClientId, serviceCredential.ServiceName);
+        // Resolve permissions from IAM if enabled
+        IEnumerable<string>? permissions = null;
+        IEnumerable<string>? roles = null;
+
+        if (_configuration.GetValue<bool>("Features:IAMIntegrationEnabled"))
+        {
+            // Use the PrincipalId from ServiceCredential for IAM resolution
+            if (serviceCredential.PrincipalId.HasValue)
+            {
+                try
+                {
+                    var iamResponse = await _iamClient.ResolvePermissionsAsync(serviceCredential.PrincipalId.Value);
+                    permissions = iamResponse.Permissions;
+                    roles = iamResponse.Roles;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to resolve permissions from IAM for service {ClientId}. Issuing token without permissions.", request.ClientId);
+                    // Fail open: Issue token without permissions rather than block service login
+                }
+            }
+            else
+            {
+                _logger.LogWarning("Service {ClientId} has no PrincipalId mapping. Token will be issued without IAM permissions. Register this service in IAM.", request.ClientId);
+            }
+        }
+
+        var accessToken = await _tokenGenerator.GenerateServiceAccessTokenAsync(request.ClientId, serviceCredential.ServiceName, permissions, roles);
 
         await LogAuditAsync(null, null, "service_login", ipAddress, true, null);
 
@@ -300,28 +378,30 @@ public class AuthenticationService : IAuthenticationService
         };
     }
 
-    private async Task<(bool IsValid, Guid? UserId, string? Email, string? Name, string? FailureReason)> ValidateCredentialsAsync(
+    private async Task<(bool IsValid, Guid? UserId, Guid? PrincipalId, string? Email, string? Name, string? FailureReason)> ValidateCredentialsAsync(
         string username, string password, UserType userType)
     {
         var serviceUrl = userType == UserType.Customer
-            ? _configuration["ExternalServices:CustomerService:BaseUrl"]
-            : _configuration["ExternalServices:EmployeeService:BaseUrl"];
+            ? _configuration["CustomerService:BaseUrl"] ?? "http://maliev-customerservice-api"
+            : _configuration["EmployeeService:BaseUrl"] ?? "http://maliev-employeeservice-api";
 
         var validationEndpoint = userType == UserType.Customer
-            ? _configuration["ExternalServices:CustomerService:ValidationEndpoint"]
-            : _configuration["ExternalServices:EmployeeService:ValidationEndpoint"];
+            ? _configuration["CustomerService:ValidationEndpoint"]
+            : _configuration["EmployeeService:ValidationEndpoint"];
 
-        if (string.IsNullOrEmpty(serviceUrl) || string.IsNullOrEmpty(validationEndpoint))
+        if (string.IsNullOrEmpty(validationEndpoint))
         {
-            _logger.LogError("External service URL or validation endpoint not configured for {UserType}", userType);
-            return (false, null, null, null, "Configuration error");
+            _logger.LogError("Validation endpoint not configured for {UserType}", userType);
+            return (false, null, null, null, null, "Configuration error");
         }
 
         try
         {
-            var timeoutSeconds = userType == UserType.Customer
-                ? _configuration.GetValue<int>("ExternalServices:CustomerService:TimeoutInSeconds", 30)
-                : _configuration.GetValue<int>("ExternalServices:EmployeeService:TimeoutInSeconds", 30);
+            // Read timeout from configuration with 30s default
+            var configKey = userType == UserType.Customer
+                ? "CustomerService:ValidationTimeoutSeconds"
+                : "EmployeeService:ValidationTimeoutSeconds";
+            var timeoutSeconds = _configuration.GetValue<int?>(configKey) ?? 30;
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
 
@@ -334,27 +414,27 @@ public class AuthenticationService : IAuthenticationService
 
             if (!response.IsSuccessStatusCode)
             {
-                return (false, null, null, null, "Invalid credentials");
+                return (false, null, null, null, null, "Invalid credentials");
             }
 
             var result = await response.Content.ReadFromJsonAsync<CredentialValidationResult>();
             if (result == null || !result.IsValid)
             {
                 // Return UserId even for failed validation to enable account lockout tracking
-                return (false, result?.UserId, null, null, "Invalid credentials");
+                return (false, result?.UserId, result?.PrincipalId, null, null, "Invalid credentials");
             }
 
-            return (true, result.UserId, result.Email, result.Name, null);
+            return (true, result.UserId, result.PrincipalId, result.Email, result.Name, null);
         }
         catch (OperationCanceledException)
         {
             _logger.LogWarning("External service validation timed out for {UserType}", userType);
-            return (false, null, null, null, "Service timeout");
+            return (false, null, null, null, null, "Service timeout");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error validating credentials with external service");
-            return (false, null, null, null, "Service unavailable");
+            return (false, null, null, null, null, "Service unavailable");
         }
     }
 
@@ -387,6 +467,7 @@ public class AuthenticationService : IAuthenticationService
     {
         public bool IsValid { get; set; }
         public Guid UserId { get; set; }
+        public Guid? PrincipalId { get; set; }
         public string? Email { get; set; }
         public string? Name { get; set; }
     }

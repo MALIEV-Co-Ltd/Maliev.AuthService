@@ -69,6 +69,7 @@ public class TestDatabaseFixture : IDisposable
         {
             Id = Guid.NewGuid(),
             ClientId = "service-dev-customer-api",
+            PrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111"), // Test principal ID for IAM integration
             ClientSecretHash = "536cd80fe9c61705de47dacb3fc7c4d3c4c331841afe942a9966abc5e4ad70ef",
             ServiceName = "Customer API",
             IsActive = true,

@@ -14,8 +14,10 @@ public interface ITokenGenerator
     /// <param name="userType">The type of user</param>
     /// <param name="email">The user's email address</param>
     /// <param name="name">The user's name</param>
+    /// <param name="permissions">The user's permissions</param>
+    /// <param name="roles">The user's roles</param>
     /// <returns>The JWT access token</returns>
-    string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null);
+    string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null);
 
     /// <summary>
     /// Generates a cryptographically secure refresh token
@@ -35,6 +37,8 @@ public interface ITokenGenerator
     /// </summary>
     /// <param name="clientId">The client identifier</param>
     /// <param name="serviceName">The service name</param>
+    /// <param name="permissions">The service's permissions</param>
+    /// <param name="roles">The service's roles</param>
     /// <returns>The JWT access token</returns>
-    Task<string> GenerateServiceAccessTokenAsync(string clientId, string serviceName);
+    Task<string> GenerateServiceAccessTokenAsync(string clientId, string serviceName, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null);
 }

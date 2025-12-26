@@ -30,4 +30,8 @@ public class AuthenticationResult
     /// Gets or sets the date and time after which a request can be retried.
     /// </summary>
     public DateTime? RetryAfter { get; set; }
+    /// <summary>
+    /// Gets or sets the principal identifier resolved during authentication.
+    /// </summary>
+    public Guid? PrincipalId { get; set; }
 }

@@ -34,14 +34,25 @@ public class AuthenticationController : ControllerBase
     /// <summary>
     /// Authenticates a user with email and password.
     /// </summary>
+    /// <remarks>
+    /// Primary entry point for users to log into the MALIEV platform.
+    /// 
+    /// **Process:**
+    /// 1. Verifies credentials against the database.
+    /// 2. Resolves principal roles and permissions via the IAM Service.
+    /// 3. Issues a JWT access token containing these permissions.
+    /// 4. Issues a secure refresh token for session persistence.
+    /// 
+    /// **Security:**
+    /// - Subject to rate limiting (IP-based).
+    /// - Implements account lockout after multiple failed attempts.
+    /// </remarks>
     /// <param name="request">The login request containing user credentials.</param>
-    /// <returns>
-    /// An <see cref="IActionResult"/> containing the authentication response with JWT and refresh tokens.
-    /// Returns <see cref="BadRequestResult"/> if validation fails.
-    /// Returns <see cref="UnauthorizedResult"/> for invalid credentials.
-    /// Returns a 423 (Locked) status code if the account is locked.
-    /// Returns a 429 (Too Many Requests) status code if rate limited.
-    /// </returns>
+    /// <returns>Authentication response with JWT and refresh tokens.</returns>
+    /// <response code="200">Successful login. Returns access and refresh tokens.</response>
+    /// <response code="401">Invalid credentials.</response>
+    /// <response code="423">Account is locked due to too many failed attempts.</response>
+    /// <response code="429">Too many requests from this IP address.</response>
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
@@ -89,12 +100,13 @@ public class AuthenticationController : ControllerBase
     /// <summary>
     /// Refreshes an authentication token.
     /// </summary>
+    /// <remarks>
+    /// Used when an access token (JWT) has expired. Exchange a valid refresh token for a new access token and a new refresh token (rotation).
+    /// </remarks>
     /// <param name="request">The refresh request containing the refresh token.</param>
-    /// <returns>
-    /// An <see cref="IActionResult"/> containing a new set of JWT and refresh tokens.
-    /// Returns <see cref="BadRequestResult"/> if validation fails.
-    /// Returns <see cref="UnauthorizedResult"/> if the refresh token is invalid.
-    /// </returns>
+    /// <returns>A new set of JWT and refresh tokens.</returns>
+    /// <response code="200">Tokens refreshed successfully.</response>
+    /// <response code="401">If the refresh token is invalid, expired, or has already been used.</response>
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh([FromBody] RefreshRequest request)
     {
@@ -117,12 +129,12 @@ public class AuthenticationController : ControllerBase
     /// <summary>
     /// Validates a JWT access token.
     /// </summary>
+    /// <remarks>
+    /// Internal endpoint used by other microservices to verify that a token is valid, hasn't been revoked, and to see its associated claims.
+    /// </remarks>
     /// <param name="request">The validate request containing the access token.</param>
-    /// <returns>
-    /// An <see cref="IActionResult"/> with the validation result.
-    /// Returns <see cref="OkObjectResult"/> with a <see cref="ValidateResponse"/> indicating if the token is valid, along with its claims.
-    /// Returns <see cref="BadRequestResult"/> if validation of the request model fails.
-    /// </returns>
+    /// <returns>The validation result.</returns>
+    /// <response code="200">Returns token validity status and payload.</response>
     [HttpPost("validate")]
     public async Task<IActionResult> Validate([FromBody] ValidateRequest request)
     {
@@ -132,14 +144,15 @@ public class AuthenticationController : ControllerBase
     }
 
     /// <summary>
-    /// Revokes a refresh token, invalidating it for future use.
+    /// Revokes a refresh token.
     /// </summary>
+    /// <remarks>
+    /// Manually invalidates a refresh token. Useful for administrative session termination.
+    /// </remarks>
     /// <param name="request">The revoke request containing the refresh token.</param>
-    /// <returns>
-    /// An <see cref="IActionResult"/>.
-    /// Returns <see cref="NoContentResult"/> on successful revocation.
-    /// Returns <see cref="BadRequestResult"/> if validation fails or the token cannot be revoked.
-    /// </returns>
+    /// <returns>Success status.</returns>
+    /// <response code="204">Token successfully revoked.</response>
+    /// <response code="400">If the token is invalid or cannot be revoked.</response>
     [HttpPost("revoke")]
     public async Task<IActionResult> Revoke([FromBody] RevokeRequest request)
     {
@@ -159,15 +172,15 @@ public class AuthenticationController : ControllerBase
     }
 
     /// <summary>
-    /// Logs a user out by invalidating their refresh token.
+    /// Logs a user out.
     /// </summary>
+    /// <remarks>
+    /// The recommended way to end a user session. Invalidates the provided refresh token.
+    /// </remarks>
     /// <param name="request">The logout request containing the refresh token.</param>
-    /// <returns>
-    /// An <see cref="IActionResult"/>.
-    /// Returns <see cref="NoContentResult"/> on successful logout.
-    /// Returns <see cref="BadRequestResult"/> if validation fails.
-    /// Returns <see cref="UnauthorizedResult"/> if the token is invalid.
-    /// </returns>
+    /// <returns>Success status.</returns>
+    /// <response code="204">Logged out successfully.</response>
+    /// <response code="401">If the token was already invalid.</response>
     [HttpPost("logout")]
     public async Task<IActionResult> Logout([FromBody] LogoutRequest request)
     {
@@ -187,14 +200,15 @@ public class AuthenticationController : ControllerBase
     }
 
     /// <summary>
-    /// Authenticates a service using client credentials (client_id and client_secret).
+    /// Authenticates a service using client credentials.
     /// </summary>
-    /// <param name="request">The service login request containing client credentials.</param>
-    /// <returns>
-    /// An <see cref="IActionResult"/> containing the service authentication response with a JWT.
-    /// Returns <see cref="BadRequestResult"/> if validation fails.
-    /// Returns <see cref="UnauthorizedResult"/> for invalid credentials.
-    /// </returns>
+    /// <remarks>
+    /// Machine-to-machine authentication using a `client_id` and `client_secret` (API Key).
+    /// </remarks>
+    /// <param name="request">The service login request.</param>
+    /// <returns>Service authentication response with a JWT.</returns>
+    /// <response code="200">Successful authentication.</response>
+    /// <response code="401">Invalid client credentials.</response>
     [HttpPost("service/login")]
     public async Task<IActionResult> ServiceLogin([FromBody] ServiceLoginRequest request)
     {
