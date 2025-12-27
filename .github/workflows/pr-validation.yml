@@ -57,5 +57,6 @@ jobs:
         run: dotnet test Maliev.AuthService.sln --no-build --configuration Release --verbosity normal
         env:
           ConnectionStrings__AuthDbContext: "Server=localhost;Port=5432;Database=auth_service_test_db;User Id=postgres;Password=postgres;"
+          Features__PermissionBasedAuthEnabled: "true"
 
 
