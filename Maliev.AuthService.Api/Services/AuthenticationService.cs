@@ -117,28 +117,20 @@ public class AuthenticationService : IAuthenticationService
         // Validate credentials succeeded, reset lockout
         await _accountLockoutService.ResetFailedAttemptsAsync(userId, userType);
 
-        // Resolve permissions from IAM if enabled
+        // Resolve permissions from IAM (Always enabled)
         IEnumerable<string>? permissions = null;
         IEnumerable<string>? roles = null;
 
-        var iamEnabled = _configuration.GetValue<bool>("Features:IAMIntegrationEnabled");
-        if (iamEnabled)
+        try
         {
-            try
-            {
-                var iamResponse = await _iamClient.ResolvePermissionsAsync(principalId);
-                permissions = iamResponse.Permissions;
-                roles = iamResponse.Roles;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to resolve permissions from IAM for user {UserId}. Issuing token without permissions.", userId);
-                // Fail open: Issue token without permissions rather than block login
-            }
+            var iamResponse = await _iamClient.ResolvePermissionsAsync(principalId);
+            permissions = iamResponse.Permissions;
+            roles = iamResponse.Roles;
         }
-        else
+        catch (Exception ex)
         {
-            _logger.LogInformation("IAM integration disabled by feature flag for principal {PrincipalId}", principalId);
+            _logger.LogError(ex, "Failed to resolve permissions from IAM for user {UserId}. Issuing token without permissions.", userId);
+            // Fail open: Issue token without permissions rather than block login
         }
 
         var accessToken = _tokenGenerator.GenerateAccessToken(principalId, request.UserType, validationResult.Email, validationResult.Name, permissions, roles);
@@ -180,24 +172,21 @@ public class AuthenticationService : IAuthenticationService
         var (newRefreshTokenEntity, newRefreshTokenValue) = await _refreshTokenService.RotateRefreshTokenAsync(refreshToken, ipAddress);
         var userTypeString = refreshToken.UserType == UserType.Customer ? "customer" : "employee";
 
-        // Resolve permissions from IAM if enabled (Polish T028)
+        // Resolve permissions from IAM (Always enabled)
         IEnumerable<string>? permissions = null;
         IEnumerable<string>? roles = null;
 
-        if (_configuration.GetValue<bool>("Features:IAMIntegrationEnabled"))
+        try
         {
-            try
-            {
-                // Use the stored PrincipalId for consistent permission resolution across token lifecycle
-                var iamResponse = await _iamClient.ResolvePermissionsAsync(refreshToken.PrincipalId);
-                permissions = iamResponse.Permissions;
-                roles = iamResponse.Roles;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to resolve permissions from IAM during token refresh for user {UserId}. Issuing token without permissions.", refreshToken.UserId);
-                // Fail open: Issue token without permissions rather than block refresh
-            }
+            // Use the stored PrincipalId for consistent permission resolution across token lifecycle
+            var iamResponse = await _iamClient.ResolvePermissionsAsync(refreshToken.PrincipalId);
+            permissions = iamResponse.Permissions;
+            roles = iamResponse.Roles;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resolve permissions from IAM during token refresh for user {UserId}. Issuing token without permissions.", refreshToken.UserId);
+            // Fail open: Issue token without permissions rather than block refresh
         }
 
         var accessToken = _tokenGenerator.GenerateAccessToken(refreshToken.PrincipalId, userTypeString, permissions: permissions, roles: roles);
@@ -332,31 +321,28 @@ public class AuthenticationService : IAuthenticationService
             return null;
         }
 
-        // Resolve permissions from IAM if enabled
+        // Resolve permissions from IAM (Always enabled)
         IEnumerable<string>? permissions = null;
         IEnumerable<string>? roles = null;
 
-        if (_configuration.GetValue<bool>("Features:IAMIntegrationEnabled"))
+        // Use the PrincipalId from ServiceCredential for IAM resolution
+        if (serviceCredential.PrincipalId.HasValue)
         {
-            // Use the PrincipalId from ServiceCredential for IAM resolution
-            if (serviceCredential.PrincipalId.HasValue)
+            try
             {
-                try
-                {
-                    var iamResponse = await _iamClient.ResolvePermissionsAsync(serviceCredential.PrincipalId.Value);
-                    permissions = iamResponse.Permissions;
-                    roles = iamResponse.Roles;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to resolve permissions from IAM for service {ClientId}. Issuing token without permissions.", request.ClientId);
-                    // Fail open: Issue token without permissions rather than block service login
-                }
+                var iamResponse = await _iamClient.ResolvePermissionsAsync(serviceCredential.PrincipalId.Value);
+                permissions = iamResponse.Permissions;
+                roles = iamResponse.Roles;
             }
-            else
+            catch (Exception ex)
             {
-                _logger.LogWarning("Service {ClientId} has no PrincipalId mapping. Token will be issued without IAM permissions. Register this service in IAM.", request.ClientId);
+                _logger.LogError(ex, "Failed to resolve permissions from IAM for service {ClientId}. Issuing token without permissions.", request.ClientId);
+                // Fail open: Issue token without permissions rather than block service login
             }
+        }
+        else
+        {
+            _logger.LogWarning("Service {ClientId} has no PrincipalId mapping. Token will be issued without IAM permissions. Register this service in IAM.", request.ClientId);
         }
 
         var accessToken = await _tokenGenerator.GenerateServiceAccessTokenAsync(request.ClientId, serviceCredential.ServiceName, permissions, roles);

@@ -62,38 +62,4 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
 
     public Task DisposeAsync() => Task.CompletedTask;
 
-    [Fact]
-    public async Task AuthenticateAsync_IAMDisabled_DoesNotCallIAM()
-    {
-        // Arrange
-        var request = new LoginRequest { Username = "test@test.com", Password = "password", UserType = "customer" };
-        var ipAddress = "127.0.0.1";
-
-        var iamSectionMock = new Mock<IConfigurationSection>();
-        iamSectionMock.Setup(s => s.Value).Returns("false");
-        _configurationMock.Setup(c => c.GetSection("Features:IAMIntegrationEnabled")).Returns(iamSectionMock.Object);
-        _configurationMock.Setup(c => c["Features:IAMIntegrationEnabled"]).Returns("false");
-        _configurationMock.Setup(c => c["CustomerService:BaseUrl"]).Returns("http://customer-service");
-        _configurationMock.Setup(c => c["CustomerService:ValidationEndpoint"]).Returns("/validate");
-
-        // Mock HttpClient for validation
-        var handlerMock = new Mock<HttpMessageHandler>();
-        handlerMock.Protected()
-            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage
-            {
-                StatusCode = HttpStatusCode.OK,
-                Content = JsonContent.Create(new { IsValid = true, UserId = Guid.NewGuid(), Email = "test@test.com", Name = "Test" })
-            });
-        _httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient(handlerMock.Object));
-
-        _refreshTokenServiceMock.Setup(s => s.CreateRefreshTokenAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<UserType>(), It.IsAny<string>()))
-            .ReturnsAsync((new RefreshToken(), "token"));
-
-        // Act
-        await _service!.AuthenticateAsync(request, ipAddress);
-
-        // Assert
-        _iamClientMock.Verify(c => c.ResolvePermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
 }

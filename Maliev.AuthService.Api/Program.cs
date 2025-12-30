@@ -14,16 +14,11 @@ builder.AddStandardMiddleware(options =>
 });
 builder.AddServiceMeters("auth-meter"); // Register service meters for OpenTelemetry business metrics
 
-// Register DbContext for all environments (test factory provides connection string via environment variables)
+// Register DbContext for all environments
 builder.AddPostgresDbContext<AuthDbContext>(connectionName: "AuthDbContext"); // PostgreSQL with retry logic
 
-// Only add Redis and MassTransit when not in Testing environment
-// In testing, the TestWebApplicationFactory handles these configurations separately
-if (!builder.Environment.IsEnvironment("Testing"))
-{
-    builder.AddRedisDistributedCache(instanceName: "auth:"); // Redis with in-memory fallback
-    builder.AddMassTransitWithRabbitMq(); // RabbitMQ message bus (non-blocking startup)
-}
+builder.AddRedisDistributedCache(instanceName: "auth:"); // Redis with in-memory fallback
+builder.AddMassTransitWithRabbitMq(); // RabbitMQ message bus (non-blocking startup)
 
 // JWT Authentication
 builder.AddJwtAuthentication();
@@ -63,36 +58,17 @@ var app = builder.Build();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 
 // --- Database Migrations ---
-if (!app.Environment.IsEnvironment("Testing"))
+try
 {
-    try
-    {
-        await app.MigrateDatabaseAsync<AuthDbContext>();
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Database migration failed - application may not function correctly");
-        // Don't throw - allow app to start for debugging
-    }
+    await app.MigrateDatabaseAsync<AuthDbContext>();
+}
+catch (Exception ex)
+{
+    logger.LogError(ex, "Database migration failed - application may not function correctly");
+    // Don't throw - allow app to start for debugging
 }
 
 // --- Middleware Pipeline ---
-// In testing environment, allow setting IP address from header for rate limiting tests
-if (app.Environment.IsEnvironment("Testing"))
-{
-    app.Use(async (context, next) =>
-    {
-        if (context.Request.Headers.TryGetValue("X-Test-Client-IP", out var ipValue))
-        {
-            if (System.Net.IPAddress.TryParse(ipValue.ToString(), out var ipAddress))
-            {
-                context.Connection.RemoteIpAddress = ipAddress;
-            }
-        }
-        await next();
-    });
-}
-
 app.UseStandardMiddleware();
 app.UseHttpsRedirection();
 app.UseRouting();

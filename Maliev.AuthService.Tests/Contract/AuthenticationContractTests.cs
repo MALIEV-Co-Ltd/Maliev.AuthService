@@ -171,7 +171,6 @@ public class AuthenticationContractTests : IntegrationTestBase
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["Features:IAMIntegrationEnabled"] = "true",
                     ["IAM:BaseUrl"] = "http://localhost:5100"
                 });
             });
@@ -222,7 +221,6 @@ public class AuthenticationContractTests : IntegrationTestBase
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["Features:IAMIntegrationEnabled"] = "true",
                     ["IAM:BaseUrl"] = "http://localhost:5101" // Wrong port to simulate failure
                 });
             });
