@@ -16,6 +16,7 @@ using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
 using Testcontainers.Redis;
 using Xunit;
+using Microsoft.AspNetCore.Builder;
 
 namespace Maliev.AuthService.Tests.Testing;
 
@@ -139,6 +140,9 @@ public class BaseIntegrationTestFactory<TProgram, TDbContext> : WebApplicationFa
 
         builder.ConfigureTestServices(services =>
         {
+            // Add startup filter to inject test IP address middleware
+            services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(new TestIpAddressStartupFilter());
+
             // Configure JWT Bearer authentication with test RSA key
             services.PostConfigureAll<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(options =>
             {
@@ -341,5 +345,48 @@ public class BaseIntegrationTestFactory<TProgram, TDbContext> : WebApplicationFa
         var client = CreateClient();
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
         return client;
+    }
+}
+
+/// <summary>
+/// Startup filter that injects middleware to override RemoteIpAddress with X-Test-Client-IP header.
+/// This allows integration tests to simulate requests from specific IP addresses for rate limiting tests.
+/// </summary>
+internal class TestIpAddressStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+{
+    public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> nextFilter)
+    {
+        return app =>
+        {
+            app.UseMiddleware<TestIpAddressMiddleware>();
+            nextFilter(app);
+        };
+    }
+}
+
+/// <summary>
+/// Middleware that overrides RemoteIpAddress with X-Test-Client-IP header value for integration tests.
+/// </summary>
+internal class TestIpAddressMiddleware
+{
+    private readonly Microsoft.AspNetCore.Http.RequestDelegate _next;
+
+    public TestIpAddressMiddleware(Microsoft.AspNetCore.Http.RequestDelegate next)
+    {
+        _next = next;
+    }
+
+    public async Task InvokeAsync(Microsoft.AspNetCore.Http.HttpContext context)
+    {
+        // Override RemoteIpAddress if X-Test-Client-IP header is present
+        if (context.Request.Headers.TryGetValue("X-Test-Client-IP", out var testIp))
+        {
+            if (System.Net.IPAddress.TryParse(testIp.ToString(), out var ipAddress))
+            {
+                context.Connection.RemoteIpAddress = ipAddress;
+            }
+        }
+
+        await _next(context);
     }
 }
