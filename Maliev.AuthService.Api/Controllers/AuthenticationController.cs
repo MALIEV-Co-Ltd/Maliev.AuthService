@@ -58,6 +58,7 @@ public class AuthenticationController : ControllerBase
     {
 
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        _logger.LogInformation("AuthenticateAsync called with IP: {IpAddress}", ipAddress ?? "null");
         var result = await _authenticationService.AuthenticateAsync(request, ipAddress);
 
         if (!result.Success)

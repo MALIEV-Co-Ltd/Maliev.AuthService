@@ -33,8 +33,12 @@ public class RateLimitService : IRateLimitService
 
         if (rateLimit == null)
         {
+            _logger.LogInformation("No rate limit record found for IP: {IpAddress}", ipAddress);
             return false;
         }
+
+        _logger.LogInformation("Rate limit check for IP: {IpAddress}. FailedAttempts: {FailedAttempts}, BlockedUntil: {BlockedUntil}",
+            ipAddress, rateLimit.FailedAttempts, rateLimit.BlockedUntil);
 
         // Check if currently blocked
         if (rateLimit.BlockedUntil.HasValue && rateLimit.BlockedUntil.Value > DateTime.UtcNow)

@@ -70,7 +70,10 @@ catch (Exception ex)
 
 // --- Middleware Pipeline ---
 app.UseStandardMiddleware();
-app.UseHttpsRedirection();
+if (!app.Environment.IsEnvironment("Testing"))
+{
+    app.UseHttpsRedirection();
+}
 app.UseRouting();
 app.UseCors();
 app.UseAuthorization();
