@@ -27,7 +27,7 @@ namespace Maliev.AuthService.Data.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_account_lockouts", x => x.id);
+                    table.PrimaryKey("pk_account_lockouts", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -47,7 +47,7 @@ namespace Maliev.AuthService.Data.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_auth_audit_logs", x => x.id);
+                    table.PrimaryKey("pk_auth_audit_logs", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -65,7 +65,7 @@ namespace Maliev.AuthService.Data.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_ip_rate_limits", x => x.id);
+                    table.PrimaryKey("pk_ip_rate_limits", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -82,7 +82,7 @@ namespace Maliev.AuthService.Data.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_revoked_tokens", x => x.id);
+                    table.PrimaryKey("pk_revoked_tokens", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -91,6 +91,7 @@ namespace Maliev.AuthService.Data.Migrations
                 {
                     id = table.Column<Guid>(type: "uuid", nullable: false),
                     client_id = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
+                    principal_id = table.Column<Guid>(type: "uuid", nullable: true),
                     client_secret_hash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                     service_name = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
                     is_active = table.Column<bool>(type: "boolean", nullable: false, defaultValue: true),
@@ -99,7 +100,7 @@ namespace Maliev.AuthService.Data.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_service_credentials", x => x.id);
+                    table.PrimaryKey("pk_service_credentials", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -114,7 +115,7 @@ namespace Maliev.AuthService.Data.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_token_families", x => x.family_id);
+                    table.PrimaryKey("pk_token_families", x => x.family_id);
                 });
 
             migrationBuilder.CreateTable(
@@ -124,6 +125,7 @@ namespace Maliev.AuthService.Data.Migrations
                     id = table.Column<Guid>(type: "uuid", nullable: false),
                     family_id = table.Column<Guid>(type: "uuid", nullable: false),
                     user_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    principal_id = table.Column<Guid>(type: "uuid", nullable: false),
                     user_type = table.Column<string>(type: "text", nullable: false),
                     token_hash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                     is_used = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
@@ -134,7 +136,7 @@ namespace Maliev.AuthService.Data.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_refresh_tokens", x => x.id);
+                    table.PrimaryKey("pk_refresh_tokens", x => x.id);
                     table.ForeignKey(
                         name: "fk_refresh_tokens_token_families",
                         column: x => x.family_id,
