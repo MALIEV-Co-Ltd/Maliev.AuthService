@@ -12,11 +12,8 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<AuthDbCont
 {
     public AuthDbContext CreateDbContext(string[] args)
     {
-        var connectionString = Environment.GetEnvironmentVariable("AuthDbContext")
-            ?? throw new InvalidOperationException(
-                "AuthDbContext environment variable not set. " +
-                "Set it before running migrations: " +
-                "export AuthDbContext=\"Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=yourpassword;\"");
+        // Use hardcoded connection string for design-time operations
+        var connectionString = "Host=localhost;Database=auth_design;Username=postgres;Password=postgres";
 
         var optionsBuilder = new DbContextOptionsBuilder<AuthDbContext>();
         optionsBuilder.UseNpgsql(connectionString);
