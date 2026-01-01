@@ -58,15 +58,7 @@ var app = builder.Build();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 
 // --- Database Migrations ---
-try
-{
-    await app.MigrateDatabaseAsync<AuthDbContext>();
-}
-catch (Exception ex)
-{
-    logger.LogError(ex, "Database migration failed - application may not function correctly");
-    // Don't throw - allow app to start for debugging
-}
+await app.MigrateDatabaseAsync<AuthDbContext>();
 
 // --- Middleware Pipeline ---
 app.UseStandardMiddleware();
