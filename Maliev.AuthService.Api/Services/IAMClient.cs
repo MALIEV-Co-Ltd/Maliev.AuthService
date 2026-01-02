@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Text.Json;
 using Maliev.AuthService.Api.Models.IAM;
 using Microsoft.Extensions.Configuration;
 
@@ -11,6 +12,11 @@ namespace Maliev.AuthService.Api.Services;
 /// </summary>
 public class IAMClient : IIAMClient
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+    };
+
     private readonly HttpClient _httpClient;
     private readonly ILogger<IAMClient> _logger;
     private readonly Histogram<double> _resolutionLatency;
@@ -53,13 +59,12 @@ public class IAMClient : IIAMClient
         try
         {
             var request = new PermissionResolutionRequest { PrincipalId = principalId };
-            var response = await _httpClient.PostAsJsonAsync("/iam/v1/auth/resolve-permissions", request, cancellationToken);
+            var response = await _httpClient.PostAsJsonAsync("/iam/v1/auth/resolve-permissions", request, JsonOptions, cancellationToken);
 
             stopwatch.Stop();
 
             var tags = new TagList();
             foreach (var tag in _defaultTags) tags.Add(tag);
-            tags.Add("principal_id", principalId);
 
             _resolutionLatency.Record(stopwatch.Elapsed.TotalMilliseconds, tags);
 
