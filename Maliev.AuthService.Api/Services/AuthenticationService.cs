@@ -112,7 +112,9 @@ public class AuthenticationService : IAuthenticationService
         }
 
         var userId = validationResult.UserId!.Value;
-        var principalId = validationResult.PrincipalId ?? userId;
+        var principalId = (validationResult.PrincipalId == null || validationResult.PrincipalId == Guid.Empty)
+            ? userId
+            : validationResult.PrincipalId.Value;
 
         // Validate credentials succeeded, reset lockout
         await _accountLockoutService.ResetFailedAttemptsAsync(userId, userType);

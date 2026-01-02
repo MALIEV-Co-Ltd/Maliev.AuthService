@@ -12,8 +12,9 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<AuthDbCont
 {
     public AuthDbContext CreateDbContext(string[] args)
     {
-        // Use hardcoded connection string for design-time operations
-        var connectionString = "Host=localhost;Database=auth_design;Username=postgres;Password=postgres";
+        // Prefer environment variable for connection string, fallback to design-time default if not set
+        var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__AuthDbContext")
+            ?? "Host=localhost;Database=auth_design;Username=postgres;Password=postgres";
 
         var optionsBuilder = new DbContextOptionsBuilder<AuthDbContext>();
         optionsBuilder.UseNpgsql(connectionString);

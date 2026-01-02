@@ -171,7 +171,7 @@ public class AuthenticationContractTests : IntegrationTestBase
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["IAM:BaseUrl"] = "http://localhost:5100"
+                    ["IAMService:BaseUrl"] = "http://localhost:5100"
                 });
             });
         });

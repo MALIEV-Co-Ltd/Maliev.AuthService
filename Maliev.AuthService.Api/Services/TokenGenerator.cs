@@ -69,7 +69,7 @@ public class TokenGenerator : ITokenGenerator
         var privateKeyString = Encoding.UTF8.GetString(privateKeyBytes);
 
         // Import RSA private key from PEM
-        var rsa = RSA.Create();
+        using var rsa = RSA.Create();
         rsa.ImportFromPem(privateKeyString);
 
         var securityKey = new RsaSecurityKey(rsa);
@@ -143,7 +143,7 @@ public class TokenGenerator : ITokenGenerator
         var privateKeyString = Encoding.UTF8.GetString(privateKeyBytes);
 
         // Import RSA private key from PEM
-        var rsa = RSA.Create();
+        using var rsa = RSA.Create();
         rsa.ImportFromPem(privateKeyString);
 
         var securityKey = new RsaSecurityKey(rsa);

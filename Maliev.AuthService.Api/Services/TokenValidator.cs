@@ -41,7 +41,7 @@ public class TokenValidator : ITokenValidator
             var publicKeyString = System.Text.Encoding.UTF8.GetString(publicKeyBytes);
 
             // Import RSA public key from PEM
-            var rsa = System.Security.Cryptography.RSA.Create();
+            using var rsa = System.Security.Cryptography.RSA.Create();
             rsa.ImportFromPem(publicKeyString);
 
             var issuer = _configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer not found");

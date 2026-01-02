@@ -5,7 +5,7 @@
 
 ## Summary
 
-This feature integrates AuthService with a downstream IAM service to resolve permissions and roles for authenticated principals. These authorization claims are then embedded in the JWT access token. The implementation prioritizes resilience (fail-safe with empty permissions) and controlled rollout (feature toggle).
+This feature integrates AuthService with a downstream IAM service to resolve permissions and roles for authenticated principals. These authorization claims are then embedded in the JWT access token. The implementation prioritizes resilience (fail-safe with empty permissions).
 
 ## Technical Context
 
@@ -58,7 +58,6 @@ Completed.
 ### Phase 2.3: AuthenticationService Integration
 **Goal**: Orchestrate permission resolution during login/refresh.
 - Inject `IIAMClient` into `AuthenticationService`.
-- Check `IAMIntegrationEnabled` feature flag.
 - Resolve permissions for human users (Login/Refresh) and services.
 - Pass resolved claims to `TokenGenerator`.
 

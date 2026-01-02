@@ -46,7 +46,7 @@ builder.Services.AddControllers()
     });
 
 // --- Application Services ---
-builder.AddServiceClient<IIAMClient, IAMClient>("IAM");
+builder.AddServiceClient<IIAMClient, IAMClient>("IAMService");
 
 builder.Services.AddScoped<ITokenGenerator, TokenGenerator>();
 builder.Services.AddScoped<ITokenValidator, TokenValidator>();

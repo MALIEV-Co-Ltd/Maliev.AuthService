@@ -73,6 +73,28 @@ public class RateLimitService : IRateLimitService
     /// <inheritdoc/>
     public async Task RecordFailedAttemptAsync(string ipAddress)
     {
+        try
+        {
+            await RecordFailedAttemptInternalAsync(ipAddress);
+        }
+        catch (DbUpdateException)
+        {
+            // Handle concurrency/duplicate key race condition
+            // Detach only matching IpRateLimit entities to avoid losing other pending changes
+            var entries = _dbContext.ChangeTracker.Entries<IpRateLimit>()
+                .Where(e => e.Entity.IpAddress == ipAddress)
+                .ToList();
+
+            foreach (var entry in entries)
+            {
+                entry.State = EntityState.Detached;
+            }
+            await RecordFailedAttemptInternalAsync(ipAddress);
+        }
+    }
+
+    private async Task RecordFailedAttemptInternalAsync(string ipAddress)
+    {
         var rateLimit = await _dbContext.IpRateLimits
             .FirstOrDefaultAsync(r => r.IpAddress == ipAddress);
 
