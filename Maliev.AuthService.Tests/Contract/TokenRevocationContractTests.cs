@@ -18,7 +18,7 @@ public class TokenRevocationContractTests : IntegrationTestBase
         var loginRequest = new
         {
             username = "customer@example.com",
-            password = "ValidPassword123!",
+            password = TestConstants.DummyPassword,
             user_type = "customer"
         };
 

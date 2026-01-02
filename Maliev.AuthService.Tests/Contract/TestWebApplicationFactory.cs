@@ -1,4 +1,5 @@
 using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Tests.Infrastructure;
 using Maliev.AuthService.Tests.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
@@ -51,7 +52,7 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
             Id = Guid.NewGuid(),
             ClientId = "service-dev-customer-api",
             PrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111"), // Test principal ID for IAM integration
-            ClientSecretHash = ComputeSha256Hash("valid_service_secret"),
+            ClientSecretHash = ComputeSha256Hash(TestConstants.DummyValidServiceSecret),
             ServiceName = "Customer API Service",
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
@@ -161,8 +162,8 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
 
                 var validUsers = new Dictionary<string, string>
                 {
-                    { "customer@example.com", "ValidPassword123!" },
-                    { "employee@maliev.com", "ValidPassword123!" }
+                    { "customer@example.com", TestConstants.DummyPassword },
+                    { "employee@maliev.com", TestConstants.DummyPassword }
                 };
 
                 if (username != null && validUsers.TryGetValue(username, out var expectedPassword) && password == expectedPassword)
