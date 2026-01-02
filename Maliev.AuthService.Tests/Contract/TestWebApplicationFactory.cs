@@ -1,4 +1,5 @@
 using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Tests.Infrastructure;
 using Maliev.AuthService.Tests.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
