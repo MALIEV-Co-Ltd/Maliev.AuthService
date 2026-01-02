@@ -36,6 +36,8 @@ if (!builder.Environment.IsProduction())
 }
 
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("ExternalValidation")
+    .AddStandardResilienceHandler();
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>

@@ -64,8 +64,12 @@ public class AccountLockoutService : IAccountLockoutService
         {
             // Handle concurrency/duplicate key race condition
             // If insert failed, it means the record was created by another process/thread
-            // Detach only AccountLockout entities to avoid losing other pending changes (e.g. RateLimit)
-            foreach (var entry in _dbContext.ChangeTracker.Entries<AccountLockout>().ToList())
+            // Detach only matching AccountLockout entities to avoid losing other pending changes
+            var entries = _dbContext.ChangeTracker.Entries<AccountLockout>()
+                .Where(e => e.Entity.UserId == userId && e.Entity.UserType == userType)
+                .ToList();
+
+            foreach (var entry in entries)
             {
                 entry.State = EntityState.Detached;
             }

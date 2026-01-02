@@ -391,7 +391,7 @@ public class AuthenticationService : IAuthenticationService
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
 
-            var client = _httpClientFactory.CreateClient();
+            var client = _httpClientFactory.CreateClient("ExternalValidation");
             var response = await client.PostAsJsonAsync($"{serviceUrl}{validationEndpoint}", new
             {
                 username,
@@ -406,8 +406,9 @@ public class AuthenticationService : IAuthenticationService
             var result = await response.Content.ReadFromJsonAsync<CredentialValidationResult>();
             if (result == null || !result.IsValid)
             {
-                // Return UserId even for failed validation to enable account lockout tracking
-                return (false, result?.UserId, result?.PrincipalId, null, null, "Invalid credentials");
+                // Return UserId only if it's not empty to avoid tracking lockout for unknown users globally
+                var userId = result?.UserId == Guid.Empty ? null : result?.UserId;
+                return (false, userId, result?.PrincipalId, null, null, "Invalid credentials");
             }
 
             return (true, result.UserId, result.PrincipalId, result.Email, result.Name, null);
