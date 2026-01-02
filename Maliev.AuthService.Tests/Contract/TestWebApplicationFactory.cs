@@ -79,6 +79,7 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         // Set external service URLs via environment variables for testing
         Environment.SetEnvironmentVariable("CustomerService__BaseUrl", "http://localhost:5001");
         Environment.SetEnvironmentVariable("EmployeeService__BaseUrl", "http://localhost:5002");
+        Environment.SetEnvironmentVariable("IAMService__BaseUrl", "http://localhost:5100");
 
         // Export RSA private and public keys for JWT token generation and validation
         // The base factory provides _testRsa through SigningCredentials property

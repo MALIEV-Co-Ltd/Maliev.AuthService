@@ -103,35 +103,43 @@ public class RefreshTokenService : IRefreshTokenService
     /// <inheritdoc/>
     public async Task<(RefreshToken Entity, string TokenValue)> RotateRefreshTokenAsync(RefreshToken oldToken, string? ipAddress)
     {
-        oldToken.IsUsed = true;
-        oldToken.UsedAt = DateTime.UtcNow;
-
-        var tokenValue = _tokenGenerator.GenerateRefreshToken();
-        var tokenHash = _tokenGenerator.HashToken(tokenValue);
-
-        var newToken = new RefreshToken
+        try
         {
-            Id = Guid.NewGuid(),
-            FamilyId = oldToken.FamilyId,
-            UserId = oldToken.UserId,
-            PrincipalId = oldToken.PrincipalId,
-            UserType = oldToken.UserType,
-            TokenHash = tokenHash,
-            IsUsed = false,
-            ExpiresAt = DateTime.UtcNow.AddDays(7),
-            CreatedAt = DateTime.UtcNow,
-            IpAddress = ipAddress
-        };
+            oldToken.IsUsed = true;
+            oldToken.UsedAt = DateTime.UtcNow;
 
-        oldToken.Family.LastRefreshAt = DateTime.UtcNow;
+            var tokenValue = _tokenGenerator.GenerateRefreshToken();
+            var tokenHash = _tokenGenerator.HashToken(tokenValue);
 
-        _dbContext.RefreshTokens.Add(newToken);
-        await _dbContext.SaveChangesAsync();
+            var newToken = new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                FamilyId = oldToken.FamilyId,
+                UserId = oldToken.UserId,
+                PrincipalId = oldToken.PrincipalId,
+                UserType = oldToken.UserType,
+                TokenHash = tokenHash,
+                IsUsed = false,
+                ExpiresAt = DateTime.UtcNow.AddDays(7),
+                CreatedAt = DateTime.UtcNow,
+                IpAddress = ipAddress
+            };
 
-        _logger.LogDebug("Rotated refresh token for user {UserId}, family {FamilyId}",
-            oldToken.UserId, oldToken.FamilyId);
+            oldToken.Family.LastRefreshAt = DateTime.UtcNow;
 
-        return (newToken, tokenValue);
+            _dbContext.RefreshTokens.Add(newToken);
+            await _dbContext.SaveChangesAsync();
+
+            _logger.LogDebug("Rotated refresh token for user {UserId}, family {FamilyId}",
+                oldToken.UserId, oldToken.FamilyId);
+
+            return (newToken, tokenValue);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            _logger.LogWarning("Concurrency conflict detected during token rotation for family {FamilyId}. Token may have been reused.", oldToken.FamilyId);
+            throw new InvalidOperationException("Token rotation failed due to concurrent update.");
+        }
     }
     /// <inheritdoc/>
     public async Task RevokeTokenFamilyAsync(Guid familyId, string reason)

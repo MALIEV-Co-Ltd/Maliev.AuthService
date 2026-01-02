@@ -61,6 +61,11 @@ public class RefreshToken
     /// </summary>
     public string? IpAddress { get; set; }
 
+    /// <summary>
+    /// Row version for optimistic concurrency control
+    /// </summary>
+    public byte[] Version { get; set; } = Array.Empty<byte>();
+
     // Navigation property
     public TokenFamily Family { get; set; } = null!;
 }

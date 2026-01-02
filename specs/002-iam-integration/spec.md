@@ -39,25 +39,10 @@ As a system owner, I want the AuthService to remain functional even if the IAM s
 
 **Independent Test**: Can be tested by simulating a timeout or 500 error from the IAM service during login and verifying that the AuthService still issues a valid JWT with an empty permissions list.
 
-**Acceptance Scenarios**:
+### Acceptance Scenarios
 
 1. **Given** the IAM service is unavailable or times out (200ms), **When** a user attempts to log in, **Then** the AuthService must still issue a valid JWT with an empty permissions array.
 2. **Given** the IAM service consistently fails, **When** the circuit breaker threshold is met, **Then** subsequent login attempts should skip the IAM call and immediately issue tokens with empty permissions until the circuit closes.
-
----
-
-### User Story 3 - Controlled Rollout via Feature Toggle (Priority: P2)
-
-As a system administrator, I want to control the IAM integration via a configuration flag, so that I can safely roll out the feature or instantly disable it if issues are detected.
-
-**Why this priority**: Risk mitigation. Provides a safe path for production deployment and emergency rollback without code changes.
-
-**Independent Test**: Can be tested by toggling the `IAMIntegrationEnabled` flag in configuration and verifying the AuthService switches between calling and not calling the IAM service.
-
-**Acceptance Scenarios**:
-
-1. **Given** the `IAMIntegrationEnabled` flag is set to `false`, **When** a user logs in, **Then** the AuthService must skip the IAM permission resolution and issue a standard token (backward compatible).
-2. **Given** the flag is enabled, **When** a user logs in, **Then** the AuthService must attempt to resolve permissions from the configured IAM service endpoint.
 
 ### Edge Cases
 
@@ -75,8 +60,7 @@ As a system administrator, I want to control the IAM integration via a configura
 - **FR-004**: System MUST use the `principal_id` as the "sub" (subject) claim in the generated JWT.
 - **FR-005**: System MUST implement a timeout of 200ms for all IAM permission resolution calls.
 - **FR-006**: System MUST implement a circuit breaker that opens after 5 consecutive failures to the IAM service.
-- **FR-007**: System MUST support a configuration-based feature flag (`IAMIntegrationEnabled`) to enable/disable the integration.
-- FR-008**: System MUST record audit logs for all IAM permission resolution attempts, including latency and success/failure status.
+- **FR-008**: System MUST record audit logs for all IAM permission resolution attempts, including latency and success/failure status.
 - **FR-009**: System MUST support a service account token for authenticating its calls to the IAM service.
 - **FR-010**: System MUST NOT cache permission resolution results locally, ensuring fresh resolution from IAM for every login or token refresh attempt.
 
