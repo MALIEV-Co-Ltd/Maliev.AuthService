@@ -22,7 +22,7 @@ public class AuthenticationContractTests : IntegrationTestBase
         var request = new
         {
             username = "customer@example.com",
-            password = "ValidPassword123!",
+            password = TestConstants.DummyPassword,
             user_type = "customer"
         };
 
@@ -56,7 +56,7 @@ public class AuthenticationContractTests : IntegrationTestBase
         var request = new
         {
             username = "employee@maliev.com",
-            password = "ValidPassword123!",
+            password = TestConstants.DummyPassword,
             user_type = "employee"
         };
 
@@ -81,7 +81,7 @@ public class AuthenticationContractTests : IntegrationTestBase
         var request = new
         {
             username = "invalid@example.com",
-            password = "WrongPassword",
+            password = TestConstants.DummyWrongPassword,
             user_type = "customer"
         };
 
@@ -109,7 +109,7 @@ public class AuthenticationContractTests : IntegrationTestBase
         var failedRequest = new
         {
             username = "locked@example.com",
-            password = "WrongPassword",
+            password = TestConstants.DummyWrongPassword,
             user_type = "customer"
         };
 
@@ -148,7 +148,7 @@ public class AuthenticationContractTests : IntegrationTestBase
             var request = new
             {
                 username = $"ratelimit{i}@example.com",  // Different username each time
-                password = "WrongPassword123!",  // Invalid password to trigger failed attempts
+                password = TestConstants.DummyWrongPassword,  // Invalid password to trigger failed attempts
                 user_type = "employee"  // Use employee to avoid interference with customer account lockout tests
             };
             response = await Client.PostAsJsonAsync("/auth/v1/login", request);
@@ -182,7 +182,7 @@ public class AuthenticationContractTests : IntegrationTestBase
         var request = new
         {
             username = "customer@example.com",
-            password = "ValidPassword123!",
+            password = TestConstants.DummyPassword,
             user_type = "customer"
         };
 
@@ -232,7 +232,7 @@ public class AuthenticationContractTests : IntegrationTestBase
         var request = new
         {
             username = "customer@example.com",
-            password = "ValidPassword123!",
+            password = TestConstants.DummyPassword,
             user_type = "customer"
         };
 

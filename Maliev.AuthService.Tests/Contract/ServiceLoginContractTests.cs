@@ -21,7 +21,7 @@ public class ServiceLoginContractTests : IntegrationTestBase
         var request = new
         {
             client_id = "service-dev-customer-api",
-            client_secret = "valid_service_secret"
+            client_secret = TestConstants.DummyValidServiceSecret
         };
 
         // Act
@@ -50,7 +50,7 @@ public class ServiceLoginContractTests : IntegrationTestBase
         var request = new
         {
             client_id = "service-dev-nonexistent",
-            client_secret = "some_secret"
+            client_secret = TestConstants.DummySecret
         };
 
         // Act
@@ -74,7 +74,7 @@ public class ServiceLoginContractTests : IntegrationTestBase
         var request = new
         {
             client_id = "service-dev-customer-api",
-            client_secret = "wrong_secret"
+            client_secret = TestConstants.DummyWrongSecret
         };
 
         // Act
