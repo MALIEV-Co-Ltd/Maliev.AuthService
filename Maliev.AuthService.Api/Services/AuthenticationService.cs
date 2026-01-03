@@ -58,6 +58,7 @@ public class AuthenticationService : IAuthenticationService
     /// <inheritdoc/>
     public async Task<AuthenticationResult> AuthenticateAsync(LoginRequest request, string? ipAddress)
     {
+        // Authenticate user against external services and issue JWT tokens with IAM permissions
         if (string.IsNullOrWhiteSpace(request.UserType))
         {
             throw new ArgumentException("UserType is required");
