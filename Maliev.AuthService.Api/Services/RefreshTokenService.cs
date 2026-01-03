@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
+using Maliev.MessagingContracts.Generated;
+using MassTransit;
 
 namespace Maliev.AuthService.Api.Services;
 /// <summary>
@@ -12,21 +14,25 @@ public class RefreshTokenService : IRefreshTokenService
     private readonly AuthDbContext _dbContext;
     private readonly ITokenGenerator _tokenGenerator;
     private readonly ILogger<RefreshTokenService> _logger;
+    private readonly IPublishEndpoint _publishEndpoint;
     /// <summary>
     /// Initializes a new instance of the <see cref="RefreshTokenService"/> class.
     /// </summary>
     /// <param name="dbContext">The database context</param>
     /// <param name="tokenGenerator">The token generator</param>
     /// <param name="logger">The logger instance</param>
+    /// <param name="publishEndpoint">The publish endpoint for events</param>
 
     public RefreshTokenService(
         AuthDbContext dbContext,
         ITokenGenerator tokenGenerator,
-        ILogger<RefreshTokenService> logger)
+        ILogger<RefreshTokenService> logger,
+        IPublishEndpoint publishEndpoint)
     {
         _dbContext = dbContext;
         _tokenGenerator = tokenGenerator;
         _logger = logger;
+        _publishEndpoint = publishEndpoint;
     }
 
     /// <inheritdoc/>
@@ -93,6 +99,29 @@ public class RefreshTokenService : IRefreshTokenService
         {
             _logger.LogWarning("Token reuse detected for user {UserId}, family {FamilyId}",
                 refreshToken.UserId, refreshToken.FamilyId);
+
+            // Publish SuspiciousActivityDetectedEvent for token reuse
+            await _publishEndpoint.Publish(new SuspiciousActivityDetectedEvent(
+                MessageId: Guid.NewGuid(),
+                MessageName: "SuspiciousActivityDetectedEvent",
+                MessageType: MessageType.Event,
+                MessageVersion: "1.0.0",
+                PublishedBy: "AuthService",
+                ConsumedBy: ["NotificationService"],
+                CorrelationId: Guid.NewGuid(),
+                CausationId: null,
+                OccurredAtUtc: DateTimeOffset.UtcNow,
+                IsPublic: false,
+                Payload: new SuspiciousActivityDetectedEventPayload(
+                    UserId: refreshToken.UserId.ToString(),
+                    UserType: refreshToken.UserType == UserType.Customer ? "Customer" : "Employee",
+                    ActivityType: "RefreshTokenReuse",
+                    IpAddress: refreshToken.IpAddress,
+                    TokenFamilyId: refreshToken.FamilyId.ToString(),
+                    DetectedAt: DateTimeOffset.UtcNow
+                )
+            ));
+
             await RevokeTokenFamilyAsync(refreshToken.FamilyId, "Token reuse detected");
             return null;
         }
@@ -164,6 +193,35 @@ public class RefreshTokenService : IRefreshTokenService
 
         _logger.LogWarning("Revoked token family {FamilyId} for user {UserId}. Reason: {Reason}",
             familyId, family.UserId, reason);
+
+        // Determine revocation reason enum
+        var revocationReason = reason.ToLowerInvariant() switch
+        {
+            "user logout" => "UserLogout",
+            "token reuse detected" => "TokenReuse",
+            _ => "Administrative"
+        };
+
+        // Publish RefreshTokenRevokedEvent
+        await _publishEndpoint.Publish(new RefreshTokenRevokedEvent(
+            MessageId: Guid.NewGuid(),
+            MessageName: "RefreshTokenRevokedEvent",
+            MessageType: MessageType.Event,
+            MessageVersion: "1.0.0",
+            PublishedBy: "AuthService",
+            ConsumedBy: ["NotificationService"],
+            CorrelationId: Guid.NewGuid(),
+            CausationId: null,
+            OccurredAtUtc: DateTimeOffset.UtcNow,
+            IsPublic: false,
+            Payload: new RefreshTokenRevokedEventPayload(
+                UserId: family.UserId.ToString(),
+                UserType: family.UserType == UserType.Customer ? "Customer" : "Employee",
+                TokenFamilyId: familyId.ToString(),
+                RevocationReason: revocationReason,
+                RevokedAt: DateTimeOffset.UtcNow
+            )
+        ));
     }
     /// <inheritdoc/>
     public async Task<bool> IsTokenReuseDetectedAsync(string tokenHash)
