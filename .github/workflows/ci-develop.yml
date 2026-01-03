@@ -73,11 +73,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITOPS_PAT }}
           PR_BODY: |
-            Automated deployment of auth-service to development environment.
+            Automated GitOps Update
 
-            Commit: ${{ github.sha }}
+            - **Service**: AuthService
+            - **Environment**: Development
+            - **Image Tag**: ${{ github.sha }}
+            - **Source Branch**: ${{ github.ref_name }}
+            - **Commit**: ${{ github.sha }}
+
+            Updates maliev-auth-service image in development overlay.
+            This PR was automatically created by GitHub Actions.
+            Once merged, ArgoCD will automatically sync the changes to the maliev-dev namespace.
+
             Triggered by: ${{ github.actor }}
             Workflow: ${{ github.workflow }}
+            Run: [${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
         run: |
           cd maliev-gitops
           git config --global user.name 'github-actions[bot]'
@@ -94,8 +104,13 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Update auth-service image to ${{ github.sha }}"
+          git commit -m "chore(dev): Update AuthService image to ${{ github.sha }}"
           git push origin $BRANCH_NAME
 
           # Create pull request using GitHub CLI
-          gh pr create             --title "Deploy auth-service ${{ github.sha }} to development"             --body "$PR_BODY"             --base main             --head $BRANCH_NAME             --repo MALIEV-Co-Ltd/maliev-gitops
+          gh pr create \
+            --title "chore(dev): Update auth-service" \
+            --body "$PR_BODY" \
+            --base main \
+            --head $BRANCH_NAME \
+            --repo MALIEV-Co-Ltd/maliev-gitops
