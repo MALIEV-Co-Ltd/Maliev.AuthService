@@ -25,6 +25,7 @@ public class AuthenticationService : IAuthenticationService
     private readonly ILogger<AuthenticationService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
+    private readonly MassTransit.IPublishEndpoint _publishEndpoint;
     /// <summary>
     /// Initializes a new instance of the <see cref="AuthenticationService"/> class.
     /// </summary>
@@ -39,7 +40,8 @@ public class AuthenticationService : IAuthenticationService
         IIAMClient iamClient,
         ILogger<AuthenticationService> logger,
         IHttpClientFactory httpClientFactory,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        MassTransit.IPublishEndpoint publishEndpoint)
     {
         _dbContext = dbContext;
         _tokenGenerator = tokenGenerator;
@@ -51,16 +53,51 @@ public class AuthenticationService : IAuthenticationService
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
+        _publishEndpoint = publishEndpoint;
     }
     /// <inheritdoc/>
     public async Task<AuthenticationResult> AuthenticateAsync(LoginRequest request, string? ipAddress)
     {
-        var userType = request.UserType.ToLowerInvariant() == "customer" ? UserType.Customer : UserType.Employee;
+        // Authenticate user against external services and issue JWT tokens with IAM permissions
+        if (string.IsNullOrWhiteSpace(request.UserType))
+        {
+            throw new ArgumentException("UserType is required");
+        }
+
+        var normalizedType = request.UserType.ToLowerInvariant();
+        if (normalizedType != "customer" && normalizedType != "employee")
+        {
+            throw new ArgumentException("Invalid UserType");
+        }
+
+        var userType = normalizedType == "customer" ? UserType.Customer : UserType.Employee;
 
         // Check rate limiting first
         if (!string.IsNullOrEmpty(ipAddress) && await _rateLimitService.IsRateLimitExceededAsync(ipAddress))
         {
             await LogAuditAsync(null, userType, "login", ipAddress, false, "Rate limit exceeded");
+
+            await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.LoginFailedEvent(
+                Guid.NewGuid(),
+                "LoginFailedEvent",
+                Maliev.MessagingContracts.Generated.MessageType.Event,
+                "1.0.0",
+                "AuthService",
+                ["NotificationService"],
+                Guid.NewGuid(),
+                null,
+                DateTimeOffset.UtcNow,
+                false,
+                new Maliev.MessagingContracts.Generated.LoginFailedEventPayload(
+                    request.Username,
+                    null,
+                    normalizedType == "customer" ? "Customer" : "Employee",
+                    ipAddress,
+                    "RateLimitExceeded",
+                    DateTimeOffset.UtcNow
+                )
+            ));
+
             var blockedUntil = await _rateLimitService.GetBlockedUntilAsync(ipAddress);
             return new AuthenticationResult
             {
@@ -78,6 +115,28 @@ public class AuthenticationService : IAuthenticationService
         if (validationResult.UserId.HasValue && await _accountLockoutService.IsAccountLockedAsync(validationResult.UserId.Value, userType))
         {
             await LogAuditAsync(validationResult.UserId.Value, userType, "login", ipAddress, false, "Account locked");
+
+            await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.LoginFailedEvent(
+                Guid.NewGuid(),
+                "LoginFailedEvent",
+                Maliev.MessagingContracts.Generated.MessageType.Event,
+                "1.0.0",
+                "AuthService",
+                ["NotificationService"],
+                Guid.NewGuid(),
+                null,
+                DateTimeOffset.UtcNow,
+                false,
+                new Maliev.MessagingContracts.Generated.LoginFailedEventPayload(
+                    request.Username,
+                    validationResult.UserId.Value.ToString(),
+                    normalizedType == "customer" ? "Customer" : "Employee",
+                    ipAddress,
+                    "AccountLocked",
+                    DateTimeOffset.UtcNow
+                )
+            ));
+
             var lockedUntil = await _accountLockoutService.GetLockedUntilAsync(validationResult.UserId.Value, userType);
             return new AuthenticationResult
             {
@@ -103,6 +162,28 @@ public class AuthenticationService : IAuthenticationService
             }
 
             await LogAuditAsync(validationResult.UserId, userType, "login", ipAddress, false, validationResult.FailureReason);
+
+            await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.LoginFailedEvent(
+                Guid.NewGuid(),
+                "LoginFailedEvent",
+                Maliev.MessagingContracts.Generated.MessageType.Event,
+                "1.0.0",
+                "AuthService",
+                ["NotificationService"],
+                Guid.NewGuid(),
+                null,
+                DateTimeOffset.UtcNow,
+                false,
+                new Maliev.MessagingContracts.Generated.LoginFailedEventPayload(
+                    request.Username,
+                    validationResult.UserId?.ToString(),
+                    normalizedType == "customer" ? "Customer" : "Employee",
+                    ipAddress,
+                    "InvalidCredentials",
+                    DateTimeOffset.UtcNow
+                )
+            ));
+
             return new AuthenticationResult
             {
                 Success = false,
@@ -139,6 +220,27 @@ public class AuthenticationService : IAuthenticationService
         var (refreshTokenEntity, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(userId, principalId, userType, ipAddress);
 
         await LogAuditAsync(userId, userType, "login", ipAddress, true, null);
+
+        await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.UserLoggedInEvent(
+            Guid.NewGuid(),
+            "UserLoggedInEvent",
+            Maliev.MessagingContracts.Generated.MessageType.Event,
+            "1.0.0",
+            "AuthService",
+            ["NotificationService"],
+            Guid.NewGuid(),
+            null,
+            DateTimeOffset.UtcNow,
+            false,
+            new Maliev.MessagingContracts.Generated.UserLoggedInEventPayload(
+                userId.ToString(),
+                principalId.ToString(),
+                normalizedType == "customer" ? "Customer" : "Employee",
+                ipAddress,
+                "Password",
+                DateTimeOffset.UtcNow
+            )
+        ));
 
         return new AuthenticationResult
         {
@@ -301,6 +403,24 @@ public class AuthenticationService : IAuthenticationService
 
         await LogAuditAsync(refreshToken.UserId, refreshToken.UserType, "logout", null, true, null);
 
+        await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.UserLoggedOutEvent(
+            Guid.NewGuid(),
+            "UserLoggedOutEvent",
+            Maliev.MessagingContracts.Generated.MessageType.Event,
+            "1.0.0",
+            "AuthService",
+            ["NotificationService"],
+            Guid.NewGuid(),
+            null,
+            DateTimeOffset.UtcNow,
+            false,
+            new Maliev.MessagingContracts.Generated.UserLoggedOutEventPayload(
+                refreshToken.UserId.ToString(),
+                refreshToken.UserType == UserType.Customer ? "Customer" : "Employee",
+                DateTimeOffset.UtcNow
+            )
+        ));
+
         return true;
     }
 
@@ -313,6 +433,28 @@ public class AuthenticationService : IAuthenticationService
         if (serviceCredential == null)
         {
             await LogAuditAsync(null, null, "service_login", ipAddress, false, "Invalid client ID");
+
+            await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.LoginFailedEvent(
+                Guid.NewGuid(),
+                "LoginFailedEvent",
+                Maliev.MessagingContracts.Generated.MessageType.Event,
+                "1.0.0",
+                "AuthService",
+                ["NotificationService"],
+                Guid.NewGuid(),
+                null,
+                DateTimeOffset.UtcNow,
+                false,
+                new Maliev.MessagingContracts.Generated.LoginFailedEventPayload(
+                    request.ClientId,
+                    null,
+                    "Service",
+                    ipAddress,
+                    "InvalidCredentials",
+                    DateTimeOffset.UtcNow
+                )
+            ));
+
             return null;
         }
 
@@ -320,6 +462,28 @@ public class AuthenticationService : IAuthenticationService
         if (secretHash != serviceCredential.ClientSecretHash)
         {
             await LogAuditAsync(null, null, "service_login", ipAddress, false, "Invalid client secret");
+
+            await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.LoginFailedEvent(
+                Guid.NewGuid(),
+                "LoginFailedEvent",
+                Maliev.MessagingContracts.Generated.MessageType.Event,
+                "1.0.0",
+                "AuthService",
+                ["NotificationService"],
+                Guid.NewGuid(),
+                null,
+                DateTimeOffset.UtcNow,
+                false,
+                new Maliev.MessagingContracts.Generated.LoginFailedEventPayload(
+                    request.ClientId,
+                    null,
+                    "Service",
+                    ipAddress,
+                    "InvalidCredentials",
+                    DateTimeOffset.UtcNow
+                )
+            ));
+
             return null;
         }
 
@@ -350,6 +514,27 @@ public class AuthenticationService : IAuthenticationService
         var accessToken = await _tokenGenerator.GenerateServiceAccessTokenAsync(request.ClientId, serviceCredential.ServiceName, permissions, roles);
 
         await LogAuditAsync(null, null, "service_login", ipAddress, true, null);
+
+        await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.UserLoggedInEvent(
+            Guid.NewGuid(),
+            "UserLoggedInEvent",
+            Maliev.MessagingContracts.Generated.MessageType.Event,
+            "1.0.0",
+            "AuthService",
+            ["NotificationService"],
+            Guid.NewGuid(),
+            null,
+            DateTimeOffset.UtcNow,
+            false,
+            new Maliev.MessagingContracts.Generated.UserLoggedInEventPayload(
+                request.ClientId,
+                serviceCredential.PrincipalId?.ToString(),
+                "Service",
+                ipAddress,
+                "ServiceCredential",
+                DateTimeOffset.UtcNow
+            )
+        ));
 
         return new LoginResponse
         {

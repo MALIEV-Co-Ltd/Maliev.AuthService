@@ -13,6 +13,7 @@ using Moq.Protected;
 using Xunit;
 using System.Net;
 using System.Net.Http.Json;
+using MassTransit;
 
 namespace Maliev.AuthService.Tests.Unit;
 
@@ -28,6 +29,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     private readonly Mock<ILogger<AuthenticationService>> _loggerMock;
     private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
     private readonly Mock<IConfiguration> _configurationMock;
+    private readonly Mock<IPublishEndpoint> _publishEndpointMock;
     private AuthenticationService? _service;
 
     public AuthenticationServiceTests(TestDatabaseFixture fixture)
@@ -42,6 +44,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         _loggerMock = new Mock<ILogger<AuthenticationService>>();
         _httpClientFactoryMock = new Mock<IHttpClientFactory>();
         _configurationMock = new Mock<IConfiguration>();
+        _publishEndpointMock = new Mock<IPublishEndpoint>();
     }
 
     public async Task InitializeAsync()
@@ -57,7 +60,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             _iamClientMock.Object,
             _loggerMock.Object,
             _httpClientFactoryMock.Object,
-            _configurationMock.Object);
+            _configurationMock.Object,
+            _publishEndpointMock.Object);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;

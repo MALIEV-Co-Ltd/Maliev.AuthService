@@ -1,529 +1,142 @@
 # Maliev Authentication Service
 
-Production-ready JWT token-based authentication service with OAuth 2.0 token rotation compliance (RFC 9700).
+[![Build Status](https://img.shields.io/badge/Build-Passing-success)](https://github.com/ORGANIZATION/Maliev.AuthService)
+[![.NET Version](https://img.shields.io/badge/.NET-10.0-blue)](https://dotnet.microsoft.com/download/dotnet/10.0)
+[![Database](https://img.shields.io/badge/Database-PostgreSQL%2018-blue)](https://www.postgresql.org/)
 
-## Features
+Production-ready, highly secure authentication microservice providing JWT issuance and validation with OAuth 2.0 token rotation compliance (RFC 9700).
 
-- **RSA-2048 Asymmetric Signing**: Secure JWT signing with public/private key cryptography
-- **OAuth 2.0 RFC 9700 Compliance**: Automatic refresh token rotation with reuse detection
-- **Dual User Types**: Separate authentication flows for customers and employees
-- **Multi-Layer Security**:
-  - Account lockout (5 failures / 15 minutes)
-  - IP rate limiting (20 requests / 15 minutes)
-  - Progressive delay on failed attempts
-- **Service-to-Service Authentication**: Dedicated auth flow for microservices
-- **IAM Integration**: Fine-grained authorization via permissions and roles embedded in JWT tokens (resolved from IAM service)
-- **Complete Token Lifecycle**: Generation, validation, refresh, revocation with audit logging
-- **Production-Ready**: Structured logging, health checks, correlation IDs, error handling
+**Role in MALIEV Architecture**: The central identity provider for the entire platform. It issues RSA-2048 signed JWT tokens for customers, employees, and internal microservices, ensuring secure communication and centralized identity management.
 
-## Quick Start
+---
+
+## 🏗️ Architecture & Tech Stack
+
+- **Framework**: ASP.NET Core 10.0 (C# 13)
+- **Database**: PostgreSQL 18 with Entity Framework Core 10.x
+- **Distributed Cache**: Redis 7.x (Token revocation & rate limiting)
+- **Messaging**: RabbitMQ via MassTransit
+- **Security**: RSA-2048 Asymmetric Signing (Public/Private Key)
+- **API Documentation**: OpenAPI 3.1 + Scalar UI
+- **Observability**: OpenTelemetry (Metrics, Traces, Logging)
+
+---
+
+## ⚖️ Constitution Rules
+
+This service strictly adheres to the platform development mandates:
+
+### Banned Libraries
+To maintain high performance and low complexity, the following are **NOT** used:
+- ❌ **AutoMapper**: Explicit manual mapping only.
+- ❌ **FluentValidation**: Standard Data Annotations (`[Required]`, `[EmailAddress]`) only.
+- ❌ **FluentAssertions**: Standard xUnit `Assert` methods only.
+- ❌ **In-memory Test DB**: All integration tests use **Testcontainers** with real PostgreSQL 18.
+
+### Mandatory Practices
+- ✅ **TreatWarningsAsErrors**: Enabled in all `.csproj` files.
+- ✅ **XML Documentation**: Required on all public methods and properties.
+- ✅ **No Secrets in Code**: All sensitive configuration injected via environment variables.
+- ✅ **No Test Config in Program.cs**: Test configuration in test fixtures only.
+- ✅ **IAM Integration**: Self-registers permissions with the IAM Service using GCP-style naming: `{service}.{resource}.{action}`.
+
+---
+
+## ✨ Key Features
+
+- **RSA-2048 Asymmetric Signing**: Higher security than symmetric keys; services only need the public key to validate tokens.
+- **RFC 9700 Compliance**: Automatic refresh token rotation with built-in reuse detection to prevent theft.
+- **Dual User Contexts**: Specialized authentication flows for both public Customers and internal Employees.
+- **Service-to-Service Auth**: Secure machine-to-machine authentication for microservices.
+- **Token Revocation**: Global logout capability by revoking token families in Redis.
+- **Rate Limiting**: Protection against brute-force attacks on login endpoints.
+
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
+- .NET 10.0 SDK
+- Docker Desktop (for infrastructure)
+- PostgreSQL 18 (Alpine)
 
-- .NET 9.0 SDK
-- PostgreSQL 15+
-- Docker (optional, for local PostgreSQL)
+### Local Development Setup
 
-### Local Development
-
-1. **Clone repository**
-   
-   ```bash
-   git clone https://github.com/MALIEV-Co-Ltd/Maliev.AuthService.git
-   cd Maliev.AuthService
-   ```
-
-2. **Set up PostgreSQL**
-   
-   ```bash
-   # Using Docker
-   docker run --name auth-postgres -e POSTGRES_PASSWORD=dummy -p 5432:5432 -d postgres:15
-   ```
-
-3. **Set connection string**
-   
-   ```powershell
-   # Windows PowerShell
-   $env:AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=dummy;"
-   
-   # Linux/macOS
-   export AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=dummy;"
-   ```
-
-4. **Run database migrations**
-   
-   ```bash
-   dotnet ef database update --project Maliev.AuthService.Data
-   ```
-
-5. **Run the service**
-   
-   ```bash
-   dotnet run --project Maliev.AuthService.Api
-   ```
-
-6. **Access Swagger UI**
-   
-   ```
-   http://localhost:5000/auth/swagger
-   ```
-
-## API Endpoints
-
-All endpoints are prefixed with `/auth` base path.
-
-### Authentication
-
-#### Login (Customer/Employee)
-
-```http
-POST /auth/v1/login
-Content-Type: application/json
-
-{
-  "username": "customer@example.com",
-  "password": "SecurePassword123!",
-  "user_type": "customer"
-}
-```
-
-**Response (200 OK):**
-
-```json
-{
-  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refresh_token": "a1b2c3d4e5f6g7h8i9j0...",
-  "token_type": "Bearer",
-  "expires_in": 900
-}
-```
-
-**Error Codes:**
-
-- `400` - Invalid request (validation failure)
-- `401` - Invalid credentials
-- `423` - Account locked (too many failed attempts)
-- `429` - Rate limit exceeded
-- `503` - External service unavailable
-
----
-
-#### Service Login
-
-```http
-POST /auth/v1/service/login
-Content-Type: application/json
-
-{
-  "service_name": "customer-service",
-  "service_secret": "secret-key-here"
-}
-```
-
-**Response:** Same format as customer/employee login
-
----
-
-#### Refresh Token
-
-```http
-POST /auth/v1/refresh
-Content-Type: application/json
-
-{
-  "refresh_token": "a1b2c3d4e5f6g7h8i9j0..."
-}
-```
-
-**Response:** New access token and refresh token (old refresh token invalidated)
-
-**Token Rotation:** Each refresh generates a new token pair. Old refresh tokens are marked as used. If an old token is reused, the entire token family is invalidated for security.
-
-**Error Codes:**
-
-- `400` - Missing refresh token
-- `401` - Invalid/expired token
-- `403` - Token reuse detected (family invalidated)
-
----
-
-#### Validate Token
-
-```http
-POST /auth/v1/validate
-Content-Type: application/json
-
-{
-  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
-
-**Response (200 OK):**
-
-```json
-{
-  "user_id": "12345",
-  "user_type": "customer",
-  "username": "customer@example.com",
-  "email": "customer@example.com",
-  "roles": ["customer"],
-  "permissions": ["read:profile", "write:orders"]
-}
-```
-
-**Caching:** Successful validations are cached for 5-10 minutes to improve performance.
-
----
-
-#### Revoke Token
-
-```http
-POST /auth/v1/revoke
-Content-Type: application/json
-
-{
-  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
-
-**Response (200 OK):**
-
-```json
-{
-  "message": "Token revoked successfully"
-}
-```
-
-Revoked tokens are stored in the database and checked during validation.
-
----
-
-#### Logout
-
-```http
-POST /auth/v1/logout
-Content-Type: application/json
-
-{
-  "refresh_token": "a1b2c3d4e5f6g7h8i9j0..."
-}
-```
-
-**Response (200 OK):**
-
-```json
-{
-  "message": "Logged out successfully"
-}
-```
-
-Invalidates the entire token family associated with the refresh token.
-
----
-
-### Health Checks
-
-#### Liveness Probe
-
-```http
-GET /auth/liveness
-```
-
-**Response (200 OK):** `"Healthy"`
-
----
-
-#### Readiness Probe
-
-```http
-GET /auth/readiness
-```
-
-**Response (200 OK):**
-
-```json
-{
-  "status": "Healthy",
-  "results": {
-    "AuthDbContext": {
-      "status": "Healthy",
-      "description": "Database is accessible"
-    }
-  }
-}
-```
-
-## Configuration
-
-### Required Secrets (Google Secret Manager)
-
-Production secrets are stored in Google Secret Manager:
-
-```
-Jwt:PrivateKey  - Base64-encoded RSA-2048 private key (PEM format)
-Jwt:PublicKey   - Base64-encoded RSA-2048 public key (PEM format)
-ConnectionStrings:AuthDbContext - PostgreSQL connection string
-```
-
-### Environment Variables
-
+1. **Clone the repository**
 ```bash
-# Database
-AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=..."
-
-# JWT Configuration
-Jwt:Issuer="https://dev.api.maliev.com/auth"
-Jwt:Audience="https://dev.api.maliev.com"
-Jwt:AccessTokenLifetimeMinutes=15
-Jwt:RefreshTokenLifetimeDays=7
-
-# External Services
-ExternalServices:CustomerService:BaseUrl="http://customer-service:8080"
-ExternalServices:EmployeeService:BaseUrl="http://employee-service:8080"
-
-# Rate Limiting
-RateLimit:MaxAttempts=20
-RateLimit:WindowMinutes=15
-
-# Account Lockout
-AccountLockout:MaxFailedAttempts=5
-AccountLockout:LockoutDurationMinutes=15
+git clone https://github.com/ORGANIZATION/Maliev.AuthService.git
+cd Maliev.AuthService
 ```
 
-### Generating RSA Keys
-
-For production use, generate RSA-2048 key pairs in **PEM format**:
-
+2. **Spin up Infrastructure**
 ```bash
-# Generate private key in PKCS#8 PEM format
-openssl genpkey -algorithm RSA -out private_key.pem -pkeyopt rsa_keygen_bits:2048
+docker run --name auth-db -e POSTGRES_PASSWORD=YOUR_PASSWORD -p 5432:5432 -d postgres:18-alpine
+docker run --name auth-redis -p 6379:6379 -d redis:7-alpine
+```
 
-# Extract public key in PEM format
-openssl rsa -pubout -in private_key.pem -out public_key.pem
-
-# Base64 encode the PEM files for Google Secret Manager (single-line storage)
-# Linux/macOS
-base64 -w 0 private_key.pem > private_key_base64.txt
-base64 -w 0 public_key.pem > public_key_base64.txt
-
+3. **Configure Environment**
+```powershell
 # Windows PowerShell
-[Convert]::ToBase64String([System.IO.File]::ReadAllBytes("private_key.pem")) | Out-File -Encoding ASCII -NoNewline private_key_base64.txt
-[Convert]::ToBase64String([System.IO.File]::ReadAllBytes("public_key.pem")) | Out-File -Encoding ASCII -NoNewline public_key_base64.txt
+$env:ConnectionStrings__AuthDbContext="Host=localhost;Database=auth_app_db;Username=postgres;Password=YOUR_PASSWORD"
+$env:ConnectionStrings__Cache="localhost:6379"
 ```
 
-**IMPORTANT:**
-- Keys must be stored as **base64-encoded PEM text** (not DER format)
-- The AuthService code uses `ImportFromPem()` which requires PEM format with BEGIN/END markers
-- Google Secret Manager requires single-line values, hence the base64 encoding
-- The code flow: base64 decode → UTF-8 decode → PEM text → ImportFromPem()
-
-**Note:** Test keys are provided in `appsettings.Testing.json` for local development only.
-
-### Verifying Key Format
-
-To verify your keys are in the correct PEM format after decoding:
-
+4. **Apply Migrations & Run**
 ```bash
-# Decode and verify private key structure
-cat private_key_base64.txt | base64 -d | openssl pkey -text -noout
-
-# Decode and verify public key structure
-cat public_key_base64.txt | base64 -d | openssl pkey -pubin -text -noout
-
-# Verify the decoded output contains PEM headers
-cat private_key_base64.txt | base64 -d | head -n 1
-# Should output: -----BEGIN PRIVATE KEY-----
-
-cat public_key_base64.txt | base64 -d | head -n 1
-# Should output: -----BEGIN PUBLIC KEY-----
-```
-
-If these commands succeed and show the PEM headers, your keys are in the correct format for AuthService.
-## Database Schema
-
-The service uses PostgreSQL with 7 entities:
-
-1. **RefreshToken** - Stores hashed refresh tokens with expiration
-2. **TokenFamily** - Tracks token rotation lineage for reuse detection
-3. **RevokedAccessToken** - Stores revoked access token JTIs
-4. **AccountLockout** - Tracks failed login attempts per account
-5. **IpRateLimit** - Tracks API requests per IP address
-6. **AuthAuditLog** - Comprehensive audit trail of all auth operations
-7. **ServiceCredential** - Service-to-service authentication credentials
-
-### Database Migration
-
-```bash
-# Port forward to PostgreSQL (Kubernetes)
-kubectl port-forward -n maliev-dev postgres-cluster-1 5432:5432
-
-# Set connection string
-export AuthDbContext="Server=localhost;Port=5432;Database=auth_app_db;User Id=postgres;Password=..."
-
-# Apply migrations
 dotnet ef database update --project Maliev.AuthService.Data
+dotnet run --project Maliev.AuthService.Api
 ```
 
-Current migration: `InitialCreate` (20251007014518)
+The service will be available at `http://localhost:5000/auth`. Access the interactive documentation at `http://localhost:5000/auth/scalar`.
 
-## Testing
+---
 
-The service includes comprehensive test coverage with 27 tests (100% pass rate).
+## 📡 API Endpoints
 
-### Running Tests
+All endpoints are prefixed with `/auth/v1/`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/login` | Authenticate and receive JWT + Refresh Token |
+| POST | `/refresh` | Exchange refresh token for new pair (Rotation) |
+| POST | `/logout` | Revoke current refresh token family |
+| POST | `/validate` | Validate an existing JWT (Internal use) |
+| GET | `/me` | Get current authenticated user details |
+
+---
+
+## 🏥 Health & Monitoring
+
+Standardized health probes for Kubernetes orchestration:
+- **Liveness**: `GET /auth/liveness`
+- **Readiness**: `GET /auth/readiness` (Checks DB and Redis connectivity)
+- **Metrics**: `GET /auth/metrics` (Prometheus format)
+
+---
+
+## 🧪 Testing
+
+We prioritize reliable tests over mock-heavy unit tests.
 
 ```bash
-# Run all tests
-dotnet test Maliev.AuthService.sln --verbosity normal
-
-# Run with coverage
-dotnet test --collect:"XPlat Code Coverage"
-
-# Run specific test suite
-dotnet test --filter "FullyQualifiedName~AuthenticationContractTests"
+# Run all tests using Testcontainers
+dotnet test --verbosity normal
 ```
 
-### Test Suites
+- **Integration Tests**: Use real PostgreSQL 18 containers.
+- **Contract Tests**: Ensure API stability for consumers.
 
-- **Authentication Contract Tests** (6 tests) - Login validation, error handling, lockout
-- **Service Login Contract Tests** (4 tests) - Service authentication validation
-- **Token Refresh Contract Tests** (5 tests) - Token rotation, expiry, reuse detection
-- **Token Validation Contract Tests** (5 tests) - Validation, revocation, expiry
-- **Token Revocation Contract Tests** (3 tests) - Revocation, idempotency
-- **Logout Contract Tests** (3 tests) - Token family revocation
-- **Health Check Contract Tests** (2 tests) - Liveness and readiness probes
+---
 
-## Deployment
+## 📦 Deployment
 
-### Kubernetes
+Infrastructure management is handled via GitOps patterns.
 
-The service is deployed via GitOps using ArgoCD. Manifests are located in the `maliev-gitops` repository.
+- **Docker Image**: `REGION-docker.pkg.dev/PROJECT_ID/REPOSITORY/maliev-auth-service:{sha}`
+- **Environments**: Development, Staging, Production
 
-**Namespace:** `maliev-dev` (development), `maliev-staging` (staging), `maliev-prod` (production)
+---
 
-**Service URL:** `http://maliev-auth-service:8080/auth`
+## 📄 License
 
-### CI/CD
-
-GitHub Actions workflows handle automated deployment:
-
-- **develop** branch → Development environment
-- **staging** branch → Staging environment
-- **main** branch → Production environment
-
-Each workflow:
-
-1. Builds and tests the service
-2. Creates Docker image
-3. Pushes to Google Artifact Registry
-4. Updates GitOps repository with new image tag
-5. ArgoCD automatically syncs and deploys
-
-### Monitoring
-
-- **Logs:** Structured JSON logs via Serilog (console output)
-- **Health Checks:** `/auth/liveness` and `/auth/readiness` endpoints
-- **Correlation IDs:** All requests tagged with `X-Correlation-ID` header
-
-## Security Considerations
-
-### Token Security
-
-- **Access Tokens:** Short-lived (15 minutes), signed with RSA-2048
-- **Refresh Tokens:** Long-lived (7 days), stored as SHA-256 hashes
-- **Token Rotation:** New refresh token on each use (RFC 9700)
-- **Reuse Detection:** Entire token family invalidated on reuse attempt
-- **Revocation:** JTI-based access token revocation with database storage
-
-### Rate Limiting
-
-- **Account-based:** 5 failed login attempts in 15 minutes → Account lockout
-- **IP-based:** 20 requests per 15 minutes per IP → Rate limit error
-- **Progressive Delays:** Exponential backoff on failed login attempts
-
-### Best Practices
-
-- **Never** store private keys in source code or environment variables
-- **Always** use Google Secret Manager for production secrets
-- **Rotate** RSA keys periodically (recommended: every 90 days)
-- **Monitor** audit logs for suspicious activity
-- **Validate** all user inputs with FluentValidation
-- **Use HTTPS** in production (enforced by middleware)
-
-## Troubleshooting
-
-### Issue: Tests fail with database connection errors
-
-**Solution:** Tests use in-memory database. Ensure `ASPNETCORE_ENVIRONMENT=Testing` is set.
-
-### Issue: Token validation always fails
-
-**Solution:** Verify public key matches the private key used for signing. Check Google Secret Manager configuration.
-
-### Issue: Rate limit errors in development
-
-**Solution:** Increase rate limits in `appsettings.Development.json` or clear `IpRateLimit` table.
-
-### Issue: SwaggerUI returns 404
-
-**Solution:** Swagger is disabled in production. Set `ASPNETCORE_ENVIRONMENT=Development` or `Staging`.
-
-### Issue: Database migration fails
-
-**Solution:** Ensure PostgreSQL is running and `AuthDbContext` environment variable is set correctly.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Client Application                      │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           │ HTTPS
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Maliev.AuthService.Api (ASP.NET Core)          │
-├─────────────────────────────────────────────────────────────┤
-│  Controllers                                                 │
-│  ├─ AuthenticationController                                │
-│  Middleware                                                  │
-│  ├─ CorrelationIdMiddleware                                 │
-│  ├─ ExceptionHandlingMiddleware                             │
-│  Services                                                    │
-│  ├─ AuthenticationService                                   │
-│  ├─ TokenGenerator (RSA-2048)                               │
-│  ├─ TokenValidator                                          │
-│  ├─ RefreshTokenService (RFC 9700)                          │
-│  ├─ AccountLockoutService                                   │
-│  └─ RateLimitService                                        │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│         Maliev.AuthService.Data (Entity Framework)          │
-├─────────────────────────────────────────────────────────────┤
-│  DbContext: AuthDbContext                                    │
-│  Repositories                                                │
-│  ├─ RefreshTokenRepository                                  │
-│  ├─ TokenFamilyRepository                                   │
-│  └─ RevokedAccessTokenRepository                            │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼
-                    ┌──────────────┐
-                    │  PostgreSQL  │
-                    │  auth_app_db │
-                    └──────────────┘
-```
-
-## Contributing
-
-1. Create feature branch from `develop`
-2. Implement feature with tests
-3. Ensure all tests pass (`dotnet test`)
-4. Create pull request to `develop`
-5. After review, merge to `develop` for deployment
-
-## License
-
-Copyright © 2025 Maliev Co. Ltd. All rights reserved.
+Proprietary - © 2025 MALIEV Co., Ltd. All rights reserved.

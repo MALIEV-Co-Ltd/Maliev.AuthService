@@ -24,6 +24,23 @@ public class TokenGenerator : ITokenGenerator
         _configuration = configuration;
         _logger = logger;
     }
+
+    private RsaSecurityKey GetRsaSecurityKey()
+    {
+        var privateKeyPem = _configuration["Jwt:PrivateKey"]
+            ?? throw new InvalidOperationException("JWT private key not configured");
+
+        // Decode Base64-encoded PEM
+        var privateKeyBytes = Convert.FromBase64String(privateKeyPem);
+        var privateKeyString = Encoding.UTF8.GetString(privateKeyBytes);
+
+        // Import RSA private key from PEM
+        var rsa = RSA.Create();
+        rsa.ImportFromPem(privateKeyString);
+
+        return new RsaSecurityKey(rsa);
+    }
+
     /// <inheritdoc/>
     public string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null)
     {
@@ -61,18 +78,7 @@ public class TokenGenerator : ITokenGenerator
             }
         }
 
-        var privateKeyPem = _configuration["Jwt:PrivateKey"]
-            ?? throw new InvalidOperationException("JWT private key not configured");
-
-        // Decode Base64-encoded PEM
-        var privateKeyBytes = Convert.FromBase64String(privateKeyPem);
-        var privateKeyString = Encoding.UTF8.GetString(privateKeyBytes);
-
-        // Import RSA private key from PEM
-        using var rsa = RSA.Create();
-        rsa.ImportFromPem(privateKeyString);
-
-        var securityKey = new RsaSecurityKey(rsa);
+        var securityKey = GetRsaSecurityKey();
         var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.RsaSha256);
 
         var issuer = _configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer not found");
@@ -135,18 +141,7 @@ public class TokenGenerator : ITokenGenerator
             }
         }
 
-        var privateKeyPem = _configuration["Jwt:PrivateKey"]
-            ?? throw new InvalidOperationException("JWT private key not configured");
-
-        // Decode Base64-encoded PEM
-        var privateKeyBytes = Convert.FromBase64String(privateKeyPem);
-        var privateKeyString = Encoding.UTF8.GetString(privateKeyBytes);
-
-        // Import RSA private key from PEM
-        using var rsa = RSA.Create();
-        rsa.ImportFromPem(privateKeyString);
-
-        var securityKey = new RsaSecurityKey(rsa);
+        var securityKey = GetRsaSecurityKey();
         var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.RsaSha256);
 
         var issuer = _configuration["Jwt:Issuer"] ?? throw new InvalidOperationException("Jwt:Issuer not found");
