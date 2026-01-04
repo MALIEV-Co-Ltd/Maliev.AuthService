@@ -77,8 +77,8 @@ docker run --name auth-redis -p 6379:6379 -d redis:7-alpine
 3. **Configure Environment**
 ```powershell
 # Windows PowerShell
-$env:ConnectionStrings__AuthDbContext="Host=localhost;Database=auth_app_db;Username=postgres;Password=YOUR_PASSWORD"
-$env:ConnectionStrings__Cache="localhost:6379"
+$env:ConnectionStrings__AuthDbContext="YOUR_POSTGRES_CONNECTION_STRING"
+$env:ConnectionStrings__Cache="YOUR_REDIS_CONNECTION_STRING"
 ```
 
 4. **Apply Migrations & Run**
