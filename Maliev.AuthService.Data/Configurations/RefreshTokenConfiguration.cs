@@ -17,6 +17,8 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
         builder.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
         builder.Property(e => e.UserType).HasColumnName("user_type").IsRequired().HasConversion<string>();
         builder.Property(e => e.TokenHash).HasColumnName("token_hash").HasMaxLength(64).IsRequired();
+        builder.Property(e => e.Email).HasColumnName("email").HasMaxLength(255);
+        builder.Property(e => e.Name).HasColumnName("name").HasMaxLength(255);
         builder.Property(e => e.IsUsed).HasColumnName("is_used").HasDefaultValue(false);
         builder.Property(e => e.UsedAt).HasColumnName("used_at");
         builder.Property(e => e.ExpiresAt).HasColumnName("expires_at").IsRequired();
