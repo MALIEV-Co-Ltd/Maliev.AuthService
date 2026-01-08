@@ -46,7 +46,7 @@ builder.Services.AddControllers()
     });
 
 // --- Application Services ---
-builder.AddServiceClient<IIAMClient, IAMClient>("IAMService");
+builder.AddServiceClient<IIAMClient, IAMClient>("IAM");
 
 builder.Services.AddScoped<ITokenGenerator, TokenGenerator>();
 builder.Services.AddScoped<ITokenValidator, TokenValidator>();
@@ -64,7 +64,7 @@ await app.MigrateDatabaseAsync<AuthDbContext>();
 
 // --- Middleware Pipeline ---
 app.UseStandardMiddleware();
-if (!app.Environment.IsEnvironment("Testing"))
+if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
 }

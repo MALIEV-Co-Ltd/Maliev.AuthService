@@ -1,86 +1,74 @@
-# .NET build outputs
-bin/
-obj/
-*.user
-*.suo
-*.userosscache
-*.sln.docstates
-
-# Visual Studio
-.vs/
-.vscode/
-
 # Build results
-[Dd]ebug/
-[Dd]ebugPublic/
-[Rr]elease/
-[Rr]eleases/
-x64/
-x86/
-[Aa][Rr][Mm]/
-[Aa][Rr][Mm]64/
-bld/
 [Bb]in/
 [Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+bld/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
 [Ll]og/
 [Ll]ogs/
 
-# Test results
+# IDE files
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*.user
+*.suo
+*.sln.docstates
+*.sln.iml
+
+# NuGet Packages
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+artifacts/
+
+# Environment & Secrets
+*.env
+*.env.*
+secrets/
+appsettings.Local.json
+appsettings.Testing.json
+gha-creds-*.json
+
+# OS files
+.DS_Store
+Thumbs.db
+NUL
+
+# Temporary & Logs
+*.log
+*.bak
+*.sql
+build_errors.txt
+
+# Test Artifacts
 TestResults/
 [Tt]est[Rr]esult*/
 *.trx
 *.coverage
 *.coveragexml
+coverage/
 
-# NuGet
-*.nupkg
-*.snupkg
-packages/
-.nuget/
-
-# Rider
-.idea/
-*.sln.iml
-
-# Mac
-.DS_Store
-
+# Repository Specific
 .claude/settings.local.json
 .gemini/settings.local.json
-
-gha-creds-*.json
-
-# Application Configuration
-appsettings.Development.json
-appsettings.Testing.json
-appsettings.Local.json
-
-# Temporary/debug files
-*.bak
-*.log
-*.sql
-build_errors.txt
-docker-compose.test.yml
-docker-compose.dev.yml
-
-# OpenAPI exports
-*-openapi.json
-*-openapi-*.json
-
-# Temporary tracking docs
 *MIGRATION*.md
 *SUMMARY*.md
 *AUDIT*.md
 *.Improvements.md
-# Test Outputs
-*test-output.txt
-*_error.txt
 
+# OpenAPI & Documentation
+*-openapi.json
+*-openapi-*.json
 
-# Test Outputs
-*test-output.txt
-*_error.txt
-
-
-# Windows NUL device file (accidentally created by redirects)
-NUL
+# Enforced Rules (User Request)
+appsettings.Development.json
+docker-compose*.yml
+docker-compose.override.yml
