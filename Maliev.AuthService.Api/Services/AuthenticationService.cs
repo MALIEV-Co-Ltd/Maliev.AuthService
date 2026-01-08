@@ -217,7 +217,7 @@ public class AuthenticationService : IAuthenticationService
         }
 
         var accessToken = _tokenGenerator.GenerateAccessToken(principalId, request.UserType, validationResult.Email, validationResult.Name, permissions, roles);
-        var (refreshTokenEntity, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(userId, principalId, userType, ipAddress);
+        var (refreshTokenEntity, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(userId, principalId, userType, validationResult.Email, validationResult.Name, ipAddress);
 
         await LogAuditAsync(userId, userType, "login", ipAddress, true, null);
 
@@ -293,7 +293,7 @@ public class AuthenticationService : IAuthenticationService
             // Fail open: Issue token without permissions rather than block refresh
         }
 
-        var accessToken = _tokenGenerator.GenerateAccessToken(refreshToken.PrincipalId, userTypeString, permissions: permissions, roles: roles);
+        var accessToken = _tokenGenerator.GenerateAccessToken(refreshToken.PrincipalId, userTypeString, refreshToken.Email, refreshToken.Name, permissions, roles);
 
         await LogAuditAsync(refreshToken.UserId, refreshToken.UserType, "token_refresh", ipAddress, true, null);
 
@@ -331,12 +331,20 @@ public class AuthenticationService : IAuthenticationService
 
         var userId = principal.FindFirst("sub")?.Value;
         var userType = principal.FindFirst("user_type")?.Value;
+        var email = principal.FindFirst("email")?.Value;
+        var name = principal.FindFirst("name")?.Value;
+        var roles = principal.FindAll("roles").Select(c => c.Value).ToList();
+        var permissions = principal.FindAll("permissions").Select(c => c.Value).ToList();
 
         return new ValidateResponse
         {
             Valid = true,
             UserId = userId,
-            UserType = userType
+            UserType = userType,
+            Email = email,
+            Name = name,
+            Roles = roles,
+            Permissions = permissions
         };
     }
     /// <inheritdoc/>
@@ -459,7 +467,9 @@ public class AuthenticationService : IAuthenticationService
         }
 
         var secretHash = HashSecret(request.ClientSecret);
-        if (secretHash != serviceCredential.ClientSecretHash)
+        if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(secretHash),
+            Encoding.UTF8.GetBytes(serviceCredential.ClientSecretHash)))
         {
             await LogAuditAsync(null, null, "service_login", ipAddress, false, "Invalid client secret");
 
