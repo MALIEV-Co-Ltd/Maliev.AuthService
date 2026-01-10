@@ -21,7 +21,7 @@ public class AuthenticationService : IAuthenticationService
     private readonly IRefreshTokenService _refreshTokenService;
     private readonly IAccountLockoutService _accountLockoutService;
     private readonly IRateLimitService _rateLimitService;
-    private readonly IIAMClient _iamClient;
+    private readonly IIAMServiceClient _iamServiceClient;
     private readonly ILogger<AuthenticationService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
@@ -37,7 +37,7 @@ public class AuthenticationService : IAuthenticationService
         IRefreshTokenService refreshTokenService,
         IAccountLockoutService accountLockoutService,
         IRateLimitService rateLimitService,
-        IIAMClient iamClient,
+        IIAMServiceClient iamServiceClient,
         ILogger<AuthenticationService> logger,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
@@ -49,7 +49,7 @@ public class AuthenticationService : IAuthenticationService
         _refreshTokenService = refreshTokenService;
         _accountLockoutService = accountLockoutService;
         _rateLimitService = rateLimitService;
-        _iamClient = iamClient;
+        _iamServiceClient = iamServiceClient;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
@@ -206,7 +206,7 @@ public class AuthenticationService : IAuthenticationService
 
         try
         {
-            var iamResponse = await _iamClient.ResolvePermissionsAsync(principalId);
+            var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId);
             permissions = iamResponse.Permissions;
             roles = iamResponse.Roles;
         }
@@ -283,7 +283,7 @@ public class AuthenticationService : IAuthenticationService
         try
         {
             // Use the stored PrincipalId for consistent permission resolution across token lifecycle
-            var iamResponse = await _iamClient.ResolvePermissionsAsync(refreshToken.PrincipalId);
+            var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(refreshToken.PrincipalId);
             permissions = iamResponse.Permissions;
             roles = iamResponse.Roles;
         }
@@ -506,7 +506,7 @@ public class AuthenticationService : IAuthenticationService
         {
             try
             {
-                var iamResponse = await _iamClient.ResolvePermissionsAsync(serviceCredential.PrincipalId.Value);
+                var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(serviceCredential.PrincipalId.Value);
                 permissions = iamResponse.Permissions;
                 roles = iamResponse.Roles;
             }

@@ -10,16 +10,16 @@ using Xunit;
 
 namespace Maliev.AuthService.Tests.Unit;
 
-public class IAMClientTests
+public class IAMServiceClientTests
 {
     private readonly Mock<HttpMessageHandler> _handlerMock;
     private readonly HttpClient _httpClient;
     private readonly Mock<IMeterFactory> _meterFactoryMock;
-    private readonly Mock<ILogger<IAMClient>> _loggerMock;
+    private readonly Mock<ILogger<IAMServiceClient>> _loggerMock;
     private readonly Mock<Microsoft.Extensions.Configuration.IConfiguration> _configMock;
-    private readonly IAMClient _client;
+    private readonly IAMServiceClient _client;
 
-    public IAMClientTests()
+    public IAMServiceClientTests()
     {
         _handlerMock = new Mock<HttpMessageHandler>();
         _httpClient = new HttpClient(_handlerMock.Object)
@@ -29,9 +29,9 @@ public class IAMClientTests
         _meterFactoryMock = new Mock<IMeterFactory>();
         _meterFactoryMock.Setup(m => m.Create(It.IsAny<MeterOptions>())).Returns(new Meter("auth-meter"));
 
-        _loggerMock = new Mock<ILogger<IAMClient>>();
+        _loggerMock = new Mock<ILogger<IAMServiceClient>>();
         _configMock = new Mock<Microsoft.Extensions.Configuration.IConfiguration>();
-        _client = new IAMClient(_httpClient, _meterFactoryMock.Object, _configMock.Object, _loggerMock.Object);
+        _client = new IAMServiceClient(_httpClient, _meterFactoryMock.Object, _configMock.Object, _loggerMock.Object);
     }
 
     [Fact]

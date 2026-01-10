@@ -5,7 +5,7 @@ namespace Maliev.AuthService.Api.Services;
 /// <summary>
 /// Client for communicating with the IAM service for permission and role resolution.
 /// </summary>
-public interface IIAMClient
+public interface IIAMServiceClient
 {
     /// <summary>
     /// Resolves permissions and roles for a specified principal.

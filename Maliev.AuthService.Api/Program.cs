@@ -46,7 +46,7 @@ builder.Services.AddControllers()
     });
 
 // --- Application Services ---
-builder.AddServiceClient<IIAMClient, IAMClient>("IAMService");
+builder.AddServiceClient<IIAMServiceClient, IAMServiceClient>("IAMService");
 
 // IAM Integration
 builder.Services.AddIAMRegistration<AuthIAMRegistrationService>("auth");
