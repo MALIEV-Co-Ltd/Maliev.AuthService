@@ -126,7 +126,7 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
             var client = new HttpClient(handler);
 
             // Try to get BaseAddress from configuration, default to localhost if not found
-            var iamBaseUrl = _configuration["IAM:BaseUrl"];
+            var iamBaseUrl = _configuration["IAMService:BaseUrl"];
             if (!string.IsNullOrEmpty(iamBaseUrl))
             {
                 client.BaseAddress = new Uri(iamBaseUrl);

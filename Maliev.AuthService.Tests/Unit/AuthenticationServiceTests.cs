@@ -25,7 +25,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     private readonly Mock<IRefreshTokenService> _refreshTokenServiceMock;
     private readonly Mock<IAccountLockoutService> _accountLockoutServiceMock;
     private readonly Mock<IRateLimitService> _rateLimitServiceMock;
-    private readonly Mock<IIAMClient> _iamClientMock;
+    private readonly Mock<IIAMServiceClient> _iamClientMock;
     private readonly Mock<ILogger<AuthenticationService>> _loggerMock;
     private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
     private readonly Mock<IConfiguration> _configurationMock;
@@ -40,7 +40,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         _refreshTokenServiceMock = new Mock<IRefreshTokenService>();
         _accountLockoutServiceMock = new Mock<IAccountLockoutService>();
         _rateLimitServiceMock = new Mock<IRateLimitService>();
-        _iamClientMock = new Mock<IIAMClient>();
+        _iamClientMock = new Mock<IIAMServiceClient>();
         _loggerMock = new Mock<ILogger<AuthenticationService>>();
         _httpClientFactoryMock = new Mock<IHttpClientFactory>();
         _configurationMock = new Mock<IConfiguration>();

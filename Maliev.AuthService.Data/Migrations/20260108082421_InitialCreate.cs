@@ -128,11 +128,14 @@ namespace Maliev.AuthService.Data.Migrations
                     principal_id = table.Column<Guid>(type: "uuid", nullable: false),
                     user_type = table.Column<string>(type: "text", nullable: false),
                     token_hash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    email = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
+                    name = table.Column<string>(type: "character varying(255)", maxLength: 255, nullable: true),
                     is_used = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                     used_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     expires_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     created_at = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "NOW()"),
-                    ip_address = table.Column<string>(type: "character varying(45)", maxLength: 45, nullable: true)
+                    ip_address = table.Column<string>(type: "character varying(45)", maxLength: 45, nullable: true),
+                    version = table.Column<byte[]>(type: "bytea", rowVersion: true, nullable: false, defaultValueSql: "'\\x0000000000000000'::bytea")
                 },
                 constraints: table =>
                 {

@@ -36,7 +36,7 @@ public class RefreshTokenService : IRefreshTokenService
     }
 
     /// <inheritdoc/>
-    public async Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(Guid userId, Guid principalId, UserType userType, string? ipAddress)
+    public async Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(Guid userId, Guid principalId, UserType userType, string? email, string? name, string? ipAddress)
     {
         var familyId = Guid.NewGuid();
         var tokenValue = _tokenGenerator.GenerateRefreshToken();
@@ -59,6 +59,8 @@ public class RefreshTokenService : IRefreshTokenService
             PrincipalId = principalId,
             UserType = userType,
             TokenHash = tokenHash,
+            Email = email,
+            Name = name,
             IsUsed = false,
             ExpiresAt = DateTime.UtcNow.AddDays(7),
             CreatedAt = DateTime.UtcNow,
@@ -148,6 +150,8 @@ public class RefreshTokenService : IRefreshTokenService
                 PrincipalId = oldToken.PrincipalId,
                 UserType = oldToken.UserType,
                 TokenHash = tokenHash,
+                Email = oldToken.Email,
+                Name = oldToken.Name,
                 IsUsed = false,
                 ExpiresAt = DateTime.UtcNow.AddDays(7),
                 CreatedAt = DateTime.UtcNow,

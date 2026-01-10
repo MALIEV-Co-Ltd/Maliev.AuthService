@@ -221,7 +221,7 @@ public class AuthenticationContractTests : IntegrationTestBase
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["IAM:BaseUrl"] = "http://localhost:5101" // Wrong port to simulate failure
+                    ["IAMService:BaseUrl"] = "http://localhost:5101" // Wrong port to simulate failure
                 });
             });
         });
