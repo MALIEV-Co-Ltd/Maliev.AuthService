@@ -46,7 +46,10 @@ builder.Services.AddControllers()
     });
 
 // --- Application Services ---
-builder.AddServiceClient<IIAMClient, IAMClient>("IAM");
+builder.AddServiceClient<IIAMClient, IAMClient>("IAMService");
+
+// IAM Integration
+builder.Services.AddIAMRegistration<AuthIAMRegistrationService>("auth");
 
 builder.Services.AddScoped<ITokenGenerator, TokenGenerator>();
 builder.Services.AddScoped<ITokenValidator, TokenValidator>();
@@ -76,8 +79,6 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapDefaultEndpoints(servicePrefix: "auth"); // Health checks: /auth/liveness, /auth/readiness
 app.MapApiDocumentation(servicePrefix: "auth"); // OpenAPI: /auth/openapi/v1.json, Scalar UI: /auth/scalar
-
-logger.LogInformation("AuthService started successfully on {Environment} environment", app.Environment.EnvironmentName);
 
 await app.RunAsync();
 

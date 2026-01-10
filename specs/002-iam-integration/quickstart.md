@@ -8,11 +8,8 @@ Add the following to your `appsettings.Development.json`:
 
 ```json
 {
-  "Features": {
-    "IAMIntegrationEnabled": true
-  },
-  "ExternalServices": {
-    "IAM": {
+  "Services": {
+    "IAMService": {
       "BaseUrl": "http://localhost:5100",
       "ServiceAccountToken": "dev-token-local",
       "Timeout": 200,
@@ -36,6 +33,5 @@ Decode the JWT at [jwt.io](https://jwt.io). You should see:
 - `roles`: An array of roles (if enabled).
 
 ## Troubleshooting
-- **No permissions in token?** Check if `Features:IAMIntegrationEnabled` is `true`.
 - **IAM Service Down?** AuthService will log a warning and return an empty permissions array (resilience mode).
 - **Latency issues?** Check `IAM Client Latency` metrics.

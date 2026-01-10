@@ -31,7 +31,7 @@
 
 - [X] T004 Create `Maliev.AuthService.Api/Services/IIAMClient.cs` interface (from plan.md)
 - [X] T005 Create `Maliev.AuthService.Api/Services/IAMClient.cs` skeleton implementation
-- [X] T006 [P] Update `Maliev.AuthService.Api/appsettings.json` with `Features:IAMIntegrationEnabled` and `ExternalServices:IAM` sections
+- [X] T006 [P] Update `Maliev.AuthService.Api/appsettings.json` with `ExternalServices:IAM` sections
 - [X] T007 [P] Update `Maliev.AuthService.Api/appsettings.Development.json` with local IAM service configuration
 - [X] T008 [P] Update `Maliev.AuthService.Api/Models/Response/AuthenticationResult.cs` to include `principal_id` if missing
 - [X] T009 Update `Maliev.AuthService.Api/Program.cs` to register `IAMClient` with `AddHttpClient` and `AddStandardResilienceHandler`
@@ -44,7 +44,7 @@
 
 **Goal**: Resolve permissions and roles from IAM and embed them in JWT during login.
 
-**Independent Test**: Perform login with `IAMIntegrationEnabled=true`, verify JWT contains `permissions` and `roles` claims, and `sub` matches `principal_id`.
+**Independent Test**: Perform login, verify JWT contains `permissions` and `roles` claims, and `sub` matches `principal_id`.
 
 ### Tests for User Story 1
 
@@ -90,7 +90,7 @@
 
 **Goal**: Toggle IAM integration via configuration flag.
 
-**Independent Test**: Set `IAMIntegrationEnabled=false`, verify login skips IAM call and issues standard JWT.
+**Independent Test**: Verify login issues standard JWT.
 
 ### Tests for User Story 3
 

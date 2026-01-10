@@ -1,8 +1,8 @@
 # Feature Specification: AuthService IAM Integration
 
-**Feature Branch**: `002-iam-integration`  
-**Created**: 2025-12-21  
-**Status**: Draft  
+**Feature Branch**: `002-iam-integration`
+**Created**: 2025-12-21
+**Status**: Draft
 **Input**: User description: "Modify the AuthService to integrate with the IAM service for permission resolution. The AuthService will continue to handle authentication but will delegate authorization concerns to the IAM service and embed permissions array in JWT token."
 
 ## Clarifications
@@ -22,11 +22,11 @@ As a client application, I want my users to receive JWT tokens that include thei
 
 **Why this priority**: Core objective of the feature. Enables the platform to move towards a centralized authorization model where permissions and roles are carried within the security context (JWT).
 
-**Independent Test**: Can be tested by performing a successful login when the IAM integration is enabled and verifying that the returned JWT contains "permissions" and "roles" claims with the expected values for that principal.
+**Independent Test**: Can be tested by performing a successful login and verifying that the returned JWT contains "permissions" and "roles" claims with the expected values for that principal.
 
 **Acceptance Scenarios**:
 
-1. **Given** a user with assigned permissions and roles in IAM, **When** they log in with IAM integration enabled, **Then** the AuthService returns a JWT containing all resolved permissions and roles in their respective claim arrays.
+1. **Given** a user with assigned permissions and roles in IAM, **When** they log in, **Then** the AuthService returns a JWT containing all resolved permissions and roles in their respective claim arrays.
 2. **Given** a successful authentication, **When** the JWT is generated, **Then** the "sub" claim must contain the `principal_id` provided by the upstream identity source (Customer/Employee service).
 
 ---
@@ -69,14 +69,13 @@ As a system owner, I want the AuthService to remain functional even if the IAM s
 - **Principal**: The authenticated identity (User/Service) for which permissions and roles are being resolved.
 - **Permission**: A string identifier representing a specific action or resource access right resolved from IAM (e.g., `invoice.read`).
 - **Role**: A string identifier representing a group of permissions or a job function resolved from IAM (e.g., `accountant`).
-- **IAM Integration Feature Flag**: A configuration setting that controls whether the authorization delegation logic is active.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: User login completion (including permission resolution) takes less than 200ms (P95) when the feature is enabled.
+- **SC-001**: User login completion (including permission resolution) takes less than 200ms (P95).
 - **SC-002**: 100% of logins succeed even if the IAM service is unavailable (falling back to empty permissions).
-- **SC-003**: 100% of JWT tokens contain the expected permission claims when the feature is enabled and IAM returns data.
- - SC-004**: System administrators can perform a configuration change to disable the IAM integration in under 30 seconds (excluding deployment pipeline duration).
+- **SC-003**: 100% of JWT tokens contain the expected permission claims when IAM returns data.
+ - SC-004**: System administrators can perform a configuration change to disable the IAM service integration in under 30 seconds (excluding deployment pipeline duration).
 - **SC-005**: JWT token size remains under 8KB for users with up to 100 permissions.
