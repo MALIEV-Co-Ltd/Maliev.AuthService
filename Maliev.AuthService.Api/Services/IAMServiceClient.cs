@@ -10,7 +10,7 @@ namespace Maliev.AuthService.Api.Services;
 /// <summary>
 /// Implementation of the IAM client using HttpClient.
 /// </summary>
-public class IAMClient : IIAMClient
+public class IAMServiceClient : IIAMServiceClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -18,19 +18,19 @@ public class IAMClient : IIAMClient
     };
 
     private readonly HttpClient _httpClient;
-    private readonly ILogger<IAMClient> _logger;
+    private readonly ILogger<IAMServiceClient> _logger;
     private readonly Histogram<double> _resolutionLatency;
     private readonly Counter<long> _resolutionErrors;
     private readonly KeyValuePair<string, object?>[] _defaultTags;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="IAMClient"/> class.
+    /// Initializes a new instance of the <see cref="IAMServiceClient"/> class.
     /// </summary>
     /// <param name="httpClient">The HTTP client.</param>
     /// <param name="meterFactory">The meter factory for metrics.</param>
     /// <param name="configuration">The configuration.</param>
     /// <param name="logger">The logger.</param>
-    public IAMClient(HttpClient httpClient, IMeterFactory meterFactory, IConfiguration configuration, ILogger<IAMClient> logger)
+    public IAMServiceClient(HttpClient httpClient, IMeterFactory meterFactory, IConfiguration configuration, ILogger<IAMServiceClient> logger)
     {
         _httpClient = httpClient;
         _logger = logger;

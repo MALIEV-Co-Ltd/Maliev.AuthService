@@ -21,7 +21,7 @@ public class AuthenticationService : IAuthenticationService
     private readonly IRefreshTokenService _refreshTokenService;
     private readonly IAccountLockoutService _accountLockoutService;
     private readonly IRateLimitService _rateLimitService;
-    private readonly IIAMClient _iamClient;
+    private readonly IIAMServiceClient _iamServiceClient;
     private readonly ILogger<AuthenticationService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
@@ -37,7 +37,7 @@ public class AuthenticationService : IAuthenticationService
         IRefreshTokenService refreshTokenService,
         IAccountLockoutService accountLockoutService,
         IRateLimitService rateLimitService,
-        IIAMClient iamClient,
+        IIAMServiceClient iamServiceClient,
         ILogger<AuthenticationService> logger,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
@@ -49,7 +49,7 @@ public class AuthenticationService : IAuthenticationService
         _refreshTokenService = refreshTokenService;
         _accountLockoutService = accountLockoutService;
         _rateLimitService = rateLimitService;
-        _iamClient = iamClient;
+        _iamServiceClient = iamServiceClient;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
@@ -206,7 +206,7 @@ public class AuthenticationService : IAuthenticationService
 
         try
         {
-            var iamResponse = await _iamClient.ResolvePermissionsAsync(principalId);
+            var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId);
             permissions = iamResponse.Permissions;
             roles = iamResponse.Roles;
         }
@@ -217,7 +217,7 @@ public class AuthenticationService : IAuthenticationService
         }
 
         var accessToken = _tokenGenerator.GenerateAccessToken(principalId, request.UserType, validationResult.Email, validationResult.Name, permissions, roles);
-        var (refreshTokenEntity, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(userId, principalId, userType, ipAddress);
+        var (refreshTokenEntity, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(userId, principalId, userType, validationResult.Email, validationResult.Name, ipAddress);
 
         await LogAuditAsync(userId, userType, "login", ipAddress, true, null);
 
@@ -283,7 +283,7 @@ public class AuthenticationService : IAuthenticationService
         try
         {
             // Use the stored PrincipalId for consistent permission resolution across token lifecycle
-            var iamResponse = await _iamClient.ResolvePermissionsAsync(refreshToken.PrincipalId);
+            var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(refreshToken.PrincipalId);
             permissions = iamResponse.Permissions;
             roles = iamResponse.Roles;
         }
@@ -293,7 +293,7 @@ public class AuthenticationService : IAuthenticationService
             // Fail open: Issue token without permissions rather than block refresh
         }
 
-        var accessToken = _tokenGenerator.GenerateAccessToken(refreshToken.PrincipalId, userTypeString, permissions: permissions, roles: roles);
+        var accessToken = _tokenGenerator.GenerateAccessToken(refreshToken.PrincipalId, userTypeString, refreshToken.Email, refreshToken.Name, permissions, roles);
 
         await LogAuditAsync(refreshToken.UserId, refreshToken.UserType, "token_refresh", ipAddress, true, null);
 
@@ -331,12 +331,20 @@ public class AuthenticationService : IAuthenticationService
 
         var userId = principal.FindFirst("sub")?.Value;
         var userType = principal.FindFirst("user_type")?.Value;
+        var email = principal.FindFirst("email")?.Value;
+        var name = principal.FindFirst("name")?.Value;
+        var roles = principal.FindAll("roles").Select(c => c.Value).ToList();
+        var permissions = principal.FindAll("permissions").Select(c => c.Value).ToList();
 
         return new ValidateResponse
         {
             Valid = true,
             UserId = userId,
-            UserType = userType
+            UserType = userType,
+            Email = email,
+            Name = name,
+            Roles = roles,
+            Permissions = permissions
         };
     }
     /// <inheritdoc/>
@@ -459,7 +467,9 @@ public class AuthenticationService : IAuthenticationService
         }
 
         var secretHash = HashSecret(request.ClientSecret);
-        if (secretHash != serviceCredential.ClientSecretHash)
+        if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(secretHash),
+            Encoding.UTF8.GetBytes(serviceCredential.ClientSecretHash)))
         {
             await LogAuditAsync(null, null, "service_login", ipAddress, false, "Invalid client secret");
 
@@ -496,7 +506,7 @@ public class AuthenticationService : IAuthenticationService
         {
             try
             {
-                var iamResponse = await _iamClient.ResolvePermissionsAsync(serviceCredential.PrincipalId.Value);
+                var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(serviceCredential.PrincipalId.Value);
                 permissions = iamResponse.Permissions;
                 roles = iamResponse.Roles;
             }

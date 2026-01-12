@@ -13,9 +13,11 @@ public interface IRefreshTokenService
     /// <param name="userId">The user identifier</param>
     /// <param name="principalId">The principal identifier for IAM</param>
     /// <param name="userType">The type of user</param>
+    /// <param name="email">The user email address</param>
+    /// <param name="name">The user display name</param>
     /// <param name="ipAddress">The IP address of the client</param>
     /// <returns>The refresh token entity and token value</returns>
-    Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(Guid userId, Guid principalId, UserType userType, string? ipAddress);
+    Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(Guid userId, Guid principalId, UserType userType, string? email, string? name, string? ipAddress);
 
     /// <summary>
     /// Validates a refresh token

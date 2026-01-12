@@ -37,6 +37,16 @@ public class RefreshToken
     public string TokenHash { get; set; } = string.Empty;
 
     /// <summary>
+    /// User email address (snapshot at login for refresh tokens)
+    /// </summary>
+    public string? Email { get; set; }
+
+    /// <summary>
+    /// User display name (snapshot at login for refresh tokens)
+    /// </summary>
+    public string? Name { get; set; }
+
+    /// <summary>
     /// Indicates if token has been used for refresh (reuse detection)
     /// </summary>
     public bool IsUsed { get; set; }
