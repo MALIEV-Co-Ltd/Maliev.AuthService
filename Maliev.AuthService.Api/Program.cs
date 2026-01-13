@@ -46,7 +46,27 @@ builder.Services.AddControllers()
     });
 
 // --- Application Services ---
-builder.AddServiceClient<IIAMServiceClient, IAMServiceClient>("IAMService");
+// IAM Client with service account authentication
+// Register service account token provider
+builder.Services.AddSingleton<Maliev.Aspire.ServiceDefaults.IAM.IServiceAccountTokenProvider>(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    return new Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountTokenProvider(config, "auth");
+});
+
+// Register authentication handler
+builder.Services.AddTransient<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>();
+
+// Register typed IAM client with service account authentication
+builder.Services.AddHttpClient<IIAMServiceClient, IAMServiceClient>(client =>
+{
+    var baseUrl = builder.Configuration["Services:IAMService:BaseUrl"]
+        ?? throw new InvalidOperationException("Services:IAMService:BaseUrl is required");
+    client.BaseAddress = new Uri(baseUrl);
+    client.Timeout = TimeSpan.FromMinutes(5);
+})
+.AddHttpMessageHandler<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>()
+.AddStandardResilienceHandler();
 
 // IAM Integration
 builder.Services.AddIAMRegistration<AuthIAMRegistrationService>("auth");
