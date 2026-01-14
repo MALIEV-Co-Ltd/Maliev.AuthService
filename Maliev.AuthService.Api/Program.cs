@@ -1,86 +1,106 @@
 using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.Data.DbContexts;
+using Microsoft.Extensions.Logging;
 
-var builder = WebApplication.CreateBuilder(args);
+// Initialize bootstrap logging
+using var loggerFactory = LoggerFactory.Create(logBuilder => logBuilder.AddConsole());
+var bootstrapLogger = loggerFactory.CreateLogger("Program");
 
-// --- Secrets & Configuration ---
-builder.AddGoogleSecretManagerVolume(); // Load secrets from /mnt/secrets if available
-
-// --- Infrastructure & Observability ---
-builder.AddServiceDefaults(); // OpenTelemetry, health checks, resilience
-builder.AddStandardMiddleware(options =>
+try
 {
-    options.EnableRequestLogging = true;
-});
-builder.AddServiceMeters("auth-meter"); // Register service meters for OpenTelemetry business metrics
+    bootstrapLogger.LogInformation("Starting Auth Service host");
 
-// Register DbContext for all environments
-builder.AddPostgresDbContext<AuthDbContext>(connectionName: "AuthDbContext"); // PostgreSQL with retry logic
+    var builder = WebApplication.CreateBuilder(args);
 
-builder.AddRedisDistributedCache(instanceName: "auth:"); // Redis with in-memory fallback
-builder.AddMassTransitWithRabbitMq(); // RabbitMQ message bus (non-blocking startup)
+    // --- Secrets & Configuration ---
+    builder.AddGoogleSecretManagerVolume(); // Load secrets from /mnt/secrets if available
 
-// JWT Authentication
-builder.AddJwtAuthentication();
-
-// --- API Configuration ---
-builder.AddDefaultCors(); // CORS from CORS:AllowedOrigins config
-builder.AddDefaultApiVersioning(); // API versioning with URL segment reader
-
-// Add OpenAPI (must be in Program.cs for XML comments to work via source generator)
-if (!builder.Environment.IsProduction())
-{
-    builder.AddStandardOpenApi(
-        title: "MALIEV Auth Service API",
-        description: "Centralized authentication service for the Maliev platform. Provides user login with email/password, JWT access token issuance with IAM-resolved permissions and roles, refresh token rotation, token validation for service-to-service calls, and session management including logout and token revocation.");
-}
-
-builder.Services.AddHttpClient();
-builder.Services.AddHttpClient("ExternalValidation")
-    .AddStandardResilienceHandler();
-
-builder.Services.AddControllers()
-    .AddJsonOptions(options =>
+    // --- Infrastructure & Observability ---
+    builder.AddServiceDefaults(); // OpenTelemetry, health checks, resilience
+    builder.AddStandardMiddleware(options =>
     {
-        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower;
+        options.EnableRequestLogging = true;
     });
+    builder.AddServiceMeters("auth-meter"); // Register service meters for OpenTelemetry business metrics
 
-// --- Application Services ---
-builder.AddServiceClient<IIAMServiceClient, IAMServiceClient>("IAMService");
+    // Register DbContext for all environments
+    builder.AddPostgresDbContext<AuthDbContext>(connectionName: "AuthDbContext"); // PostgreSQL with retry logic
 
-// IAM Integration
-builder.Services.AddIAMRegistration<AuthIAMRegistrationService>("auth");
+    builder.AddRedisDistributedCache(instanceName: "auth:"); // Redis with in-memory fallback
+    builder.AddMassTransitWithRabbitMq(); // RabbitMQ message bus (non-blocking startup)
 
-builder.Services.AddScoped<ITokenGenerator, TokenGenerator>();
-builder.Services.AddScoped<ITokenValidator, TokenValidator>();
-builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
-builder.Services.AddScoped<IAccountLockoutService, AccountLockoutService>();
-builder.Services.AddScoped<IRateLimitService, RateLimitService>();
-builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
+    // JWT Authentication
+    builder.AddJwtAuthentication();
 
-// Build the application
-var app = builder.Build();
-var logger = app.Services.GetRequiredService<ILogger<Program>>();
+    // --- API Configuration ---
+    builder.AddDefaultCors(); // CORS from CORS:AllowedOrigins config
+    builder.AddDefaultApiVersioning(); // API versioning with URL segment reader
 
-// --- Database Migrations ---
-await app.MigrateDatabaseAsync<AuthDbContext>();
+    // Add OpenAPI (must be in Program.cs for XML comments to work via source generator)
+    if (!builder.Environment.IsProduction())
+    {
+        builder.AddStandardOpenApi(
+            title: "MALIEV Auth Service API",
+            description: "Centralized authentication service for the Maliev platform. Provides user login with email/password, JWT access token issuance with IAM-resolved permissions and roles, refresh token rotation, token validation for service-to-service calls, and session management including logout and token revocation.");
+    }
 
-// --- Middleware Pipeline ---
-app.UseStandardMiddleware();
-if (!app.Environment.IsDevelopment())
-{
-    app.UseHttpsRedirection();
+    builder.Services.AddHttpClient();
+    builder.Services.AddHttpClient("ExternalValidation")
+        .AddStandardResilienceHandler();
+
+    builder.Services.AddControllers()
+        .AddJsonOptions(options =>
+        {
+            options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower;
+        });
+
+    // --- Application Services ---
+    builder.AddServiceClient<IIAMServiceClient, IAMServiceClient>("IAMService");
+
+    // IAM Integration
+    builder.Services.AddIAMRegistration<AuthIAMRegistrationService>("auth");
+
+    builder.Services.AddScoped<ITokenGenerator, TokenGenerator>();
+    builder.Services.AddScoped<ITokenValidator, TokenValidator>();
+    builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
+    builder.Services.AddScoped<IAccountLockoutService, AccountLockoutService>();
+    builder.Services.AddScoped<IRateLimitService, RateLimitService>();
+    builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
+
+    // Build the application
+    var app = builder.Build();
+    var logger = app.Services.GetRequiredService<ILogger<Program>>();
+
+    // --- Database Migrations ---
+    await app.MigrateDatabaseAsync<AuthDbContext>();
+
+    // --- Middleware Pipeline ---
+    app.UseStandardMiddleware();
+    if (!app.Environment.IsDevelopment())
+    {
+        app.UseHttpsRedirection();
+    }
+    app.UseRouting();
+    app.UseCors();
+    app.UseAuthorization();
+
+    // --- Endpoints ---
+    app.MapControllers();
+    app.MapDefaultEndpoints(servicePrefix: "auth"); // Health checks: /auth/liveness, /auth/readiness
+    app.MapApiDocumentation(servicePrefix: "auth"); // OpenAPI: /auth/openapi/v1.json, Scalar UI: /auth/scalar
+
+    logger.LogInformation("Auth Service started successfully");
+    await app.RunAsync();
 }
-app.UseRouting();
-app.UseCors();
-app.UseAuthorization();
-
-// --- Endpoints ---
-app.MapControllers();
-app.MapDefaultEndpoints(servicePrefix: "auth"); // Health checks: /auth/liveness, /auth/readiness
-app.MapApiDocumentation(servicePrefix: "auth"); // OpenAPI: /auth/openapi/v1.json, Scalar UI: /auth/scalar
-
-await app.RunAsync();
+catch (Exception ex)
+{
+    bootstrapLogger.LogCritical(ex, "Auth Service host terminated unexpectedly during startup");
+    throw;
+}
+finally
+{
+    loggerFactory.Dispose();
+}
 
 /// <summary>
 /// Main program class for the application
