@@ -1,3 +1,4 @@
+#pragma warning disable CA1848 // For improved performance, use the LoggerMessage delegates
 using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.Data.DbContexts;
 using Microsoft.Extensions.Logging;
