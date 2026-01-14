@@ -22,7 +22,7 @@ public class TokenGeneratorTests
         _loggerMock = new Mock<ILogger<TokenGenerator>>();
 
         using var rsa = RSA.Create(2048);
-        var privateKeyPem = rsa.ExportRSAPrivateKeyPem();
+        var privateKeyPem = rsa.ExportPkcs8PrivateKeyPem();  // Use PKCS#8 format
         _privateKeyBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(privateKeyPem));
 
         _configMock.Setup(c => c["Jwt:PrivateKey"]).Returns(_privateKeyBase64);

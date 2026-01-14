@@ -86,13 +86,13 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         var rsa = (SigningCredentials.Key as RsaSecurityKey)?.Rsa;
         if (rsa != null)
         {
-            // Export private key for token generation
-            var privateKeyPem = rsa.ExportRSAPrivateKeyPem();
+            // Export private key for token generation (PKCS#8 format for ImportPkcs8PrivateKey)
+            var privateKeyPem = rsa.ExportPkcs8PrivateKeyPem();
             var privateKeyBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(privateKeyPem));
             Environment.SetEnvironmentVariable("Jwt__PrivateKey", privateKeyBase64);
 
             // Export public key for token validation
-            var publicKeyPem = rsa.ExportRSAPublicKeyPem();
+            var publicKeyPem = rsa.ExportSubjectPublicKeyInfoPem();  // Use SubjectPublicKeyInfo format
             var publicKeyBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(publicKeyPem));
             Environment.SetEnvironmentVariable("Jwt__PublicKey", publicKeyBase64);
         }
