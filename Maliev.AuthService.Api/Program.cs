@@ -48,6 +48,16 @@ try
     builder.Services.AddHttpClient("ExternalValidation")
         .AddStandardResilienceHandler();
 
+    // Authenticated client for EmployeeService calls (Lookup/Provision)
+    builder.Services.AddHttpClient("EmployeeServiceClient", client =>
+    {
+        var baseUrl = builder.Configuration["Services:EmployeeService:BaseUrl"]
+            ?? throw new InvalidOperationException("Services:EmployeeService:BaseUrl is required");
+        client.BaseAddress = new Uri(baseUrl);
+    })
+    .AddHttpMessageHandler<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>()
+    .AddStandardResilienceHandler();
+
     builder.Services.AddControllers()
         .AddJsonOptions(options =>
         {

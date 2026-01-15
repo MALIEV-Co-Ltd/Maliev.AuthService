@@ -33,26 +33,38 @@ public class TokenGenerator : ITokenGenerator
 
         try
         {
-            // Decode Base64-encoded PEM
-            var privateKeyBytes = Convert.FromBase64String(privateKeyPem);
-            var privateKeyString = Encoding.UTF8.GetString(privateKeyBytes);
+            string pemContent;
+            if (privateKeyPem.StartsWith("-----"))
+            {
+                pemContent = privateKeyPem;
+            }
+            else
+            {
+                // Decode Base64-encoded PEM or DER
+                var privateKeyBytes = Convert.FromBase64String(privateKeyPem);
+                var decodedString = Encoding.UTF8.GetString(privateKeyBytes);
 
-            // Extract the base64 content between PEM headers
-            var lines = privateKeyString.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            var base64Content = string.Join("", lines.Where(l => !l.StartsWith("-----")));
+                if (decodedString.StartsWith("-----"))
+                {
+                    pemContent = decodedString;
+                }
+                else
+                {
+                    // It's likely raw PKCS#8 DER bytes
+                    var rsaDer = RSA.Create();
+                    rsaDer.ImportPkcs8PrivateKey(privateKeyBytes, out _);
+                    return new RsaSecurityKey(rsaDer);
+                }
+            }
 
-            // Decode the PKCS#8 key bytes
-            var keyBytes = Convert.FromBase64String(base64Content);
-
-            // Import RSA private key using PKCS#8 format
             var rsa = RSA.Create();
-            rsa.ImportPkcs8PrivateKey(keyBytes, out _);
+            rsa.ImportFromPem(pemContent);
 
             return new RsaSecurityKey(rsa);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to import RSA private key. Ensure key is in PKCS#8 format.");
+            _logger.LogError(ex, "Failed to import RSA private key. Ensure key is in valid PEM or PKCS#8 format.");
             throw new InvalidOperationException("Failed to import RSA private key", ex);
         }
     }

@@ -241,6 +241,80 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                 };
             }
 
+            // Mock EmployeeService by-email endpoint
+            if (request.RequestUri?.PathAndQuery.Contains("/employee/v1/employees/by-email/") == true)
+            {
+                var email = Uri.UnescapeDataString(request.RequestUri.Segments.Last());
+
+                if (email == "existing.employee@maliev.com")
+                {
+                    var response = new
+                    {
+                        employeeId = Guid.NewGuid(),
+                        principalId = Guid.Parse("7c9e6639-7420-4007-8596-f0ad96130444"),
+                        email = email,
+                        fullName = "Existing Employee",
+                        employmentStatus = "Active"
+                    };
+
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = JsonContent.Create(response)
+                    };
+                }
+
+                if (email == "terminated.employee@maliev.com")
+                {
+                    var response = new
+                    {
+                        employeeId = Guid.NewGuid(),
+                        principalId = Guid.NewGuid(),
+                        email = email,
+                        fullName = "Terminated Employee",
+                        employmentStatus = "Terminated"
+                    };
+
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = JsonContent.Create(response)
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            // Mock EmployeeService auto-provision endpoint
+            if (request.RequestUri?.PathAndQuery.Contains("/employee/v1/employees/auto-provision") == true)
+            {
+                string? email = null;
+                string? fullName = null;
+
+                if (request.Content != null)
+                {
+                    var requestBody = await request.Content.ReadAsStringAsync(cancellationToken);
+                    var jsonDoc = JsonDocument.Parse(requestBody);
+                    if (jsonDoc.RootElement.TryGetProperty("email", out var emailElement))
+                        email = emailElement.GetString();
+                    if (jsonDoc.RootElement.TryGetProperty("full_name", out var fullNameElement))
+                        fullName = fullNameElement.GetString();
+                }
+
+                var response = new
+                {
+                    employeeId = Guid.NewGuid(),
+                    principalId = Guid.NewGuid(),
+                    email = email,
+                    fullName = fullName ?? "New Employee",
+                    employeeNumber = "EMP-TEST-001",
+                    employmentStatus = "Active"
+                };
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(response)
+                };
+            }
+
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
     }

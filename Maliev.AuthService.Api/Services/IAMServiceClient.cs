@@ -12,7 +12,8 @@ namespace Maliev.AuthService.Api.Services;
 /// </summary>
 public class IAMServiceClient : IIAMServiceClient
 {
-    // Use PascalCase (default) to match IAMService's expected format
+    // Use PascalCase (default) to match IAMService's expected format.
+    // IAM Service API v1 requires PascalCase for this specific endpoint.
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = null // PascalCase (default)

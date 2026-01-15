@@ -52,4 +52,12 @@ public interface IAuthenticationService
     /// <param name="ipAddress">The IP address of the client</param>
     /// <returns>The login response, or null if authentication failed</returns>
     Task<LoginResponse?> AuthenticateServiceAsync(ServiceLoginRequest request, string? ipAddress);
+
+    /// <summary>
+    /// Exchanges a verified Google Workspace identity for a platform JWT
+    /// </summary>
+    /// <param name="request">The Google exchange request</param>
+    /// <param name="ipAddress">The IP address of the client</param>
+    /// <returns>The authentication result</returns>
+    Task<AuthenticationResult> ExchangeGoogleTokenAsync(GoogleExchangeRequest request, string? ipAddress);
 }

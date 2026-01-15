@@ -36,13 +36,13 @@ public class AuthenticationController : ControllerBase
     /// </summary>
     /// <remarks>
     /// Primary entry point for users to log into the MALIEV platform.
-    /// 
+    ///
     /// **Process:**
     /// 1. Verifies credentials against the database.
     /// 2. Resolves principal roles and permissions via the IAM Service.
     /// 3. Issues a JWT access token containing these permissions.
     /// 4. Issues a secure refresh token for session persistence.
-    /// 
+    ///
     /// **Security:**
     /// - Subject to rate limiting (IP-based).
     /// - Implements account lockout after multiple failed attempts.
@@ -227,5 +227,76 @@ public class AuthenticationController : ControllerBase
         }
 
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Exchanges a verified Google Workspace identity for a platform JWT.
+    /// </summary>
+    /// <remarks>
+    /// Used by the Intranet BFF after successful Google OAuth authentication.
+    /// Assumes the email has already been validated by Google (trusted provider).
+    ///
+    /// **Process:**
+    /// 1. Validates email is @maliev.com domain.
+    /// 2. Looks up employee by email in EmployeeService.
+    /// 3. Resolves permissions from IAM Service.
+    /// 4. Issues JWT with embedded permissions.
+    /// 5. Issues refresh token for session persistence.
+    ///
+    /// **Auto-Provisioning:**
+    /// If employee doesn't exist, triggers auto-provisioning with minimal permissions.
+    /// </remarks>
+    /// <param name="request">The Google exchange request.</param>
+    /// <returns>Authentication response with JWT and refresh tokens.</returns>
+    /// <response code="200">Successful exchange. Returns access and refresh tokens.</response>
+    /// <response code="403">Non-@maliev.com email or inactive employee account.</response>
+    /// <response code="503">EmployeeService unavailable.</response>
+    [HttpPost("exchange/google")]
+    [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ExchangeGoogleToken([FromBody] GoogleExchangeRequest request)
+    {
+        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        var result = await _authenticationService.ExchangeGoogleTokenAsync(request, ipAddress);
+
+        if (!result.Success)
+        {
+            if (result.ErrorCode == "employee_not_found" || result.ErrorCode == "inactive_account")
+            {
+                return StatusCode(403, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
+            if (result.ErrorCode == "invalid_domain")
+            {
+                return StatusCode(403, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = "Only @maliev.com email addresses are allowed"
+                });
+            }
+
+            if (result.ErrorCode == "service_unavailable")
+            {
+                return StatusCode(503, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
+            return Unauthorized(new ErrorResponse
+            {
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
+            });
+        }
+
+        return Ok(result.Response);
     }
 }

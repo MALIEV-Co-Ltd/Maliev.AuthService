@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
@@ -561,6 +562,247 @@ public class AuthenticationService : IAuthenticationService
         };
     }
 
+    /// <inheritdoc/>
+    public async Task<AuthenticationResult> ExchangeGoogleTokenAsync(GoogleExchangeRequest request, string? ipAddress)
+    {
+        // 1. Validate @maliev.com domain
+        if (!request.Email.EndsWith("@maliev.com", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Google exchange rejected for non-maliev.com email: {Email}", request.Email);
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "invalid_domain",
+                ErrorDescription = "Only @maliev.com email addresses are allowed"
+            };
+        }
+
+        // 2. Look up employee by email in EmployeeService
+        var (employeeLookupSuccess, employeeId, principalId, employeeName, employmentStatus, lookupError) =
+            await LookupEmployeeByEmailAsync(request.Email);
+
+        if (!employeeLookupSuccess)
+        {
+            // Service unavailable (timeout, network error)
+            if (lookupError == "service_unavailable")
+            {
+                _logger.LogError("EmployeeService unavailable during Google exchange for {Email}", request.Email);
+                await LogAuditAsync(null, UserType.Employee, "google_exchange", ipAddress, false, "EmployeeService unavailable");
+
+                return new AuthenticationResult
+                {
+                    Success = false,
+                    ErrorCode = "service_unavailable",
+                    ErrorDescription = "Employee lookup service is currently unavailable"
+                };
+            }
+
+            // Employee not found (404)
+            // Call auto-provision endpoint (Day 2)
+            _logger.LogInformation("Employee not found for email {Email} during Google exchange. Triggering auto-provisioning.", request.Email);
+
+            var (provisionSuccess, provEmployeeId, provPrincipalId, provName, provStatus, provisionError) =
+                await ProvisionEmployeeAsync(request.Email, request.FullName ?? request.Email);
+
+            if (!provisionSuccess)
+            {
+                _logger.LogError("Auto-provisioning failed for {Email}: {Error}", request.Email, provisionError);
+                await LogAuditAsync(null, UserType.Employee, "google_exchange", ipAddress, false, $"Auto-provision failed: {provisionError}");
+
+                return new AuthenticationResult
+                {
+                    Success = false,
+                    ErrorCode = "provision_failed",
+                    ErrorDescription = "Failed to create your employee account automatically. Please contact IT support."
+                };
+            }
+
+            employeeId = provEmployeeId;
+            principalId = provPrincipalId;
+            employeeName = provName;
+            employmentStatus = provStatus;
+
+            _logger.LogInformation("Successfully auto-provisioned employee for {Email} with PrincipalId {PrincipalId}",
+                request.Email, principalId);
+        }
+
+        // 3. Check EmploymentStatus != "Terminated"
+        if (string.Equals(employmentStatus, "Terminated", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Google exchange rejected for terminated employee: {Email}", request.Email);
+            await LogAuditAsync(employeeId, UserType.Employee, "google_exchange", ipAddress, false, "Account terminated");
+
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "inactive_account",
+                ErrorDescription = "Employee account is inactive"
+            };
+        }
+
+        // 4. Resolve permissions from IAM (with fail-safe)
+        IEnumerable<string>? permissions = null;
+        IEnumerable<string>? roles = null;
+
+        try
+        {
+            var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId!.Value);
+            permissions = iamResponse.Permissions;
+            roles = iamResponse.Roles;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resolve permissions from IAM for Google SSO user {Email}. Issuing token without permissions.", request.Email);
+            // Fail open: Issue token without permissions rather than block login
+        }
+
+        // 5. Generate JWT with permissions (same as login flow)
+        var accessToken = _tokenGenerator.GenerateAccessToken(
+            principalId!.Value,
+            "employee",
+            request.Email,
+            employeeName ?? request.FullName ?? request.Email,
+            permissions,
+            roles);
+
+        // 6. Create refresh token (7-day expiry)
+        var (refreshTokenEntity, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(
+            employeeId!.Value,
+            principalId.Value,
+            UserType.Employee,
+            request.Email,
+            employeeName ?? request.FullName ?? request.Email,
+            ipAddress);
+
+        // 7. Audit log + publish UserLoggedInEvent
+        await LogAuditAsync(employeeId.Value, UserType.Employee, "google_exchange", ipAddress, true, null);
+
+        await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.UserLoggedInEvent(
+            Guid.NewGuid(),
+            "UserLoggedInEvent",
+            Maliev.MessagingContracts.Generated.MessageType.Event,
+            "1.0.0",
+            "AuthService",
+            ["NotificationService"],
+            Guid.NewGuid(),
+            null,
+            DateTimeOffset.UtcNow,
+            false,
+            new Maliev.MessagingContracts.Generated.UserLoggedInEventPayload(
+                employeeId.Value.ToString(),
+                principalId.Value.ToString(),
+                "Employee",
+                ipAddress,
+                "GoogleSSO",
+                DateTimeOffset.UtcNow
+            )
+        ));
+
+        // 8. Return LoginResponse
+        return new AuthenticationResult
+        {
+            Success = true,
+            PrincipalId = principalId.Value,
+            Response = new LoginResponse
+            {
+                AccessToken = accessToken,
+                RefreshToken = refreshTokenValue,
+                TokenType = "Bearer",
+                ExpiresIn = 900,
+                User = new UserIdentityResponse
+                {
+                    UserId = principalId.Value.ToString(),
+                    UserType = "employee",
+                    Email = request.Email,
+                    Name = employeeName ?? request.FullName ?? request.Email
+                }
+            }
+        };
+    }
+
+    /// <summary>
+    /// Looks up an employee by email in the EmployeeService.
+    /// </summary>
+    /// <param name="email">The employee's work email address.</param>
+    /// <returns>A tuple containing lookup success status and employee details.</returns>
+    private async Task<(bool Success, Guid? EmployeeId, Guid? PrincipalId, string? Name, string? EmploymentStatus, string? Error)>
+        LookupEmployeeByEmailAsync(string email)
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient("EmployeeServiceClient");
+            var encodedEmail = Uri.EscapeDataString(email);
+            var response = await client.GetAsync($"/employee/v1/employees/by-email/{encodedEmail}");
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                _logger.LogInformation("Employee not found for email: {Email}", email);
+                return (false, null, null, null, null, "not_found");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Employee lookup failed with status {StatusCode} for email: {Email}",
+                    response.StatusCode, email);
+                return (false, null, null, null, null, "service_unavailable");
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>();
+            if (result == null)
+            {
+                _logger.LogWarning("Employee lookup returned null result for email: {Email}", email);
+                return (false, null, null, null, null, "service_unavailable");
+            }
+
+            return (true, result.EmployeeId, result.PrincipalId, result.FullName, result.EmploymentStatus, null);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Employee lookup timed out for email: {Email}", email);
+            return (false, null, null, null, null, "service_unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error looking up employee by email: {Email}", email);
+            return (false, null, null, null, null, "service_unavailable");
+        }
+    }
+
+    /// <summary>
+    /// Calls the EmployeeService auto-provision endpoint.
+    /// </summary>
+    private async Task<(bool Success, Guid? EmployeeId, Guid? PrincipalId, string? Name, string? EmploymentStatus, string? Error)>
+        ProvisionEmployeeAsync(string email, string fullName)
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient("EmployeeServiceClient");
+            var request = new { email, full_name = fullName };
+            var response = await client.PostAsJsonAsync("/employee/v1/employees/auto-provision", request);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("Employee auto-provision failed with status {StatusCode} for email: {Email}. Error: {Error}",
+                    response.StatusCode, email, errorBody);
+                return (false, null, null, null, null, "provision_failed");
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>();
+            if (result == null)
+            {
+                return (false, null, null, null, null, "service_unavailable");
+            }
+
+            return (true, result.EmployeeId, result.PrincipalId, result.FullName, result.EmploymentStatus, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error auto-provisioning employee by email: {Email}", email);
+            return (false, null, null, null, null, "service_unavailable");
+        }
+    }
+
     private async Task<(bool IsValid, Guid? UserId, Guid? PrincipalId, string? Email, string? Name, string? FailureReason)> ValidateCredentialsAsync(
         string username, string password, UserType userType)
     {
@@ -654,5 +896,14 @@ public class AuthenticationService : IAuthenticationService
         public Guid? PrincipalId { get; set; }
         public string? Email { get; set; }
         public string? Name { get; set; }
+    }
+
+    private class EmployeeLookupResult
+    {
+        public Guid EmployeeId { get; set; }
+        public Guid PrincipalId { get; set; }
+        public string Email { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string EmploymentStatus { get; set; } = string.Empty;
     }
 }
