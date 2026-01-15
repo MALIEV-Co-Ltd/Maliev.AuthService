@@ -131,11 +131,17 @@ public class BaseIntegrationTestFactory<TProgram, TDbContext> : WebApplicationFa
     {
         builder.ConfigureAppConfiguration((context, config) =>
         {
+            var privateKeyPem = _testRsa.ExportPkcs8PrivateKeyPem();
+            var publicKeyPem = _testRsa.ExportRSAPublicKeyPem();
+
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Service:Name"] = "AuthService",
                 ["Service:Version"] = "1.0.0-test",
-                ["Jwt:SecurityKey"] = "test-secret-key-at-least-32-characters-long"
+                ["Jwt:Issuer"] = "test-issuer",
+                ["Jwt:Audience"] = "test-audience",
+                ["Jwt:PrivateKey"] = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(privateKeyPem)),
+                ["Jwt:PublicKey"] = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(publicKeyPem))
             });
         });
 

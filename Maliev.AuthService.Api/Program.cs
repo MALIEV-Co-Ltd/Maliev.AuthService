@@ -44,9 +44,35 @@ try
             description: "Centralized authentication service for the Maliev platform. Provides user login with email/password, JWT access token issuance with IAM-resolved permissions and roles, refresh token rotation, token validation for service-to-service calls, and session management including logout and token revocation.");
     }
 
+    // Register the authentication handler and token provider for service-to-service calls
+    builder.Services.AddTransient<Maliev.Aspire.ServiceDefaults.IAM.IServiceAccountTokenProvider>(sp =>
+    {
+        var config = sp.GetRequiredService<IConfiguration>();
+        return new Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountTokenProvider(config, "auth");
+    });
+    builder.Services.AddTransient<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>();
+
     builder.Services.AddHttpClient();
+
     builder.Services.AddHttpClient("ExternalValidation")
         .AddStandardResilienceHandler();
+
+    // Authenticated client for EmployeeService calls (Lookup/Provision)
+    builder.Services.AddHttpClient("EmployeeServiceClient", client =>
+    {
+        var baseUrl = builder.Configuration["Services:EmployeeService:BaseUrl"]
+            ?? throw new InvalidOperationException("Services:EmployeeService:BaseUrl is required");
+        client.BaseAddress = new Uri(baseUrl);
+    })
+    .AddHttpMessageHandler<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>()
+    .AddStandardResilienceHandler(options =>
+    {
+        options.Retry.MaxRetryAttempts = 5;
+        options.Retry.BackoffType = Polly.DelayBackoffType.Exponential;
+        options.CircuitBreaker.FailureRatio = 0.5;
+        options.CircuitBreaker.MinimumThroughput = 5;
+        options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
+    });
 
     builder.Services.AddControllers()
         .AddJsonOptions(options =>

@@ -33,26 +33,43 @@ public class TokenGenerator : ITokenGenerator
 
         try
         {
-            // Decode Base64-encoded PEM
-            var privateKeyBytes = Convert.FromBase64String(privateKeyPem);
-            var privateKeyString = Encoding.UTF8.GetString(privateKeyBytes);
-
-            // Extract the base64 content between PEM headers
-            var lines = privateKeyString.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            var base64Content = string.Join("", lines.Where(l => !l.StartsWith("-----")));
-
-            // Decode the PKCS#8 key bytes
-            var keyBytes = Convert.FromBase64String(base64Content);
-
-            // Import RSA private key using PKCS#8 format
             var rsa = RSA.Create();
-            rsa.ImportPkcs8PrivateKey(keyBytes, out _);
+
+            if (privateKeyPem.Trim().StartsWith("-----BEGIN"))
+            {
+                rsa.ImportFromPem(privateKeyPem);
+            }
+            else
+            {
+                // Try Base64-encoded PEM or DER
+                byte[] keyBytes;
+                try
+                {
+                    keyBytes = Convert.FromBase64String(privateKeyPem);
+                }
+                catch (FormatException)
+                {
+                    _logger.LogError("PrivateKey is not valid PEM and not valid Base64.");
+                    throw new InvalidOperationException("Invalid private key format. Expected PEM or Base64-encoded PEM/DER.");
+                }
+
+                var decodedString = Encoding.UTF8.GetString(keyBytes);
+                if (decodedString.Trim().StartsWith("-----BEGIN"))
+                {
+                    rsa.ImportFromPem(decodedString);
+                }
+                else
+                {
+                    // Assume raw PKCS#8 DER
+                    rsa.ImportPkcs8PrivateKey(keyBytes, out _);
+                }
+            }
 
             return new RsaSecurityKey(rsa);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to import RSA private key. Ensure key is in PKCS#8 format.");
+            _logger.LogError(ex, "Failed to import RSA private key. Ensure key is in valid PEM or PKCS#8 format.");
             throw new InvalidOperationException("Failed to import RSA private key", ex);
         }
     }
