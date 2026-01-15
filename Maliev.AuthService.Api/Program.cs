@@ -44,7 +44,16 @@ try
             description: "Centralized authentication service for the Maliev platform. Provides user login with email/password, JWT access token issuance with IAM-resolved permissions and roles, refresh token rotation, token validation for service-to-service calls, and session management including logout and token revocation.");
     }
 
+    // Register the authentication handler and token provider for service-to-service calls
+    builder.Services.AddTransient<Maliev.Aspire.ServiceDefaults.IAM.IServiceAccountTokenProvider>(sp =>
+    {
+        var config = sp.GetRequiredService<IConfiguration>();
+        return new Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountTokenProvider(config, "auth");
+    });
+    builder.Services.AddTransient<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>();
+
     builder.Services.AddHttpClient();
+
     builder.Services.AddHttpClient("ExternalValidation")
         .AddStandardResilienceHandler();
 
