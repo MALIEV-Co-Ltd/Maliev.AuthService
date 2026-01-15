@@ -34,26 +34,34 @@ public class TokenGenerator : ITokenGenerator
         try
         {
             string pemContent;
-            if (privateKeyPem.StartsWith("-----"))
+            if (privateKeyPem.StartsWith("-----BEGIN") && privateKeyPem.EndsWith("-----END PRIVATE KEY-----"))
             {
                 pemContent = privateKeyPem;
             }
             else
             {
-                // Decode Base64-encoded PEM or DER
-                var privateKeyBytes = Convert.FromBase64String(privateKeyPem);
-                var decodedString = Encoding.UTF8.GetString(privateKeyBytes);
+                // Attempt Base64 decode, then check for PEM again, or assume DER
+                try
+                {
+                    var privateKeyBytes = Convert.FromBase64String(privateKeyPem);
+                    var decodedString = Encoding.UTF8.GetString(privateKeyBytes);
 
-                if (decodedString.StartsWith("-----"))
-                {
-                    pemContent = decodedString;
+                    if (decodedString.StartsWith("-----BEGIN") && decodedString.EndsWith("-----END PRIVATE KEY-----"))
+                    {
+                        pemContent = decodedString;
+                    }
+                    else
+                    {
+                        // It's likely raw PKCS#8 DER bytes
+                        var rsaDer = RSA.Create();
+                        rsaDer.ImportPkcs8PrivateKey(privateKeyBytes, out _);
+                        return new RsaSecurityKey(rsaDer);
+                    }
                 }
-                else
+                catch (FormatException)
                 {
-                    // It's likely raw PKCS#8 DER bytes
-                    var rsaDer = RSA.Create();
-                    rsaDer.ImportPkcs8PrivateKey(privateKeyBytes, out _);
-                    return new RsaSecurityKey(rsaDer);
+                    _logger.LogError("PrivateKey is not valid Base64 and does not appear to be a PEM string.");
+                    throw new InvalidOperationException("Invalid private key format. Expected PEM or Base64-encoded PEM/DER.");
                 }
             }
 

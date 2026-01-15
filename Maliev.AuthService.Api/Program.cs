@@ -65,7 +65,14 @@ try
         client.BaseAddress = new Uri(baseUrl);
     })
     .AddHttpMessageHandler<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>()
-    .AddStandardResilienceHandler();
+    .AddStandardResilienceHandler(options =>
+    {
+        options.Retry.MaxRetryAttempts = 5;
+        options.Retry.BackoffType = Polly.DelayBackoffType.Exponential;
+        options.CircuitBreaker.FailureRatio = 0.5;
+        options.CircuitBreaker.MinimumThroughput = 5;
+        options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
+    });
 
     builder.Services.AddControllers()
         .AddJsonOptions(options =>

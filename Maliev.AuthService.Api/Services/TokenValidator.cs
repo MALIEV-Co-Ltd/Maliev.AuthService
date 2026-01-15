@@ -39,26 +39,34 @@ public class TokenValidator : ITokenValidator
             string pemContent;
             byte[] publicKeyBytes;
 
-            if (publicKeyPem.StartsWith("-----"))
+            if (publicKeyPem.StartsWith("-----BEGIN") && publicKeyPem.EndsWith("-----END PUBLIC KEY-----"))
             {
                 pemContent = publicKeyPem;
             }
             else
             {
-                // Decode Base64-encoded PEM or DER
-                publicKeyBytes = Convert.FromBase64String(publicKeyPem);
-                var decodedString = System.Text.Encoding.UTF8.GetString(publicKeyBytes);
+                try
+                {
+                    // Decode Base64-encoded PEM or DER
+                    publicKeyBytes = Convert.FromBase64String(publicKeyPem);
+                    var decodedString = System.Text.Encoding.UTF8.GetString(publicKeyBytes);
 
-                if (decodedString.StartsWith("-----"))
-                {
-                    pemContent = decodedString;
+                    if (decodedString.StartsWith("-----BEGIN") && decodedString.EndsWith("-----END PUBLIC KEY-----"))
+                    {
+                        pemContent = decodedString;
+                    }
+                    else
+                    {
+                        // It's likely raw SubjectPublicKeyInfo (SPKI) DER bytes
+                        using var rsaDer = System.Security.Cryptography.RSA.Create();
+                        rsaDer.ImportSubjectPublicKeyInfo(publicKeyBytes, out _);
+                        return ValidateWithRsaAsync(token, rsaDer);
+                    }
                 }
-                else
+                catch (FormatException)
                 {
-                    // It's likely raw SubjectPublicKeyInfo (SPKI) DER bytes
-                    using var rsaDer = System.Security.Cryptography.RSA.Create();
-                    rsaDer.ImportSubjectPublicKeyInfo(publicKeyBytes, out _);
-                    return ValidateWithRsaAsync(token, rsaDer);
+                    _logger.LogError("PublicKey is not valid Base64 and does not appear to be a PEM string.");
+                    return Task.FromResult<ClaimsPrincipal?>(null);
                 }
             }
 

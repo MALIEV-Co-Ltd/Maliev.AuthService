@@ -598,7 +598,7 @@ public class AuthenticationService : IAuthenticationService
             }
 
             // Employee not found (404)
-            // Call auto-provision endpoint (Day 2)
+            // Call auto-provision endpoint
             _logger.LogInformation("Employee not found for email {Email} during Google exchange. Triggering auto-provisioning.", request.Email);
 
             var (provisionSuccess, provEmployeeId, provPrincipalId, provName, provStatus, provisionError) =
@@ -898,12 +898,12 @@ public class AuthenticationService : IAuthenticationService
         public string? Name { get; set; }
     }
 
-    private class EmployeeLookupResult
+    private record EmployeeLookupResult
     {
-        public Guid EmployeeId { get; set; }
-        public Guid PrincipalId { get; set; }
-        public string Email { get; set; } = string.Empty;
-        public string FullName { get; set; } = string.Empty;
-        public string EmploymentStatus { get; set; } = string.Empty;
+        public Guid EmployeeId { get; init; }
+        public Guid PrincipalId { get; init; }
+        public string Email { get; init; } = string.Empty;
+        public string FullName { get; init; } = string.Empty;
+        public string EmploymentStatus { get; init; } = string.Empty;
     }
 }

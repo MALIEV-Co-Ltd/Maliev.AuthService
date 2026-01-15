@@ -36,13 +36,11 @@ public class AuthenticationController : ControllerBase
     /// </summary>
     /// <remarks>
     /// Primary entry point for users to log into the MALIEV platform.
-    ///
     /// **Process:**
     /// 1. Verifies credentials against the database.
     /// 2. Resolves principal roles and permissions via the IAM Service.
     /// 3. Issues a JWT access token containing these permissions.
     /// 4. Issues a secure refresh token for session persistence.
-    ///
     /// **Security:**
     /// - Subject to rate limiting (IP-based).
     /// - Implements account lockout after multiple failed attempts.
