@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Linq;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -30,15 +31,30 @@ public class TokenGenerator : ITokenGenerator
         var privateKeyPem = _configuration["Jwt:PrivateKey"]
             ?? throw new InvalidOperationException("JWT private key not configured");
 
-        // Decode Base64-encoded PEM
-        var privateKeyBytes = Convert.FromBase64String(privateKeyPem);
-        var privateKeyString = Encoding.UTF8.GetString(privateKeyBytes);
+        try
+        {
+            // Decode Base64-encoded PEM
+            var privateKeyBytes = Convert.FromBase64String(privateKeyPem);
+            var privateKeyString = Encoding.UTF8.GetString(privateKeyBytes);
 
-        // Import RSA private key from PEM
-        var rsa = RSA.Create();
-        rsa.ImportFromPem(privateKeyString);
+            // Extract the base64 content between PEM headers
+            var lines = privateKeyString.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var base64Content = string.Join("", lines.Where(l => !l.StartsWith("-----")));
 
-        return new RsaSecurityKey(rsa);
+            // Decode the PKCS#8 key bytes
+            var keyBytes = Convert.FromBase64String(base64Content);
+
+            // Import RSA private key using PKCS#8 format
+            var rsa = RSA.Create();
+            rsa.ImportPkcs8PrivateKey(keyBytes, out _);
+
+            return new RsaSecurityKey(rsa);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to import RSA private key. Ensure key is in PKCS#8 format.");
+            throw new InvalidOperationException("Failed to import RSA private key", ex);
+        }
     }
 
     /// <inheritdoc/>

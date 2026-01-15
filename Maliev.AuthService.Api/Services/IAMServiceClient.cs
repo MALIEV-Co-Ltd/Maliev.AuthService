@@ -12,9 +12,10 @@ namespace Maliev.AuthService.Api.Services;
 /// </summary>
 public class IAMServiceClient : IIAMServiceClient
 {
+    // Use PascalCase (default) to match IAMService's expected format
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+        PropertyNamingPolicy = null // PascalCase (default)
     };
 
     private readonly HttpClient _httpClient;
@@ -58,7 +59,7 @@ public class IAMServiceClient : IIAMServiceClient
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var request = new PermissionResolutionRequest { PrincipalId = principalId };
+            var request = new PermissionResolutionRequest { PrincipalId = principalId.ToString() };
             var response = await _httpClient.PostAsJsonAsync("/iam/v1/auth/resolve-permissions", request, JsonOptions, cancellationToken);
 
             stopwatch.Stop();
