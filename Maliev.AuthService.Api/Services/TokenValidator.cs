@@ -1,5 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Maliev.AuthService.Data.DbContexts;
@@ -36,43 +38,38 @@ public class TokenValidator : ITokenValidator
             var publicKeyPem = _configuration["Jwt:PublicKey"]
                 ?? throw new InvalidOperationException("JWT public key not configured");
 
-            string pemContent;
-            byte[] publicKeyBytes;
+            var rsa = RSA.Create();
 
-            if (publicKeyPem.StartsWith("-----BEGIN") && publicKeyPem.EndsWith("-----END PUBLIC KEY-----"))
+            // Try direct PEM import first
+            if (publicKeyPem.Trim().StartsWith("-----BEGIN"))
             {
-                pemContent = publicKeyPem;
+                rsa.ImportFromPem(publicKeyPem);
             }
             else
             {
+                // Try Base64-encoded PEM or DER
+                byte[] keyBytes;
                 try
                 {
-                    // Decode Base64-encoded PEM or DER
-                    publicKeyBytes = Convert.FromBase64String(publicKeyPem);
-                    var decodedString = System.Text.Encoding.UTF8.GetString(publicKeyBytes);
-
-                    if (decodedString.StartsWith("-----BEGIN") && decodedString.EndsWith("-----END PUBLIC KEY-----"))
-                    {
-                        pemContent = decodedString;
-                    }
-                    else
-                    {
-                        // It's likely raw SubjectPublicKeyInfo (SPKI) DER bytes
-                        using var rsaDer = System.Security.Cryptography.RSA.Create();
-                        rsaDer.ImportSubjectPublicKeyInfo(publicKeyBytes, out _);
-                        return ValidateWithRsaAsync(token, rsaDer);
-                    }
+                    keyBytes = Convert.FromBase64String(publicKeyPem);
                 }
                 catch (FormatException)
                 {
-                    _logger.LogError("PublicKey is not valid Base64 and does not appear to be a PEM string.");
+                    _logger.LogError("PublicKey is not valid PEM and not valid Base64.");
                     return Task.FromResult<ClaimsPrincipal?>(null);
                 }
-            }
 
-            // Import RSA public key from PEM
-            using var rsa = System.Security.Cryptography.RSA.Create();
-            rsa.ImportFromPem(pemContent);
+                var decodedString = Encoding.UTF8.GetString(keyBytes);
+                if (decodedString.Trim().StartsWith("-----BEGIN"))
+                {
+                    rsa.ImportFromPem(decodedString);
+                }
+                else
+                {
+                    // Assume raw SPKI DER
+                    rsa.ImportSubjectPublicKeyInfo(keyBytes, out _);
+                }
+            }
 
             return ValidateWithRsaAsync(token, rsa);
         }

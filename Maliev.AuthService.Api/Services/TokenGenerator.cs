@@ -33,40 +33,37 @@ public class TokenGenerator : ITokenGenerator
 
         try
         {
-            string pemContent;
-            if (privateKeyPem.StartsWith("-----BEGIN") && privateKeyPem.EndsWith("-----END PRIVATE KEY-----"))
+            var rsa = RSA.Create();
+
+            if (privateKeyPem.Trim().StartsWith("-----BEGIN"))
             {
-                pemContent = privateKeyPem;
+                rsa.ImportFromPem(privateKeyPem);
             }
             else
             {
-                // Attempt Base64 decode, then check for PEM again, or assume DER
+                // Try Base64-encoded PEM or DER
+                byte[] keyBytes;
                 try
                 {
-                    var privateKeyBytes = Convert.FromBase64String(privateKeyPem);
-                    var decodedString = Encoding.UTF8.GetString(privateKeyBytes);
-
-                    if (decodedString.StartsWith("-----BEGIN") && decodedString.EndsWith("-----END PRIVATE KEY-----"))
-                    {
-                        pemContent = decodedString;
-                    }
-                    else
-                    {
-                        // It's likely raw PKCS#8 DER bytes
-                        var rsaDer = RSA.Create();
-                        rsaDer.ImportPkcs8PrivateKey(privateKeyBytes, out _);
-                        return new RsaSecurityKey(rsaDer);
-                    }
+                    keyBytes = Convert.FromBase64String(privateKeyPem);
                 }
                 catch (FormatException)
                 {
-                    _logger.LogError("PrivateKey is not valid Base64 and does not appear to be a PEM string.");
+                    _logger.LogError("PrivateKey is not valid PEM and not valid Base64.");
                     throw new InvalidOperationException("Invalid private key format. Expected PEM or Base64-encoded PEM/DER.");
                 }
-            }
 
-            var rsa = RSA.Create();
-            rsa.ImportFromPem(pemContent);
+                var decodedString = Encoding.UTF8.GetString(keyBytes);
+                if (decodedString.Trim().StartsWith("-----BEGIN"))
+                {
+                    rsa.ImportFromPem(decodedString);
+                }
+                else
+                {
+                    // Assume raw PKCS#8 DER
+                    rsa.ImportPkcs8PrivateKey(keyBytes, out _);
+                }
+            }
 
             return new RsaSecurityKey(rsa);
         }
