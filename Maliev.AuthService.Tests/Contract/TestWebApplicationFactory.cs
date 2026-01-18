@@ -173,6 +173,7 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                     {
                         IsValid = true,
                         UserId = Guid.NewGuid(),
+                        PrincipalId = Guid.NewGuid(),
                         Email = username,
                         Name = "Test User"
                     };

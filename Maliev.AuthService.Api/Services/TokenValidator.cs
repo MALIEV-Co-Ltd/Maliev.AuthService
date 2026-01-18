@@ -35,6 +35,13 @@ public class TokenValidator : ITokenValidator
     {
         try
         {
+            var tokenHandler = new JwtSecurityTokenHandler { MapInboundClaims = false };
+            if (!tokenHandler.CanReadToken(token))
+            {
+                _logger.LogWarning("Token cannot be read as JWT");
+                return Task.FromResult<ClaimsPrincipal?>(null);
+            }
+
             var publicKeyPem = _configuration["Jwt:PublicKey"]
                 ?? throw new InvalidOperationException("JWT public key not configured");
 
