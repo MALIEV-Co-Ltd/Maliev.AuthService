@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using Maliev.AuthService.Tests.Contract;
 
-namespace Maliev.AuthService.Api.Tests.Integration;
+namespace Maliev.AuthService.Tests.Integration;
 
 public class RateLimitServiceTests : IClassFixture<TestWebApplicationFactory>
 {

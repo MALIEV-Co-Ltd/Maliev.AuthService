@@ -31,15 +31,13 @@ public class GoogleExchangeContractTests : IntegrationTestBase
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
-        var json = JsonDocument.Parse(content);
+        var result = await response.Content.ReadFromJsonAsync<LoginResponse>();
 
-        Assert.NotNull(json.RootElement.GetProperty("access_token").GetString());
-        Assert.NotNull(json.RootElement.GetProperty("refresh_token").GetString());
+        Assert.NotNull(result?.AccessToken);
+        Assert.NotNull(result?.RefreshToken);
 
-        var user = json.RootElement.GetProperty("user");
-        Assert.Equal("employee", user.GetProperty("user_type").GetString());
-        Assert.Equal("existing.employee@maliev.com", user.GetProperty("email").GetString());
+        Assert.Equal("employee", result?.User.UserType);
+        Assert.Equal("existing.employee@maliev.com", result?.User.Email);
     }
 
     [Fact]
@@ -58,14 +56,12 @@ public class GoogleExchangeContractTests : IntegrationTestBase
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
-        var json = JsonDocument.Parse(content);
+        var result = await response.Content.ReadFromJsonAsync<LoginResponse>();
 
-        Assert.NotNull(json.RootElement.GetProperty("access_token").GetString());
+        Assert.NotNull(result?.AccessToken);
 
-        var user = json.RootElement.GetProperty("user");
-        Assert.Equal("employee", user.GetProperty("user_type").GetString());
-        Assert.Equal("new.employee@maliev.com", user.GetProperty("email").GetString());
+        Assert.Equal("employee", result?.User.UserType);
+        Assert.Equal("new.employee@maliev.com", result?.User.Email);
     }
 
     [Fact]

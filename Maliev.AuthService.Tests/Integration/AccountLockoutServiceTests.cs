@@ -7,7 +7,7 @@ using Xunit;
 using Maliev.AuthService.Tests.Contract;
 using Maliev.MessagingContracts.Generated;
 
-namespace Maliev.AuthService.Api.Tests.Integration;
+namespace Maliev.AuthService.Tests.Integration;
 
 public class AccountLockoutServiceTests : IClassFixture<TestWebApplicationFactory>
 {
