@@ -1,8 +1,8 @@
-using Microsoft.EntityFrameworkCore;
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 using Maliev.MessagingContracts.Generated;
 using MassTransit;
+using Microsoft.EntityFrameworkCore;
 
 namespace Maliev.AuthService.Api.Services;
 /// <summary>

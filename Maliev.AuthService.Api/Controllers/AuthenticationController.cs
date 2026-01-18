@@ -1,8 +1,8 @@
 using Asp.Versioning;
-using Microsoft.AspNetCore.Mvc;
 using Maliev.AuthService.Api.Models.Request;
 using Maliev.AuthService.Api.Models.Response;
 using Maliev.AuthService.Api.Services;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Maliev.AuthService.Api.Controllers;
 

@@ -1,6 +1,6 @@
+using Maliev.Aspire.ServiceDefaults.Database;
 using Maliev.AuthService.Data.Entities;
 using Microsoft.EntityFrameworkCore;
-using Maliev.Aspire.ServiceDefaults.Database;
 
 namespace Maliev.AuthService.Data.DbContexts;
 

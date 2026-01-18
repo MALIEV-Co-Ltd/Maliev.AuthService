@@ -1,5 +1,3 @@
-using Maliev.AuthService.Api.Models.Response;
-
 namespace Maliev.AuthService.Api.Services;
 /// <summary>
 /// Interface for TokenGenerator

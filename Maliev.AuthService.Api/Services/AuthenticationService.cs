@@ -1,13 +1,11 @@
-using System.IdentityModel.Tokens.Jwt;
+using Maliev.AuthService.Api.Models.Request;
+using Maliev.AuthService.Api.Models.Response;
+using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Data.Entities;
+using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
-using Maliev.AuthService.Api.Models.Request;
-using Maliev.AuthService.Api.Models.Response;
-using Maliev.AuthService.Api.Models.IAM;
-using Maliev.AuthService.Data.DbContexts;
-using Maliev.AuthService.Data.Entities;
 
 namespace Maliev.AuthService.Api.Services;
 /// <summary>
