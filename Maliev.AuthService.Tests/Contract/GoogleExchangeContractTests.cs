@@ -31,7 +31,7 @@ public class GoogleExchangeContractTests : IntegrationTestBase
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = await response.Content.ReadFromJsonAsync<LoginResponse>();
+        var result = await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions);
 
         Assert.NotNull(result?.AccessToken);
         Assert.NotNull(result?.RefreshToken);
@@ -56,7 +56,7 @@ public class GoogleExchangeContractTests : IntegrationTestBase
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var result = await response.Content.ReadFromJsonAsync<LoginResponse>();
+        var result = await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions);
 
         Assert.NotNull(result?.AccessToken);
 
@@ -80,7 +80,7 @@ public class GoogleExchangeContractTests : IntegrationTestBase
 
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        var result = await response.Content.ReadFromJsonAsync<ErrorResponse>();
+        var result = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions);
         Assert.Equal("invalid_domain", result?.Error);
     }
 
@@ -100,7 +100,7 @@ public class GoogleExchangeContractTests : IntegrationTestBase
 
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        var result = await response.Content.ReadFromJsonAsync<ErrorResponse>();
+        var result = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions);
         Assert.Equal("inactive_account", result?.Error);
     }
 }
