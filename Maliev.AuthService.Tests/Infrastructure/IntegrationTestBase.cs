@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Maliev.AuthService.Tests.Contract;
 using Xunit;
 
@@ -11,6 +12,13 @@ public abstract class IntegrationTestBase : IClassFixture<TestWebApplicationFact
 {
     protected readonly TestWebApplicationFactory Factory;
     protected readonly HttpClient Client;
+
+    protected static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true
+    };
+
 
     protected static readonly string[] AdminRoles = { "admin" };
 

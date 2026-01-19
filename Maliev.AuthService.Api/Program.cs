@@ -1,6 +1,5 @@
 using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.Data.DbContexts;
-using Microsoft.Extensions.Logging;
 
 // Initialize bootstrap logging
 using var loggerFactory = LoggerFactory.Create(logBuilder => logBuilder.AddConsole());

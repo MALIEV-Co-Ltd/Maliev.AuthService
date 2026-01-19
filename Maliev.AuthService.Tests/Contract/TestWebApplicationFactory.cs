@@ -171,10 +171,11 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                 {
                     var response = new
                     {
-                        IsValid = true,
-                        UserId = Guid.NewGuid(),
-                        Email = username,
-                        Name = "Test User"
+                        is_valid = true,
+                        user_id = Guid.NewGuid(),
+                        principal_id = Guid.NewGuid(),
+                        email = username,
+                        name = "Test User"
                     };
 
                     return new HttpResponseMessage(HttpStatusCode.OK)
@@ -182,6 +183,7 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                         Content = JsonContent.Create(response)
                     };
                 }
+
 
                 Guid generatedUserId;
                 if (!string.IsNullOrEmpty(username))
@@ -199,10 +201,11 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
 
                 var invalidResponse = new
                 {
-                    IsValid = false,
-                    UserId = generatedUserId,
-                    Error = "Invalid credentials"
+                    is_valid = false,
+                    user_id = generatedUserId,
+                    error = "Invalid credentials"
                 };
+
 
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {

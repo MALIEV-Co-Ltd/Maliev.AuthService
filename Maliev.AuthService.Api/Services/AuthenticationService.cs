@@ -1,15 +1,15 @@
-using System.IdentityModel.Tokens.Jwt;
+using Maliev.AuthService.Api.Models.Request;
+using Maliev.AuthService.Api.Models.Response;
+using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Data.Entities;
+using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
-using Maliev.AuthService.Api.Models.Request;
-using Maliev.AuthService.Api.Models.Response;
-using Maliev.AuthService.Api.Models.IAM;
-using Maliev.AuthService.Data.DbContexts;
-using Maliev.AuthService.Data.Entities;
+using System.Text.Json;
 
 namespace Maliev.AuthService.Api.Services;
+
 /// <summary>
 /// Service for Authentication operations
 /// </summary>
@@ -842,9 +842,11 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "Invalid credentials");
             }
 
-            var result = await response.Content.ReadFromJsonAsync<CredentialValidationResult>();
+            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+            var result = await response.Content.ReadFromJsonAsync<CredentialValidationResult>(jsonOptions);
             if (result == null || !result.IsValid)
             {
+
                 // Return UserId only if it's not empty to avoid tracking lockout for unknown users globally
                 var userId = result?.UserId == Guid.Empty ? null : result?.UserId;
                 return (false, userId, result?.PrincipalId, null, null, "Invalid credentials");

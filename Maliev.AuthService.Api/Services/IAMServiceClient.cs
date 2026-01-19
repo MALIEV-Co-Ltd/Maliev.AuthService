@@ -1,9 +1,7 @@
-using System.Net.Http.Json;
+using Maliev.AuthService.Api.Models.IAM;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Text.Json;
-using Maliev.AuthService.Api.Models.IAM;
-using Microsoft.Extensions.Configuration;
 
 namespace Maliev.AuthService.Api.Services;
 

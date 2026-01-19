@@ -1,10 +1,10 @@
+using Maliev.AuthService.Data.DbContexts;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
-using Maliev.AuthService.Data.DbContexts;
 
 namespace Maliev.AuthService.Api.Services;
 /// <summary>
@@ -35,6 +35,13 @@ public class TokenValidator : ITokenValidator
     {
         try
         {
+            var tokenHandler = new JwtSecurityTokenHandler { MapInboundClaims = false };
+            if (!tokenHandler.CanReadToken(token))
+            {
+                _logger.LogWarning("Token cannot be read as JWT");
+                return Task.FromResult<ClaimsPrincipal?>(null);
+            }
+
             var publicKeyPem = _configuration["Jwt:PublicKey"]
                 ?? throw new InvalidOperationException("JWT public key not configured");
 
@@ -108,19 +115,42 @@ public class TokenValidator : ITokenValidator
             ClockSkew = TimeSpan.FromMinutes(5)
         };
 
-        // Disable claim type mapping to keep original claim names like "sub" instead of full URIs
-        var tokenHandler = new JwtSecurityTokenHandler { MapInboundClaims = false };
-        var principal = tokenHandler.ValidateToken(token, validationParameters, out var validatedToken);
-
-        if (validatedToken is not JwtSecurityToken jwtToken ||
-            !jwtToken.Header.Alg.Equals(SecurityAlgorithms.RsaSha256, StringComparison.InvariantCultureIgnoreCase))
+        try
         {
-            _logger.LogWarning("Invalid token algorithm");
+            // Disable claim type mapping to keep original claim names like "sub" instead of full URIs
+            var tokenHandler = new JwtSecurityTokenHandler { MapInboundClaims = false };
+
+            // ValidateToken can throw for malformed tokens even if CanReadToken returns true
+            // due to structure issues detected during parsing
+            var principal = tokenHandler.ValidateToken(token, validationParameters, out var validatedToken);
+
+            if (validatedToken is not JwtSecurityToken jwtToken ||
+                !jwtToken.Header.Alg.Equals(SecurityAlgorithms.RsaSha256, StringComparison.InvariantCultureIgnoreCase))
+            {
+                _logger.LogWarning("Invalid token algorithm");
+                return Task.FromResult<ClaimsPrincipal?>(null);
+            }
+
+            return Task.FromResult<ClaimsPrincipal?>(principal);
+        }
+        catch (ArgumentException ex)
+        {
+            // Handles "IDX10708: 'base64UrlEncodedString' cannot be null or empty" and similar parsing errors
+            _logger.LogWarning(ex, "Token validation failed due to malformed token structure");
             return Task.FromResult<ClaimsPrincipal?>(null);
         }
-
-        return Task.FromResult<ClaimsPrincipal?>(principal);
+        catch (SecurityTokenException ex)
+        {
+            _logger.LogWarning(ex, "Token validation failed");
+            return Task.FromResult<ClaimsPrincipal?>(null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during token validation");
+            return Task.FromResult<ClaimsPrincipal?>(null);
+        }
     }
+
     /// <inheritdoc/>
     public async Task<bool> IsTokenRevokedAsync(string jti)
     {
