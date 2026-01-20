@@ -6,30 +6,20 @@ on:
       - "release/v*"
 
 jobs:
+  build-and-test:
+    uses: ./.github/workflows/_build-and-test.yml
+    with:
+      solution_file: Maliev.AuthService.slnx
+    secrets:
+      gitops_pat: ${{ secrets.GITOPS_PAT }}
+
   build-and-deploy:
+    needs: build-and-test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "10.x"
-
-      - name: Restore dependencies
-        run: dotnet restore Maliev.AuthService.slnx
-        env:
-          NUGET_USERNAME: ${{ github.actor }}
-          NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
-
-      - name: Build
-        run: dotnet build Maliev.AuthService.slnx --no-restore
-
-      - name: Test
-        run: dotnet test Maliev.AuthService.slnx --no-build --verbosity normal
-        working-directory: ${{ github.workspace }}
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
