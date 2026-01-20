@@ -62,10 +62,10 @@ Maliev.AuthService/
 ### Build and Test
 ```powershell
 # Build solution
-dotnet build Maliev.AuthService.sln
+dotnet build Maliev.AuthService.slnx
 
 # Run tests (27 tests)
-dotnet test Maliev.AuthService.sln --verbosity normal
+dotnet test Maliev.AuthService.slnx --verbosity normal
 
 # Run specific test project
 dotnet test Maliev.AuthService.Tests --verbosity normal
@@ -172,10 +172,10 @@ ExternalServices:EmployeeService:BaseUrl="http://localhost:5002"
 ### Running Tests
 ```powershell
 # Run all tests
-dotnet test Maliev.AuthService.sln --verbosity normal
+dotnet test Maliev.AuthService.slnx --verbosity normal
 
 # Run with coverage
-dotnet test Maliev.AuthService.sln --collect:"XPlat Code Coverage"
+dotnet test Maliev.AuthService.slnx --collect:"XPlat Code Coverage"
 
 # Run specific test class
 dotnet test --filter "FullyQualifiedName~AuthenticationContractTests"

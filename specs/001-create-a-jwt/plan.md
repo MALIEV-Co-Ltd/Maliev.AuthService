@@ -274,55 +274,55 @@ The structure separates concerns while maintaining simplicity appropriate for a 
    - Library: Microsoft.IdentityModel.Tokens with RsaSecurityKey
 
 2. **Refresh Token Storage Strategy** (SHA-256 hashing)
-   
+
    - Decision needed: Confirm SHA-256 hashing per FR-023
    - Research: Constant-time comparison in .NET, hash collision resistance
    - Implementation: `System.Security.Cryptography.SHA256`
 
 3. **Token Revocation Event System** (Redis pub/sub)
-   
+
    - Decision needed: Redis vs Kafka for <2s propagation (FR-060)
    - Research: Redis Pub/Sub vs Kafka performance for low-latency events
    - Library: StackExchange.Redis vs Confluent.Kafka
 
 4. **External Service Circuit Breaker** (Polly configuration)
-   
+
    - Decision needed: Confirm Polly for circuit breaker (FR-067-069)
    - Research: Polly CircuitBreaker policy configuration, metrics integration
    - Pattern: Advanced circuit breaker with half-open state
 
 5. **Rate Limiting Implementation** (ASP.NET Core 9 built-in)
-   
+
    - Decision needed: Confirm ASP.NET Core 9 built-in rate limiting (FR-053-056)
    - Research: Fixed window vs sliding window, IP extraction from headers
    - Implementation: `Microsoft.AspNetCore.RateLimiting`
 
 6. **Database Migration Strategy** (EF Core)
-   
+
    - Decision needed: Manual vs automated migration application
    - Research: Best practices for Kubernetes deployments, idempotent migrations
    - Pattern: Manual migration via `dotnet ef database update` (per constitution)
 
 7. **Token Family Tracking** (Rotation lineage)
-   
+
    - Decision needed: Database schema for family_id, cascading invalidation
    - Research: Efficient queries for token family traversal
    - Pattern: Indexed foreign key with cleanup jobs
 
 8. **Health Check Integration** (Kubernetes liveness/readiness)
-   
+
    - Decision needed: Database connectivity check strategy
    - Research: Fast vs comprehensive health checks, dependency checks
    - Library: AspNetCore.HealthChecks.UI.Client
 
 9. **Distributed Tracing** (OpenTelemetry)
-   
+
    - Decision needed: Correlation ID vs full OpenTelemetry spans
    - Research: .NET 9 Activity API, trace context propagation
    - Library: OpenTelemetry.Extensions.Hosting (optional for Phase 2)
 
 10. **Password Validation Delegation** (External service contracts)
-    
+
     - Decision needed: Request/response format for customer/employee validation
     - Research: Standard authentication API patterns, error handling
     - Pattern: Typed HttpClient with Polly retry
@@ -340,7 +340,7 @@ The structure separates concerns while maintaining simplicity appropriate for a 
 ### Deliverables
 
 1. **Data Model** (`data-model.md`):
-   
+
    - RefreshToken entity (id, token_hash, user_id, user_type, family_id, expiry, created_at, last_used_at)
    - RevokedToken entity (jti, user_id, revoked_at, reason, expiry)
    - TokenFamily entity (family_id, user_id, user_type, created_at, last_refresh_at, invalidated, invalidation_reason)
@@ -348,7 +348,7 @@ The structure separates concerns while maintaining simplicity appropriate for a 
    - Relationships and indexes for performance
 
 2. **API Contracts** (`contracts/`):
-   
+
    - **authentication.openapi.yaml**: POST /api/v1/auth/login (LoginRequest → LoginResponse)
    - **token-refresh.openapi.yaml**: POST /api/v1/auth/refresh (RefreshTokenRequest → TokenResponse)
    - **token-validation.openapi.yaml**: POST /api/v1/auth/validate (ValidateTokenRequest → UserIdentityResponse)
@@ -356,7 +356,7 @@ The structure separates concerns while maintaining simplicity appropriate for a 
    - All contracts include error responses (400, 401, 403, 409, 429, 500, 503)
 
 3. **Contract Tests** (failing tests for TDD):
-   
+
    - AuthenticationContractTests.cs (login endpoint validation)
    - TokenRefreshContractTests.cs (refresh endpoint validation)
    - TokenValidationContractTests.cs (validate endpoint validation)
@@ -364,7 +364,7 @@ The structure separates concerns while maintaining simplicity appropriate for a 
    - Each test validates request/response schema against OpenAPI contract
 
 4. **Integration Test Scenarios**:
-   
+
    - CustomerLoginIntegrationTests (FR-001, FR-002, FR-008)
    - EmployeeLoginIntegrationTests (FR-001, FR-003, FR-008)
    - TokenRotationIntegrationTests (FR-015 - new refresh token issued)
@@ -374,7 +374,7 @@ The structure separates concerns while maintaining simplicity appropriate for a 
    - CircuitBreakerIntegrationTests (FR-067, FR-068, FR-069)
 
 5. **Quickstart Guide** (`quickstart.md`):
-   
+
    - Local PostgreSQL setup with docker-compose.test.yml
    - Environment variable configuration (ConnectionStrings__AuthDbContext)
    - Database migration steps
@@ -383,7 +383,7 @@ The structure separates concerns while maintaining simplicity appropriate for a 
    - Validating token rotation and reuse detection
 
 6. **Agent Context File** (`CLAUDE.md` in repository root):
-   
+
    - Project overview and architecture
    - Key technologies and versions
    - Development commands (build, test, run)
@@ -419,7 +419,7 @@ The structure separates concerns while maintaining simplicity appropriate for a 
 **Ordering Strategy**:
 
 1. **Foundation Layer** (TDD: Tests first):
-   
+
    - Task 1-4: Contract tests (all [P] - can run in parallel)
    - Task 5-7: Entity models and EF Core configurations [P]
    - Task 8: DbContext setup and DesignTimeDbContextFactory
@@ -427,7 +427,7 @@ The structure separates concerns while maintaining simplicity appropriate for a 
    - Task 10-12: Repository interfaces and implementations [P]
 
 2. **Service Layer**:
-   
+
    - Task 13-14: Token generator interface and implementation
    - Task 15-16: Token validator interface and implementation
    - Task 17-18: Refresh token service interface and implementation
@@ -436,25 +436,25 @@ The structure separates concerns while maintaining simplicity appropriate for a 
    - Task 23-24: Authentication service interface and implementation
 
 3. **API Layer**:
-   
+
    - Task 25-28: FluentValidation validators with unit tests [P]
    - Task 29-32: Controllers (Authentication, Token, Validation, Revocation)
    - Task 33-34: Exception and request logging middleware [P]
    - Task 35: Program.cs configuration and startup
 
 4. **Integration Testing**:
-   
+
    - Task 36: TestDatabaseFixture and TestWebApplicationFactory setup
    - Task 37-44: Integration test scenarios (8 test suites) [P]
 
 5. **Infrastructure**:
-   
+
    - Task 45: Dockerfile and .dockerignore
    - Task 46-48: GitHub Actions workflows (develop, staging, main) [P]
    - Task 49: README.md and quickstart documentation
 
 6. **Final Validation**:
-   
+
    - Task 50: Run all tests and verify 80%+ coverage
    - Task 51: Build and run service locally, execute quickstart.md
    - Task 52: Clean artifacts and verify zero warnings build
