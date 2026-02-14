@@ -252,15 +252,20 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
             {
                 var email = Uri.UnescapeDataString(request.RequestUri.Segments.Last());
 
+                if (email == "service.down@maliev.com")
+                {
+                    return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+                }
+
                 if (email == "existing.employee@maliev.com")
                 {
                     var response = new
                     {
-                        employeeId = Guid.NewGuid(),
-                        principalId = Guid.Parse("7c9e6639-7420-4007-8596-f0ad96130444"),
+                        employee_id = Guid.NewGuid(),
+                        principal_id = Guid.Parse("7c9e6639-7420-4007-8596-f0ad96130444"),
                         email = email,
-                        fullName = "Existing Employee",
-                        employmentStatus = "Active"
+                        full_name = "Existing Employee",
+                        employment_status = "Active"
                     };
 
                     return new HttpResponseMessage(HttpStatusCode.OK)
@@ -273,11 +278,11 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                 {
                     var response = new
                     {
-                        employeeId = Guid.NewGuid(),
-                        principalId = Guid.NewGuid(),
+                        employee_id = Guid.NewGuid(),
+                        principal_id = Guid.NewGuid(),
                         email = email,
-                        fullName = "Terminated Employee",
-                        employmentStatus = "Terminated"
+                        full_name = "Terminated Employee",
+                        employment_status = "Terminated"
                     };
 
                     return new HttpResponseMessage(HttpStatusCode.OK)
@@ -305,14 +310,19 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                         fullName = fullNameElement.GetString();
                 }
 
+                if (email == "provision.fail@maliev.com")
+                {
+                    return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                }
+
                 var response = new
                 {
-                    employeeId = Guid.NewGuid(),
-                    principalId = Guid.NewGuid(),
+                    employee_id = Guid.NewGuid(),
+                    principal_id = Guid.NewGuid(),
                     email = email,
-                    fullName = fullName ?? "New Employee",
-                    employeeNumber = "EMP-TEST-001",
-                    employmentStatus = "Active"
+                    full_name = fullName ?? "New Employee",
+                    employee_number = "EMP-TEST-001",
+                    employment_status = "Active"
                 };
 
                 return new HttpResponseMessage(HttpStatusCode.OK)

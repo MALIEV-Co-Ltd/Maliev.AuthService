@@ -72,8 +72,46 @@ public class TokenRevocationContractTests : IntegrationTestBase
         // Act - Second revocation (idempotent)
         var response = await Client.PostAsJsonAsync("/auth/v1/revoke", request);
 
-        // Assert
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-    }
+                // Assert
 
-}
+                Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+            }
+
+        
+
+            [Fact]
+
+            public async Task POST_V1_Auth_Revoke_InvalidToken_Returns400()
+
+            {
+
+                await CleanDatabaseAsync();
+
+                // Arrange
+
+                var request = new
+
+                {
+
+                    token = "invalid-token",
+
+                    reason = "test"
+
+                };
+
+        
+
+                // Act
+
+                var response = await Client.PostAsJsonAsync("/auth/v1/revoke", request);
+
+        
+
+                // Assert
+
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+            }
+
+        }

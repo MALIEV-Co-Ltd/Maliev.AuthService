@@ -103,4 +103,44 @@ public class GoogleExchangeContractTests : IntegrationTestBase
         var result = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions);
         Assert.Equal("inactive_account", result?.Error);
     }
+
+    [Fact]
+    public async Task ExchangeGoogleToken_WithServiceUnavailable_ShouldReturn503()
+    {
+        await CleanDatabaseAsync();
+        // Arrange
+        var request = new
+        {
+            email = "service.down@maliev.com",
+            full_name = "Service Down"
+        };
+
+        // Act
+        var response = await Client.PostAsJsonAsync("/auth/v1/exchange/google", request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions);
+        Assert.Equal("service_unavailable", result?.Error);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleToken_WithProvisionFailed_ShouldReturn403()
+    {
+        await CleanDatabaseAsync();
+        // Arrange
+        var request = new
+        {
+            email = "provision.fail@maliev.com",
+            full_name = "Provision Fail"
+        };
+
+        // Act
+        var response = await Client.PostAsJsonAsync("/auth/v1/exchange/google", request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions);
+        Assert.Equal("provision_failed", result?.Error);
+    }
 }

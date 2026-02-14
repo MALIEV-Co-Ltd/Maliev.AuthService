@@ -69,4 +69,246 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
 
     public Task DisposeAsync() => Task.CompletedTask;
 
+    [Fact]
+    public async Task AuthenticateAsync_InvalidUserType_ThrowsArgumentException()
+    {
+        // Arrange
+        var request = new LoginRequest { Username = "user", Password = "password", UserType = "invalid" };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() => _service!.AuthenticateAsync(request, "127.0.0.1"));
+    }
+
+    [Fact]
+    public async Task AuthenticateAsync_RateLimitExceeded_ReturnsRateLimitExceeded()
+    {
+        // Arrange
+        var request = new LoginRequest { Username = "user", Password = "password", UserType = "customer" };
+        var ipAddress = "1.2.3.4";
+        var blockedUntil = DateTime.UtcNow.AddMinutes(15);
+
+        _rateLimitServiceMock.Setup(s => s.IsRateLimitExceededAsync(ipAddress))
+            .ReturnsAsync(true);
+        _rateLimitServiceMock.Setup(s => s.GetBlockedUntilAsync(ipAddress))
+            .ReturnsAsync(blockedUntil);
+
+        // Act
+        var result = await _service!.AuthenticateAsync(request, ipAddress);
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal("rate_limit_exceeded", result.ErrorCode);
+        Assert.Equal(blockedUntil, result.RetryAfter);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleTokenAsync_InvalidDomain_ReturnsInvalidDomain()
+    {
+        // Arrange
+        var request = new GoogleExchangeRequest { Email = "user@gmail.com", FullName = "User" };
+
+        // Act
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal("invalid_domain", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleTokenAsync_EmployeeNotFound_AutoProvisions()
+    {
+        // Arrange
+        var email = "new.user@maliev.com";
+        var request = new GoogleExchangeRequest { Email = email, FullName = "New User" };
+        var employeeId = Guid.NewGuid();
+        var principalId = Guid.NewGuid();
+
+        _employeeServiceClientMock.Setup(s => s.GetEmployeeByEmailAsync(email))
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        var provisionResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new
+            {
+                employee_id = employeeId,
+                principal_id = principalId,
+                email = email,
+                full_name = "New User",
+                employment_status = "Active"
+            })
+        };
+        _employeeServiceClientMock.Setup(s => s.ProvisionEmployeeAsync(It.IsAny<object>()))
+            .ReturnsAsync(provisionResponse);
+
+        _iamClientMock.Setup(s => s.ResolvePermissionsAsync(principalId))
+            .ReturnsAsync(new PermissionResolutionResponse { Permissions = new List<string> { "read" }, Roles = new List<string> { "user" } });
+
+        _tokenGeneratorMock.Setup(s => s.GenerateAccessToken(principalId, "employee", email, "New User", It.IsAny<IEnumerable<string>>(), It.IsAny<IEnumerable<string>>()))
+            .Returns("access-token");
+
+        _refreshTokenServiceMock.Setup(s => s.CreateRefreshTokenAsync(employeeId, principalId, UserType.Employee, email, "New User", It.IsAny<string>()))
+            .ReturnsAsync((new RefreshToken(), "refresh-token"));
+
+        // Act
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(principalId, result.PrincipalId);
+        Assert.Equal("access-token", result.Response!.AccessToken);
+        _employeeServiceClientMock.Verify(s => s.ProvisionEmployeeAsync(It.IsAny<object>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleTokenAsync_EmployeeLookupFails_ReturnsServiceUnavailable()
+    {
+        // Arrange
+        var email = "user@maliev.com";
+        var request = new GoogleExchangeRequest { Email = email };
+
+        _employeeServiceClientMock.Setup(s => s.GetEmployeeByEmailAsync(email))
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+
+        // Act
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal("service_unavailable", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleTokenAsync_ProvisionFails_ReturnsProvisionFailed()
+    {
+        // Arrange
+        var email = "new.user@maliev.com";
+        var request = new GoogleExchangeRequest { Email = email };
+
+        _employeeServiceClientMock.Setup(s => s.GetEmployeeByEmailAsync(email))
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        _employeeServiceClientMock.Setup(s => s.ProvisionEmployeeAsync(It.IsAny<object>()))
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.BadRequest));
+
+        // Act
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal("provision_failed", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleTokenAsync_EmployeeTerminated_ReturnsInactiveAccount()
+    {
+        // Arrange
+        var email = "user@maliev.com";
+        var request = new GoogleExchangeRequest { Email = email };
+        var employeeId = Guid.NewGuid();
+
+        var lookupResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new
+            {
+                employee_id = employeeId,
+                principal_id = Guid.NewGuid(),
+                email = email,
+                full_name = "User",
+                employment_status = "Terminated"
+            })
+        };
+        _employeeServiceClientMock.Setup(s => s.GetEmployeeByEmailAsync(email))
+            .ReturnsAsync(lookupResponse);
+
+        // Act
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal("inactive_account", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleTokenAsync_LookupTimeout_ReturnsServiceUnavailable()
+    {
+        // Arrange
+        var email = "user@maliev.com";
+        var request = new GoogleExchangeRequest { Email = email };
+
+        _employeeServiceClientMock.Setup(s => s.GetEmployeeByEmailAsync(email))
+            .ThrowsAsync(new OperationCanceledException());
+
+        // Act
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal("service_unavailable", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task RefreshTokenAsync_IAMServiceFails_StillReturnsTokens()
+    {
+        // Arrange
+        var refreshTokenValue = "valid-refresh";
+        var refreshToken = new RefreshToken
+        {
+            UserId = Guid.NewGuid(),
+            PrincipalId = Guid.NewGuid(),
+            UserType = UserType.Employee,
+            Email = "user@test.com",
+            Name = "User",
+            FamilyId = Guid.NewGuid(),
+            Family = new TokenFamily { FamilyId = Guid.NewGuid() }
+        };
+
+        _refreshTokenServiceMock.Setup(s => s.ValidateRefreshTokenAsync(refreshTokenValue))
+            .ReturnsAsync(refreshToken);
+        _refreshTokenServiceMock.Setup(s => s.RotateRefreshTokenAsync(refreshToken, It.IsAny<string>()))
+            .ReturnsAsync((new RefreshToken(), "new-refresh"));
+
+        _iamClientMock.Setup(s => s.ResolvePermissionsAsync(refreshToken.PrincipalId))
+            .ThrowsAsync(new Exception("IAM down"));
+
+        _tokenGeneratorMock.Setup(s => s.GenerateAccessToken(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), null, null))
+            .Returns("access-token");
+
+        // Act
+        var result = await _service!.RefreshTokenAsync(new RefreshRequest { RefreshToken = refreshTokenValue }, "127.0.0.1");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("access-token", result.AccessToken);
+        Assert.Equal("new-refresh", result.RefreshToken);
+    }
+
+    [Fact]
+    public async Task AuthenticateAsync_ExternalServiceTimeout_ReturnsInvalidCredentials()
+    {
+        // Arrange
+        var request = new LoginRequest { Username = "user", Password = "password", UserType = "customer" };
+
+        _configurationMock.Setup(c => c["CustomerService:ValidationEndpoint"]).Returns("/validate");
+
+        var handlerMock = new Mock<HttpMessageHandler>();
+        handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>()
+            )
+            .ThrowsAsync(new OperationCanceledException());
+
+        var httpClient = new HttpClient(handlerMock.Object);
+        _httpClientFactoryMock.Setup(f => f.CreateClient("ExternalValidation"))
+            .Returns(httpClient);
+
+        // Act
+        var result = await _service!.AuthenticateAsync(request, "127.0.0.1");
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Equal("invalid_credentials", result.ErrorCode);
+    }
 }
