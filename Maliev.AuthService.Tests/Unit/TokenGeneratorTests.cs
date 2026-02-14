@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Maliev.AuthService.Api.Services;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -13,6 +14,7 @@ public class TokenGeneratorTests
 {
     private readonly Mock<IConfiguration> _configMock;
     private readonly Mock<ILogger<TokenGenerator>> _loggerMock;
+    private readonly Mock<IHostEnvironment> _environmentMock;
     private readonly TokenGenerator _tokenGenerator;
     private readonly string _privateKeyBase64;
 
@@ -20,6 +22,10 @@ public class TokenGeneratorTests
     {
         _configMock = new Mock<IConfiguration>();
         _loggerMock = new Mock<ILogger<TokenGenerator>>();
+        _environmentMock = new Mock<IHostEnvironment>();
+
+        // Setup environment as Testing (not Development) to avoid debug logs in tests
+        _environmentMock.Setup(e => e.EnvironmentName).Returns("Testing");
 
         using var rsa = RSA.Create(2048);
         var privateKeyPem = rsa.ExportPkcs8PrivateKeyPem();  // Use PKCS#8 format
@@ -29,7 +35,7 @@ public class TokenGeneratorTests
         _configMock.Setup(c => c["Jwt:Issuer"]).Returns("https://test.com");
         _configMock.Setup(c => c["Jwt:Audience"]).Returns("https://test.com");
 
-        _tokenGenerator = new TokenGenerator(_configMock.Object, _loggerMock.Object);
+        _tokenGenerator = new TokenGenerator(_configMock.Object, _loggerMock.Object, _environmentMock.Object);
     }
 
     [Fact]

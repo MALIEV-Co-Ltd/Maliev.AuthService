@@ -30,6 +30,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
     private readonly Mock<IConfiguration> _configurationMock;
     private readonly Mock<IPublishEndpoint> _publishEndpointMock;
+    private readonly Mock<Maliev.AuthService.Api.Services.External.IEmployeeServiceClient> _employeeServiceClientMock;
     private AuthenticationService? _service;
 
     public AuthenticationServiceTests(TestDatabaseFixture fixture)
@@ -45,6 +46,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         _httpClientFactoryMock = new Mock<IHttpClientFactory>();
         _configurationMock = new Mock<IConfiguration>();
         _publishEndpointMock = new Mock<IPublishEndpoint>();
+        _employeeServiceClientMock = new Mock<Maliev.AuthService.Api.Services.External.IEmployeeServiceClient>();
     }
 
     public async Task InitializeAsync()
@@ -61,7 +63,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             _loggerMock.Object,
             _httpClientFactoryMock.Object,
             _configurationMock.Object,
-            _publishEndpointMock.Object);
+            _publishEndpointMock.Object,
+            _employeeServiceClientMock.Object);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;

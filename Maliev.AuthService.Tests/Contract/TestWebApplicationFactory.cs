@@ -76,6 +76,9 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
 
     protected override void ConfigureEnvironmentVariables()
     {
+        // Set IAM registration delay to 0 for immediate registration in tests
+        Environment.SetEnvironmentVariable("IAM__RegistrationDelaySeconds", "0");
+
         // Set external service URLs via environment variables for testing
         Environment.SetEnvironmentVariable("CustomerService__BaseUrl", "http://localhost:5001");
         Environment.SetEnvironmentVariable("EmployeeService__BaseUrl", "http://localhost:5002");

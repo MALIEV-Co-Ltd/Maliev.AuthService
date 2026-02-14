@@ -67,11 +67,11 @@ public class BaseIntegrationTestFactory<TProgram, TDbContext> : WebApplicationFa
                     .Build();
 
                 _redisContainer = new RedisBuilder()
-                    .WithImage("redis:8.4-alpine")
+                    .WithImage("redis:7.4-alpine")
                     .Build();
 
                 _rabbitmqContainer = new RabbitMqBuilder()
-                    .WithImage("rabbitmq:4.2-alpine")
+                    .WithImage("rabbitmq:4.0-alpine")
                     .Build();
 
                 // Start all containers in parallel
@@ -129,6 +129,8 @@ public class BaseIntegrationTestFactory<TProgram, TDbContext> : WebApplicationFa
         Environment.SetEnvironmentVariable($"ConnectionStrings__{DbConnectionStringName}", _postgresContainer!.GetConnectionString());
         Environment.SetEnvironmentVariable("ConnectionStrings__redis", _redisContainer!.GetConnectionString());
         Environment.SetEnvironmentVariable("ConnectionStrings__rabbitmq", _rabbitmqContainer!.GetConnectionString());
+        Environment.SetEnvironmentVariable("CORS_ALLOWED_ORIGINS", "http://localhost:3000");
+        Environment.SetEnvironmentVariable("CORS__AllowedOrigins__0", "http://localhost:3000");
     }
 
     public new async Task DisposeAsync()
@@ -137,6 +139,8 @@ public class BaseIntegrationTestFactory<TProgram, TDbContext> : WebApplicationFa
         // Static containers are NOT disposed here to allow reuse across tests
         _testRsa.Dispose();
         Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", null); // Cleanup
+        Environment.SetEnvironmentVariable("CORS_ALLOWED_ORIGINS", null);
+        Environment.SetEnvironmentVariable("CORS__AllowedOrigins__0", null);
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -175,7 +179,9 @@ public class BaseIntegrationTestFactory<TProgram, TDbContext> : WebApplicationFa
                 ["Jwt:Issuer"] = "test-issuer",
                 ["Jwt:Audience"] = "test-audience",
                 ["Jwt:PrivateKey"] = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(privateKeyPem)),
-                ["Jwt:PublicKey"] = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(publicKeyPem))
+                ["Jwt:PublicKey"] = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(publicKeyPem)),
+                ["CORS:AllowedOrigins:0"] = "http://localhost:3000",
+                ["CORS_ALLOWED_ORIGINS"] = "http://localhost:3000"
             });
         });
 
