@@ -2,6 +2,7 @@ using Maliev.AuthService.Api.Models.Request;
 using Maliev.AuthService.Api.Models.Response;
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
+using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Security.Cryptography;
@@ -27,6 +28,7 @@ public class AuthenticationService : IAuthenticationService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly MassTransit.IPublishEndpoint _publishEndpoint;
+    private readonly External.IEmployeeServiceClient _employeeServiceClient;
     /// <summary>
     /// Initializes a new instance of the <see cref="AuthenticationService"/> class.
     /// </summary>
@@ -42,7 +44,8 @@ public class AuthenticationService : IAuthenticationService
         ILogger<AuthenticationService> logger,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        MassTransit.IPublishEndpoint publishEndpoint)
+        MassTransit.IPublishEndpoint publishEndpoint,
+        External.IEmployeeServiceClient employeeServiceClient)
     {
         _dbContext = dbContext;
         _tokenGenerator = tokenGenerator;
@@ -55,6 +58,7 @@ public class AuthenticationService : IAuthenticationService
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _publishEndpoint = publishEndpoint;
+        _employeeServiceClient = employeeServiceClient ?? throw new ArgumentNullException(nameof(employeeServiceClient));
     }
     /// <inheritdoc/>
     public async Task<AuthenticationResult> AuthenticateAsync(LoginRequest request, string? ipAddress)
@@ -208,8 +212,20 @@ public class AuthenticationService : IAuthenticationService
         try
         {
             var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId);
-            permissions = iamResponse.Permissions;
             roles = iamResponse.Roles;
+
+            // Optimization: If user is Platform Owner, do NOT include permissions in JWT.
+            // The Platform Owner role implies all permissions (*), and including them all
+            // causes HTTP 431 Header Too Large errors.
+            if (roles != null && roles.Contains(MalievIamRoles.PlatformOwner))
+            {
+                permissions = null; // Don't include granular permissions
+                _logger.LogInformation("User {UserId} is Platform Owner. Excluding granular permissions from JWT to prevent header overflow.", userId);
+            }
+            else
+            {
+                permissions = iamResponse.Permissions;
+            }
         }
         catch (Exception ex)
         {
@@ -285,8 +301,18 @@ public class AuthenticationService : IAuthenticationService
         {
             // Use the stored PrincipalId for consistent permission resolution across token lifecycle
             var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(refreshToken.PrincipalId);
-            permissions = iamResponse.Permissions;
             roles = iamResponse.Roles;
+
+            // Optimization: If user is Platform Owner, do NOT include permissions in JWT.
+            if (roles != null && roles.Contains(MalievIamRoles.PlatformOwner))
+            {
+                permissions = null;
+                _logger.LogInformation("User {UserId} is Platform Owner. Excluding granular permissions from refreshed JWT.", refreshToken.UserId);
+            }
+            else
+            {
+                permissions = iamResponse.Permissions;
+            }
         }
         catch (Exception ex)
         {
@@ -522,7 +548,12 @@ public class AuthenticationService : IAuthenticationService
             _logger.LogWarning("Service {ClientId} has no PrincipalId mapping. Token will be issued without IAM permissions. Register this service in IAM.", request.ClientId);
         }
 
-        var accessToken = await _tokenGenerator.GenerateServiceAccessTokenAsync(request.ClientId, serviceCredential.ServiceName, permissions, roles);
+        var accessToken = await _tokenGenerator.GenerateServiceAccessTokenAsync(
+            request.ClientId,
+            serviceCredential.ServiceName,
+            permissions,
+            roles,
+            serviceCredential.PrincipalId);
 
         await LogAuditAsync(null, null, "service_login", ipAddress, true, null);
 
@@ -601,8 +632,14 @@ public class AuthenticationService : IAuthenticationService
             // Call auto-provision endpoint
             _logger.LogInformation("Employee not found for email {Email} during Google exchange. Triggering auto-provisioning.", request.Email);
 
+            // Split full name into first and last name for the employee service
+            var nameParts = (request.FullName ?? request.Email).Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            var firstName = nameParts.Length > 0 ? nameParts[0] : request.Email;
+            var lastName = nameParts.Length > 1 ? nameParts[1] : "-"; // Default to "-" if last name missing
+
             var (provisionSuccess, provEmployeeId, provPrincipalId, provName, provStatus, provisionError) =
-                await ProvisionEmployeeAsync(request.Email, request.FullName ?? request.Email);
+                await ProvisionEmployeeAsync(request.Email, firstName, lastName);
+
 
             if (!provisionSuccess)
             {
@@ -647,8 +684,18 @@ public class AuthenticationService : IAuthenticationService
         try
         {
             var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId!.Value);
-            permissions = iamResponse.Permissions;
             roles = iamResponse.Roles;
+
+            // Optimization: If user is Platform Owner, do NOT include permissions in JWT.
+            if (roles != null && roles.Contains(MalievIamRoles.PlatformOwner))
+            {
+                permissions = null;
+                _logger.LogInformation("Google SSO user {Email} is Platform Owner. Excluding granular permissions from JWT.", request.Email);
+            }
+            else
+            {
+                permissions = iamResponse.Permissions;
+            }
         }
         catch (Exception ex)
         {
@@ -730,9 +777,7 @@ public class AuthenticationService : IAuthenticationService
     {
         try
         {
-            var client = _httpClientFactory.CreateClient("EmployeeServiceClient");
-            var encodedEmail = Uri.EscapeDataString(email);
-            var response = await client.GetAsync($"/employee/v1/employees/by-email/{encodedEmail}");
+            var response = await _employeeServiceClient.GetEmployeeByEmailAsync(email);
 
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
@@ -747,7 +792,8 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "service_unavailable");
             }
 
-            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>();
+            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions);
             if (result == null)
             {
                 _logger.LogWarning("Employee lookup returned null result for email: {Email}", email);
@@ -772,13 +818,13 @@ public class AuthenticationService : IAuthenticationService
     /// Calls the EmployeeService auto-provision endpoint.
     /// </summary>
     private async Task<(bool Success, Guid? EmployeeId, Guid? PrincipalId, string? Name, string? EmploymentStatus, string? Error)>
-        ProvisionEmployeeAsync(string email, string fullName)
+        ProvisionEmployeeAsync(string email, string firstName, string lastName)
     {
         try
         {
-            var client = _httpClientFactory.CreateClient("EmployeeServiceClient");
-            var request = new { email, full_name = fullName };
-            var response = await client.PostAsJsonAsync("/employee/v1/employees/auto-provision", request);
+            var request = new { email, first_name = firstName, last_name = lastName };
+            var response = await _employeeServiceClient.ProvisionEmployeeAsync(request);
+
 
             if (!response.IsSuccessStatusCode)
             {
@@ -788,7 +834,8 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "provision_failed");
             }
 
-            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>();
+            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions);
             if (result == null)
             {
                 return (false, null, null, null, null, "service_unavailable");
@@ -807,8 +854,8 @@ public class AuthenticationService : IAuthenticationService
         string username, string password, UserType userType)
     {
         var serviceUrl = userType == UserType.Customer
-            ? _configuration["CustomerService:BaseUrl"] ?? "http://maliev-customerservice-api"
-            : _configuration["EmployeeService:BaseUrl"] ?? "http://maliev-employeeservice-api";
+            ? _configuration["CustomerService:BaseUrl"] ?? "http://CustomerService"
+            : _configuration["EmployeeService:BaseUrl"] ?? "http://EmployeeService";
 
         var validationEndpoint = userType == UserType.Customer
             ? _configuration["CustomerService:ValidationEndpoint"]

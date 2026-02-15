@@ -69,17 +69,17 @@ public class RefreshTokenServiceTests : IClassFixture<TestDatabaseFixture>, IAsy
         // Arrange
         var userId = Guid.NewGuid();
         _tokenGeneratorMock.Setup(g => g.HashToken("valid-token")).Returns("valid-hash");
-        
+
         using (var dbContext = _fixture.CreateDbContext())
         {
             var familyId = Guid.NewGuid();
             dbContext.TokenFamilies.Add(new TokenFamily { FamilyId = familyId, UserId = userId, UserType = UserType.Customer });
-            dbContext.RefreshTokens.Add(new RefreshToken 
-            { 
-                Id = Guid.NewGuid(), 
-                FamilyId = familyId, 
-                UserId = userId, 
-                TokenHash = "valid-hash", 
+            dbContext.RefreshTokens.Add(new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                FamilyId = familyId,
+                UserId = userId,
+                TokenHash = "valid-hash",
                 ExpiresAt = DateTime.UtcNow.AddDays(1),
                 IsUsed = false
             });
@@ -101,27 +101,27 @@ public class RefreshTokenServiceTests : IClassFixture<TestDatabaseFixture>, IAsy
         var userId = Guid.NewGuid();
         var familyId = Guid.NewGuid();
         _tokenGeneratorMock.Setup(g => g.HashToken("reused-token")).Returns("reused-hash");
-        
+
         using (var dbContext = _fixture.CreateDbContext())
         {
             dbContext.TokenFamilies.Add(new TokenFamily { FamilyId = familyId, UserId = userId, UserType = UserType.Customer });
-            dbContext.RefreshTokens.Add(new RefreshToken 
-            { 
-                Id = Guid.NewGuid(), 
-                FamilyId = familyId, 
-                UserId = userId, 
-                TokenHash = "reused-hash", 
+            dbContext.RefreshTokens.Add(new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                FamilyId = familyId,
+                UserId = userId,
+                TokenHash = "reused-hash",
                 ExpiresAt = DateTime.UtcNow.AddDays(1),
-                IsUsed = true 
+                IsUsed = true
             });
-            dbContext.RefreshTokens.Add(new RefreshToken 
-            { 
-                Id = Guid.NewGuid(), 
-                FamilyId = familyId, 
-                UserId = userId, 
-                TokenHash = "other-token", 
+            dbContext.RefreshTokens.Add(new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                FamilyId = familyId,
+                UserId = userId,
+                TokenHash = "other-token",
                 ExpiresAt = DateTime.UtcNow.AddDays(1),
-                IsUsed = false 
+                IsUsed = false
             });
             await dbContext.SaveChangesAsync();
         }
@@ -131,7 +131,7 @@ public class RefreshTokenServiceTests : IClassFixture<TestDatabaseFixture>, IAsy
 
         // Assert
         Assert.Null(result);
-        
+
         using (var dbContext = _fixture.CreateDbContext())
         {
             var otherToken = await dbContext.RefreshTokens.FirstOrDefaultAsync(rt => rt.TokenHash == "other-token");
@@ -150,13 +150,13 @@ public class RefreshTokenServiceTests : IClassFixture<TestDatabaseFixture>, IAsy
         using (var dbContext = _fixture.CreateDbContext())
         {
             dbContext.TokenFamilies.Add(new TokenFamily { FamilyId = familyId, UserId = userId, UserType = UserType.Customer });
-            dbContext.RefreshTokens.Add(new RefreshToken 
-            { 
-                Id = Guid.NewGuid(), 
-                FamilyId = familyId, 
-                UserId = userId, 
-                TokenHash = tokenHash, 
-                IsUsed = true 
+            dbContext.RefreshTokens.Add(new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                FamilyId = familyId,
+                UserId = userId,
+                TokenHash = tokenHash,
+                IsUsed = true
             });
             await dbContext.SaveChangesAsync();
         }
@@ -178,13 +178,13 @@ public class RefreshTokenServiceTests : IClassFixture<TestDatabaseFixture>, IAsy
         using (var dbContext = _fixture.CreateDbContext())
         {
             dbContext.TokenFamilies.Add(new TokenFamily { FamilyId = familyId, UserId = userId, UserType = UserType.Customer });
-            dbContext.RefreshTokens.Add(new RefreshToken 
-            { 
-                Id = Guid.NewGuid(), 
-                FamilyId = familyId, 
-                UserId = userId, 
-                TokenHash = tokenHash, 
-                IsUsed = false 
+            dbContext.RefreshTokens.Add(new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                FamilyId = familyId,
+                UserId = userId,
+                TokenHash = tokenHash,
+                IsUsed = false
             });
             await dbContext.SaveChangesAsync();
         }

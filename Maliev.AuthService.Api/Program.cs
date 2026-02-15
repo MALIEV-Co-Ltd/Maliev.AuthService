@@ -25,14 +25,14 @@ try
     // Register DbContext for all environments
     builder.AddPostgresDbContext<AuthDbContext>(connectionName: "AuthDbContext"); // PostgreSQL with retry logic
 
-    builder.AddRedisDistributedCache(instanceName: "auth:"); // Redis with in-memory fallback
+    builder.AddStandardCache("auth:"); // Redis + in-memory fallback, memory-optimized // Redis with in-memory fallback
     builder.AddMassTransitWithRabbitMq(); // RabbitMQ message bus (non-blocking startup)
 
     // JWT Authentication
     builder.AddJwtAuthentication();
 
     // --- API Configuration ---
-    builder.AddDefaultCors(); // CORS from CORS:AllowedOrigins config
+    builder.AddStandardCors(); // CORS with fail-fast validation
     builder.AddDefaultApiVersioning(); // API versioning with URL segment reader
 
     // Add OpenAPI (must be in Program.cs for XML comments to work via source generator)
@@ -44,6 +44,7 @@ try
     }
 
     // Register the authentication handler and token provider for service-to-service calls
+
     builder.Services.AddTransient<Maliev.Aspire.ServiceDefaults.IAM.IServiceAccountTokenProvider>(sp =>
     {
         var config = sp.GetRequiredService<IConfiguration>();
@@ -54,24 +55,14 @@ try
     builder.Services.AddHttpClient();
 
     builder.Services.AddHttpClient("ExternalValidation")
+        .AddServiceDiscovery()
         .AddStandardResilienceHandler();
 
     // Authenticated client for EmployeeService calls (Lookup/Provision)
-    builder.Services.AddHttpClient("EmployeeServiceClient", client =>
-    {
-        var baseUrl = builder.Configuration["Services:EmployeeService:BaseUrl"]
-            ?? throw new InvalidOperationException("Services:EmployeeService:BaseUrl is required");
-        client.BaseAddress = new Uri(baseUrl);
-    })
-    .AddHttpMessageHandler<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>()
-    .AddStandardResilienceHandler(options =>
-    {
-        options.Retry.MaxRetryAttempts = 5;
-        options.Retry.BackoffType = Polly.DelayBackoffType.Exponential;
-        options.CircuitBreaker.FailureRatio = 0.5;
-        options.CircuitBreaker.MinimumThroughput = 5;
-        options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
-    });
+    builder.AddAuthenticatedServiceClient<
+        Maliev.AuthService.Api.Services.External.IEmployeeServiceClient,
+        Maliev.AuthService.Api.Services.External.EmployeeServiceClient
+    >("EmployeeService", sourceServiceName: "AuthService");
 
     builder.Services.AddControllers()
         .AddJsonOptions(options =>
@@ -80,7 +71,29 @@ try
         });
 
     // --- Application Services ---
-    builder.AddServiceClient<IIAMServiceClient, IAMServiceClient>("IAMService");
+    builder.Services.AddHttpClient<IIAMServiceClient, IAMServiceClient>(client =>
+    {
+        // Check if there's an explicit URL configured (for GKE deployment)
+        var explicitUrl = builder.Configuration["Services:IAMService:BaseUrl"];
+
+        if (!string.IsNullOrEmpty(explicitUrl))
+        {
+            // Use explicit URL for GKE/production
+            client.BaseAddress = new Uri(explicitUrl);
+        }
+        else
+        {
+            // Use service name for Aspire service discovery
+            // Service discovery will resolve "http://IAMService" to actual endpoint
+            client.BaseAddress = new Uri("http://IAMService");
+        }
+
+        client.DefaultRequestHeaders.Add("X-Service-Name", "auth");
+        client.Timeout = TimeSpan.FromSeconds(90);
+    })
+    .AddServiceDiscovery()
+    .AddHttpMessageHandler<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>();
+
 
     // IAM Integration
     builder.Services.AddIAMRegistration<AuthIAMRegistrationService>("auth");

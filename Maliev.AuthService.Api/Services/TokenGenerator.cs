@@ -13,16 +13,20 @@ public class TokenGenerator : ITokenGenerator
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<TokenGenerator> _logger;
+    private readonly IHostEnvironment _environment;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="TokenGenerator"/> class.
     /// </summary>
     /// <param name="configuration">The configuration</param>
     /// <param name="logger">The logger instance</param>
+    /// <param name="environment">The host environment</param>
 
-    public TokenGenerator(IConfiguration configuration, ILogger<TokenGenerator> logger)
+    public TokenGenerator(IConfiguration configuration, ILogger<TokenGenerator> logger, IHostEnvironment environment)
     {
         _configuration = configuration;
         _logger = logger;
+        _environment = environment;
     }
 
     private RsaSecurityKey GetRsaSecurityKey()
@@ -94,19 +98,25 @@ public class TokenGenerator : ITokenGenerator
             claims.Add(new Claim(JwtRegisteredClaimNames.Name, name));
         }
 
+        // IMPORTANT: We only include roles in the user token to keep it small and prevent 431 errors.
+        // Downstream services will either check for the role or resolve permissions via IAM service.
+        var rolesList = roles?.ToList() ?? [];
+
+        foreach (var role in rolesList)
+        {
+            claims.Add(new Claim("roles", role));
+            // T145: Add standard role claim for ASP.NET Core compatibility
+            claims.Add(new Claim(ClaimTypes.Role, role));
+        }
+
+        // We specifically DO NOT include all granular permissions resolved from IAM in the JWT
+        // to prevent header size issues. However, we support including them if explicitly passed
+        // for service-to-service calls or specific integration scenarios.
         if (permissions != null)
         {
             foreach (var permission in permissions)
             {
                 claims.Add(new Claim("permissions", permission));
-            }
-        }
-
-        if (roles != null)
-        {
-            foreach (var role in roles)
-            {
-                claims.Add(new Claim("roles", role));
             }
         }
 
@@ -119,14 +129,39 @@ public class TokenGenerator : ITokenGenerator
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddMinutes(15),
+            Expires = DateTime.UtcNow.AddHours(1), // Increased from 15 mins to 1 hour for dev stability
             Issuer = issuer,
             Audience = audience,
             SigningCredentials = credentials
         };
 
+
         var tokenHandler = new JwtSecurityTokenHandler();
         var token = tokenHandler.CreateToken(tokenDescriptor);
+
+        // Debug logging in development environment only
+        if (_environment.IsDevelopment())
+        {
+            var permissionsList = permissions?.ToList() ?? [];
+
+            _logger.LogInformation(
+                "Generated JWT for user {UserId} ({UserType}) with {PermissionCount} permissions and {RoleCount} roles",
+                userId, userType, permissionsList.Count, rolesList.Count);
+
+            if (permissionsList.Count > 0)
+            {
+                _logger.LogDebug(
+                    "Permissions in JWT for user {UserId}: [{Permissions}]",
+                    userId, string.Join(", ", permissionsList));
+            }
+
+            if (rolesList.Count > 0)
+            {
+                _logger.LogDebug(
+                    "Roles in JWT for user {UserId}: [{Roles}]",
+                    userId, string.Join(", ", rolesList));
+            }
+        }
 
         return tokenHandler.WriteToken(token);
     }
@@ -146,17 +181,20 @@ public class TokenGenerator : ITokenGenerator
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
     /// <inheritdoc/>
-    public Task<string> GenerateServiceAccessTokenAsync(string clientId, string serviceName, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null)
+    public Task<string> GenerateServiceAccessTokenAsync(string clientId, string serviceName, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null, Guid? principalId = null)
     {
         var claims = new List<Claim>
         {
-            new(JwtRegisteredClaimNames.Sub, clientId),
+            new(JwtRegisteredClaimNames.Sub, principalId?.ToString() ?? clientId),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             new("service_name", serviceName),
+            new("client_id", clientId),
             new("user_type", "service"),
             new(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
         };
 
+        // IMPORTANT: Service accounts can include permissions for direct authorization
+        // User tokens should only include roles to keep token size small
         if (permissions != null)
         {
             foreach (var permission in permissions)
@@ -190,6 +228,31 @@ public class TokenGenerator : ITokenGenerator
 
         var tokenHandler = new JwtSecurityTokenHandler();
         var token = tokenHandler.CreateToken(tokenDescriptor);
+
+        // Debug logging in development environment only
+        if (_environment.IsDevelopment())
+        {
+            var permissionsList = permissions?.ToList() ?? [];
+            var rolesList = roles?.ToList() ?? [];
+
+            _logger.LogInformation(
+                "Generated service JWT for {ServiceName} (ClientId: {ClientId}) with {PermissionCount} permissions and {RoleCount} roles",
+                serviceName, clientId, permissionsList.Count, rolesList.Count);
+
+            if (permissionsList.Count > 0)
+            {
+                _logger.LogDebug(
+                    "Permissions in service JWT for {ServiceName}: [{Permissions}]",
+                    serviceName, string.Join(", ", permissionsList));
+            }
+
+            if (rolesList.Count > 0)
+            {
+                _logger.LogDebug(
+                    "Roles in service JWT for {ServiceName}: [{Roles}]",
+                    serviceName, string.Join(", ", rolesList));
+            }
+        }
 
         return Task.FromResult(tokenHandler.WriteToken(token));
     }

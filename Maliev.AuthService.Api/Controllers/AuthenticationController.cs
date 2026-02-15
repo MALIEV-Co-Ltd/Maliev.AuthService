@@ -288,6 +288,15 @@ public class AuthenticationController : ControllerBase
                 });
             }
 
+            if (result.ErrorCode == "provision_failed")
+            {
+                return StatusCode(403, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
             return Unauthorized(new ErrorResponse
             {
                 Error = result.ErrorCode!,

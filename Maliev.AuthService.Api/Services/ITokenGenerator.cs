@@ -37,6 +37,7 @@ public interface ITokenGenerator
     /// <param name="serviceName">The service name</param>
     /// <param name="permissions">The service's permissions</param>
     /// <param name="roles">The service's roles</param>
+    /// <param name="principalId">The optional principal identifier (GUID)</param>
     /// <returns>The JWT access token</returns>
-    Task<string> GenerateServiceAccessTokenAsync(string clientId, string serviceName, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null);
+    Task<string> GenerateServiceAccessTokenAsync(string clientId, string serviceName, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null, Guid? principalId = null);
 }
