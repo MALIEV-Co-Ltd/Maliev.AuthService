@@ -8,7 +8,7 @@ on:
       - main
 
 jobs:
-  prepare:
+  prep:
     runs-on: ubuntu-latest
     outputs:
       version_format: ${{ steps.set-version.outputs.version_format }}
@@ -16,18 +16,20 @@ jobs:
       - id: set-version
         run: |
           BASE_BRANCH="${{ github.base_ref }}"
-          if [ "$BASE_BRANCH" == "main" ]; then
+          if ["$BASE_BRANCH" == "main"]; then
             VERSION_FORMAT="1.0.*"
+          elif ["$BASE_BRANCH" == "staging"]; then
+            VERSION_FORMAT="1.0.*-beta*"
           else
-            VERSION_FORMAT="1.0.*-*"
+            VERSION_FORMAT="1.0.*-alpha*"
           fi
           echo "version_format=$VERSION_FORMAT" >> $GITHUB_OUTPUT
 
   build-and-test:
-    needs: prepare
+    needs: prep
     uses: ./.github/workflows/_build-and-test.yml
     with:
       solution_file: Maliev.AuthService.slnx
-      extra_args: -p:SharedLibraryVersion=${{ needs.prepare.outputs.version_format }}
+      extra_args: -p:SharedLibraryVersion=${{ needs.prep.outputs.version_format }}
     secrets:
       gitops_pat: ${{ secrets.GITOPS_PAT }}
