@@ -792,7 +792,7 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "service_unavailable");
             }
 
-            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
             var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions);
             if (result == null)
             {
@@ -800,7 +800,7 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "service_unavailable");
             }
 
-            return (true, result.Id, result.PrincipalId, result.FullName, result.EmploymentStatus, null);
+            return (true, result.EmployeeId, result.PrincipalId, result.FullName, result.EmploymentStatus, null);
         }
         catch (OperationCanceledException)
         {
@@ -834,14 +834,14 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "provision_failed");
             }
 
-            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
             var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions);
             if (result == null)
             {
                 return (false, null, null, null, null, "service_unavailable");
             }
 
-            return (true, result.Id, result.PrincipalId, result.FullName, result.EmploymentStatus, null);
+            return (true, result.EmployeeId, result.PrincipalId, result.FullName, result.EmploymentStatus, null);
         }
         catch (Exception ex)
         {
@@ -949,7 +949,7 @@ public class AuthenticationService : IAuthenticationService
 
     private record EmployeeLookupResult
     {
-        public Guid Id { get; init; }
+        public Guid EmployeeId { get; init; }
         public Guid PrincipalId { get; init; }
         public string Email { get; init; } = string.Empty;
         public string FullName { get; init; } = string.Empty;
