@@ -792,15 +792,14 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "service_unavailable");
             }
 
-            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
-            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions);
+            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>();
             if (result == null)
             {
                 _logger.LogWarning("Employee lookup returned null result for email: {Email}", email);
                 return (false, null, null, null, null, "service_unavailable");
             }
 
-            return (true, result.EmployeeId, result.PrincipalId, result.FullName, result.EmploymentStatus, null);
+            return (true, result.Id, result.PrincipalId, result.FullName, result.EmploymentStatus, null);
         }
         catch (OperationCanceledException)
         {
@@ -834,14 +833,13 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "provision_failed");
             }
 
-            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
-            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions);
+            var result = await response.Content.ReadFromJsonAsync<ProvisionEmployeeResult>();
             if (result == null)
             {
                 return (false, null, null, null, null, "service_unavailable");
             }
 
-            return (true, result.EmployeeId, result.PrincipalId, result.FullName, result.EmploymentStatus, null);
+            return (true, result.Id, result.PrincipalId, null, null, null);
         }
         catch (Exception ex)
         {
@@ -889,8 +887,7 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "Invalid credentials");
             }
 
-            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
-            var result = await response.Content.ReadFromJsonAsync<CredentialValidationResult>(jsonOptions);
+            var result = await response.Content.ReadFromJsonAsync<CredentialValidationResult>();
             if (result == null || !result.IsValid)
             {
 
@@ -949,10 +946,18 @@ public class AuthenticationService : IAuthenticationService
 
     private record EmployeeLookupResult
     {
-        public Guid EmployeeId { get; init; }
+        public Guid Id { get; init; }
         public Guid PrincipalId { get; init; }
         public string Email { get; init; } = string.Empty;
-        public string FullName { get; init; } = string.Empty;
+        public string FirstName { get; init; } = string.Empty;
+        public string LastName { get; init; } = string.Empty;
+        public string FullName => $"{FirstName} {LastName}".Trim();
         public string EmploymentStatus { get; init; } = string.Empty;
+    }
+
+    private record ProvisionEmployeeResult
+    {
+        public Guid Id { get; init; }
+        public Guid PrincipalId { get; init; }
     }
 }
