@@ -2,6 +2,8 @@ using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 using Maliev.AuthService.Tests.Infrastructure;
+using Maliev.MessagingContracts.Generated;
+using Maliev.MessagingContracts.Contracts.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -137,7 +139,7 @@ public class RefreshTokenServiceTests : IClassFixture<TestDatabaseFixture>, IAsy
             var otherToken = await dbContext.RefreshTokens.FirstOrDefaultAsync(rt => rt.TokenHash == "other-token");
             Assert.True(otherToken!.IsUsed); // Should be revoked
         }
-        _publishEndpointMock.Verify(p => p.Publish(It.IsAny<Maliev.MessagingContracts.Generated.SuspiciousActivityDetectedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
+        _publishEndpointMock.Verify(p => p.Publish(It.IsAny<SuspiciousActivityDetectedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

@@ -2,6 +2,8 @@ using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 using Maliev.AuthService.Tests.Infrastructure;
+using Maliev.MessagingContracts.Generated;
+using Maliev.MessagingContracts.Contracts.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -106,7 +108,7 @@ public class AccountLockoutServiceTests : IClassFixture<TestDatabaseFixture>, IA
         var lockout = await dbContext.AccountLockouts.FirstAsync(l => l.UserId == userId);
         Assert.Equal(5, lockout.FailedAttempts);
         Assert.NotNull(lockout.LockedUntil);
-        _publishEndpointMock.Verify(p => p.Publish(It.IsAny<Maliev.MessagingContracts.Generated.UserAccountLockedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
+        _publishEndpointMock.Verify(p => p.Publish(It.IsAny<UserAccountLockedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
