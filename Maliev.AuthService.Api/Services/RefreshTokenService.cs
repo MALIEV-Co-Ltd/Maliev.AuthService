@@ -1,6 +1,7 @@
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 using Maliev.MessagingContracts.Generated;
+using Maliev.MessagingContracts.Contracts.Auth;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 

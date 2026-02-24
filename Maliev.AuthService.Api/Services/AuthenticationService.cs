@@ -3,6 +3,7 @@ using Maliev.AuthService.Api.Models.Response;
 using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 using Maliev.Aspire.ServiceDefaults.IAM;
+using Maliev.MessagingContracts.Contracts.Auth;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Security.Cryptography;
@@ -82,7 +83,7 @@ public class AuthenticationService : IAuthenticationService
         {
             await LogAuditAsync(null, userType, "login", ipAddress, false, "Rate limit exceeded");
 
-            await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.LoginFailedEvent(
+            await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(),
                 "LoginFailedEvent",
                 Maliev.MessagingContracts.Generated.MessageType.Event,
@@ -93,7 +94,7 @@ public class AuthenticationService : IAuthenticationService
                 null,
                 DateTimeOffset.UtcNow,
                 false,
-                new Maliev.MessagingContracts.Generated.LoginFailedEventPayload(
+                new LoginFailedEventPayload(
                     request.Username,
                     null,
                     normalizedType == "customer" ? "Customer" : "Employee",
@@ -121,7 +122,7 @@ public class AuthenticationService : IAuthenticationService
         {
             await LogAuditAsync(validationResult.UserId.Value, userType, "login", ipAddress, false, "Account locked");
 
-            await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.LoginFailedEvent(
+            await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(),
                 "LoginFailedEvent",
                 Maliev.MessagingContracts.Generated.MessageType.Event,
@@ -132,7 +133,7 @@ public class AuthenticationService : IAuthenticationService
                 null,
                 DateTimeOffset.UtcNow,
                 false,
-                new Maliev.MessagingContracts.Generated.LoginFailedEventPayload(
+                new LoginFailedEventPayload(
                     request.Username,
                     validationResult.UserId.Value.ToString(),
                     normalizedType == "customer" ? "Customer" : "Employee",
@@ -168,7 +169,7 @@ public class AuthenticationService : IAuthenticationService
 
             await LogAuditAsync(validationResult.UserId, userType, "login", ipAddress, false, validationResult.FailureReason);
 
-            await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.LoginFailedEvent(
+            await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(),
                 "LoginFailedEvent",
                 Maliev.MessagingContracts.Generated.MessageType.Event,
@@ -179,7 +180,7 @@ public class AuthenticationService : IAuthenticationService
                 null,
                 DateTimeOffset.UtcNow,
                 false,
-                new Maliev.MessagingContracts.Generated.LoginFailedEventPayload(
+                new LoginFailedEventPayload(
                     request.Username,
                     validationResult.UserId?.ToString(),
                     normalizedType == "customer" ? "Customer" : "Employee",
@@ -238,7 +239,7 @@ public class AuthenticationService : IAuthenticationService
 
         await LogAuditAsync(userId, userType, "login", ipAddress, true, null);
 
-        await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.UserLoggedInEvent(
+        await _publishEndpoint.Publish(new UserLoggedInEvent(
             Guid.NewGuid(),
             "UserLoggedInEvent",
             Maliev.MessagingContracts.Generated.MessageType.Event,
@@ -249,7 +250,7 @@ public class AuthenticationService : IAuthenticationService
             null,
             DateTimeOffset.UtcNow,
             false,
-            new Maliev.MessagingContracts.Generated.UserLoggedInEventPayload(
+            new UserLoggedInEventPayload(
                 userId.ToString(),
                 principalId.ToString(),
                 normalizedType == "customer" ? "Customer" : "Employee",
@@ -438,7 +439,7 @@ public class AuthenticationService : IAuthenticationService
 
         await LogAuditAsync(refreshToken.UserId, refreshToken.UserType, "logout", null, true, null);
 
-        await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.UserLoggedOutEvent(
+        await _publishEndpoint.Publish(new UserLoggedOutEvent(
             Guid.NewGuid(),
             "UserLoggedOutEvent",
             Maliev.MessagingContracts.Generated.MessageType.Event,
@@ -449,7 +450,7 @@ public class AuthenticationService : IAuthenticationService
             null,
             DateTimeOffset.UtcNow,
             false,
-            new Maliev.MessagingContracts.Generated.UserLoggedOutEventPayload(
+            new UserLoggedOutEventPayload(
                 refreshToken.UserId.ToString(),
                 refreshToken.UserType == UserType.Customer ? "Customer" : "Employee",
                 DateTimeOffset.UtcNow
@@ -469,7 +470,7 @@ public class AuthenticationService : IAuthenticationService
         {
             await LogAuditAsync(null, null, "service_login", ipAddress, false, "Invalid client ID");
 
-            await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.LoginFailedEvent(
+            await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(),
                 "LoginFailedEvent",
                 Maliev.MessagingContracts.Generated.MessageType.Event,
@@ -480,7 +481,7 @@ public class AuthenticationService : IAuthenticationService
                 null,
                 DateTimeOffset.UtcNow,
                 false,
-                new Maliev.MessagingContracts.Generated.LoginFailedEventPayload(
+                new LoginFailedEventPayload(
                     request.ClientId,
                     null,
                     "Service",
@@ -500,7 +501,7 @@ public class AuthenticationService : IAuthenticationService
         {
             await LogAuditAsync(null, null, "service_login", ipAddress, false, "Invalid client secret");
 
-            await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.LoginFailedEvent(
+            await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(),
                 "LoginFailedEvent",
                 Maliev.MessagingContracts.Generated.MessageType.Event,
@@ -511,7 +512,7 @@ public class AuthenticationService : IAuthenticationService
                 null,
                 DateTimeOffset.UtcNow,
                 false,
-                new Maliev.MessagingContracts.Generated.LoginFailedEventPayload(
+                new LoginFailedEventPayload(
                     request.ClientId,
                     null,
                     "Service",
@@ -557,7 +558,7 @@ public class AuthenticationService : IAuthenticationService
 
         await LogAuditAsync(null, null, "service_login", ipAddress, true, null);
 
-        await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.UserLoggedInEvent(
+        await _publishEndpoint.Publish(new UserLoggedInEvent(
             Guid.NewGuid(),
             "UserLoggedInEvent",
             Maliev.MessagingContracts.Generated.MessageType.Event,
@@ -568,7 +569,7 @@ public class AuthenticationService : IAuthenticationService
             null,
             DateTimeOffset.UtcNow,
             false,
-            new Maliev.MessagingContracts.Generated.UserLoggedInEventPayload(
+            new UserLoggedInEventPayload(
                 request.ClientId,
                 serviceCredential.PrincipalId?.ToString(),
                 "Service",
@@ -724,7 +725,7 @@ public class AuthenticationService : IAuthenticationService
         // 7. Audit log + publish UserLoggedInEvent
         await LogAuditAsync(employeeId.Value, UserType.Employee, "google_exchange", ipAddress, true, null);
 
-        await _publishEndpoint.Publish(new Maliev.MessagingContracts.Generated.UserLoggedInEvent(
+        await _publishEndpoint.Publish(new UserLoggedInEvent(
             Guid.NewGuid(),
             "UserLoggedInEvent",
             Maliev.MessagingContracts.Generated.MessageType.Event,
@@ -735,7 +736,7 @@ public class AuthenticationService : IAuthenticationService
             null,
             DateTimeOffset.UtcNow,
             false,
-            new Maliev.MessagingContracts.Generated.UserLoggedInEventPayload(
+            new UserLoggedInEventPayload(
                 employeeId.Value.ToString(),
                 principalId.Value.ToString(),
                 "Employee",
