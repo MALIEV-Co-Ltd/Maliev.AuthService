@@ -26,7 +26,10 @@ try
     builder.AddPostgresDbContext<AuthDbContext>(connectionName: "AuthDbContext"); // PostgreSQL with retry logic
 
     builder.AddStandardCache("auth:"); // Redis + in-memory fallback, memory-optimized // Redis with in-memory fallback
-    builder.AddMassTransitWithRabbitMq(); // RabbitMQ message bus (non-blocking startup)
+    builder.AddMassTransitWithRabbitMq(x =>
+    {
+        // Register all event consumers here
+    }); // RabbitMQ message bus (non-blocking startup)
 
     // JWT Authentication
     builder.AddJwtAuthentication();
