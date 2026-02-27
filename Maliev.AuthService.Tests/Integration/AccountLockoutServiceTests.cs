@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using Maliev.AuthService.Tests.Contract;
-using Maliev.MessagingContracts.Generated;
+using Maliev.MessagingContracts;
 
 namespace Maliev.AuthService.Tests.Integration;
 

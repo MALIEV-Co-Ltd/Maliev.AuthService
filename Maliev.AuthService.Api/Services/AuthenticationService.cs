@@ -4,7 +4,7 @@ using Maliev.AuthService.Data.DbContexts;
 using Maliev.AuthService.Data.Entities;
 using Maliev.Aspire.ServiceDefaults.IAM;
 using Maliev.MessagingContracts.Contracts.Auth;
-using Maliev.MessagingContracts.Generated;
+using Maliev.MessagingContracts;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Security.Cryptography;
