@@ -1,4 +1,5 @@
-using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Domain.Entities;
+using Maliev.AuthService.Infrastructure.DbContexts;
 using Maliev.AuthService.Tests.Infrastructure;
 using Maliev.AuthService.Tests.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,7 +48,7 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         await using var context = GetDbContext();
 
         // Seed service credentials for service login tests
-        var serviceCredential = new Maliev.AuthService.Data.Entities.ServiceCredential
+        var serviceCredential = new ServiceCredential
         {
             Id = Guid.NewGuid(),
             ClientId = "service-dev-customer-api",
@@ -59,7 +60,7 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
             UpdatedAt = DateTime.UtcNow
         };
 
-        context.Set<Maliev.AuthService.Data.Entities.ServiceCredential>().Add(serviceCredential);
+        context.Set<ServiceCredential>().Add(serviceCredential);
         await context.SaveChangesAsync();
     }
 

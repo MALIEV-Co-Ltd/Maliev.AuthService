@@ -1,9 +1,10 @@
-using Maliev.AuthService.Api.Models.Request;
-using Maliev.AuthService.Api.Models.Response;
-using Maliev.AuthService.Api.Models.IAM;
-using Maliev.AuthService.Api.Services;
-using Maliev.AuthService.Data.DbContexts;
-using Maliev.AuthService.Data.Entities;
+using Maliev.AuthService.Application.DTOs.IAM;
+using Maliev.AuthService.Application.DTOs.Request;
+using Maliev.AuthService.Application.DTOs.Response;
+using Maliev.AuthService.Application.Interfaces;
+using Maliev.AuthService.Domain.Entities;
+using Maliev.AuthService.Infrastructure.DbContexts;
+using Maliev.AuthService.Infrastructure.Services;
 using Maliev.AuthService.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -30,7 +31,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
     private readonly Mock<IConfiguration> _configurationMock;
     private readonly Mock<IPublishEndpoint> _publishEndpointMock;
-    private readonly Mock<Maliev.AuthService.Api.Services.External.IEmployeeServiceClient> _employeeServiceClientMock;
+    private readonly Mock<IEmployeeServiceClient> _employeeServiceClientMock;
     private AuthenticationService? _service;
 
     public AuthenticationServiceTests(TestDatabaseFixture fixture)
@@ -46,7 +47,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         _httpClientFactoryMock = new Mock<IHttpClientFactory>();
         _configurationMock = new Mock<IConfiguration>();
         _publishEndpointMock = new Mock<IPublishEndpoint>();
-        _employeeServiceClientMock = new Mock<Maliev.AuthService.Api.Services.External.IEmployeeServiceClient>();
+        _employeeServiceClientMock = new Mock<IEmployeeServiceClient>();
     }
 
     public async Task InitializeAsync()

@@ -38,7 +38,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Maliev.AuthService.Api\Maliev.AuthService.Api.csproj" />
-    <ProjectReference Include="..\Maliev.AuthService.Data\Maliev.AuthService.Data.csproj" />
+    <ProjectReference Include="..\Maliev.AuthService.Infrastructure\Maliev.AuthService.Infrastructure.csproj" />
+    <ProjectReference Include="..\Maliev.AuthService.Application\Maliev.AuthService.Application.csproj" />
+    <ProjectReference Include="..\Maliev.AuthService.Domain\Maliev.AuthService.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(GITHUB_ACTIONS)' != 'true'">

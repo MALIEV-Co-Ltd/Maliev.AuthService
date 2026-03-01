@@ -1,5 +1,8 @@
 using Maliev.AuthService.Api.Services;
-using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Application.Interfaces;
+using Maliev.AuthService.Infrastructure.DbContexts;
+using Maliev.AuthService.Infrastructure.HttpClients;
+using Maliev.AuthService.Infrastructure.Services;
 
 // Initialize bootstrap logging
 using var loggerFactory = LoggerFactory.Create(logBuilder => logBuilder.AddConsole());
@@ -63,8 +66,8 @@ try
 
     // Authenticated client for EmployeeService calls (Lookup/Provision)
     builder.AddAuthenticatedServiceClient<
-        Maliev.AuthService.Api.Services.External.IEmployeeServiceClient,
-        Maliev.AuthService.Api.Services.External.EmployeeServiceClient
+        IEmployeeServiceClient,
+        EmployeeServiceClient
     >("EmployeeService", sourceServiceName: "AuthService");
 
     builder.Services.AddControllers()

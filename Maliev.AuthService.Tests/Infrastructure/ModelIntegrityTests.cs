@@ -1,4 +1,4 @@
-using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Infrastructure.DbContexts;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
