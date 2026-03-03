@@ -47,18 +47,20 @@ dotnet ef database update --project Maliev.AuthService.Data
 ## 2. Code Style & Conventions
 
 ### Structure & Naming
-- **Framework**: .NET 9.0. Follow standard C#/.NET naming conventions (PascalCase for classes/methods, camelCase for local variables).
+- **Framework**: .NET 10.0. Follow standard C#/.NET naming conventions (PascalCase for classes/methods, camelCase for local variables).
 - **Architecture**:
-  - `Maliev.AuthService.Api`: Controllers, Middleware, Validators.
-  - `Maliev.AuthService.Data`: EF Core entities, repositories, migrations.
-  - `Maliev.AuthService.Tests`: MSTest contract and integration tests.
+  - `Maliev.AuthService.Api`: Controllers, Middleware.
+  - `Maliev.AuthService.Application`: Use cases, handlers.
+  - `Maliev.AuthService.Domain`: Entities, interfaces.
+  - `Maliev.AuthService.Infrastructure`: EF Core, repositories.
+  - `Maliev.AuthService.Tests`: xUnit integration tests.
 - **Async/Await**: Use `async`/`await` for all I/O bound operations. Avoid `.Result` or `.Wait()`.
 - **Dependency Injection**: Use constructor injection for all services.
 
 ### Coding Patterns
 - **Repository Pattern**: Encapsulate data access logic in repositories (e.g., `IRefreshTokenRepository`).
-- **Validation**: Use `FluentValidation` for request models. Validators reside in `Maliev.AuthService.Api/Validators`.
-- **Logging**: Use Serilog for structured logging. Ensure correlation IDs are logged.
+- **Validation**: Use Data Annotations (`[Required]`, `[EmailAddress]`) on DTOs.
+- **Logging**: Use `ILogger` with source-generated logging. Ensure correlation IDs are logged.
 - **Endpoints**: Prefix all endpoints with `/auth` (e.g., `/auth/v1/login`).
 - **DTOs**: Separate Request and Response models in `Models/Request` and `Models/Response`.
 
@@ -68,9 +70,9 @@ dotnet ef database update --project Maliev.AuthService.Data
 - Do not expose sensitive stack traces in production responses.
 
 ### Testing Guidelines
-- **Framework**: MSTest with `FluentAssertions`.
-- **Scope**: Maintain high coverage (aim for 100% on contract/logic).
-- **Environment**: Tests run against an in-memory database or mocked dependencies unless strictly integration tests.
+- **Framework**: xUnit with standard `Assert`.
+- **Scope**: Maintain high coverage (aim for 80%+).
+- **Environment**: Use Testcontainers (PostgreSQL) for integration tests.
 - **Naming**: `MethodName_StateUnderWhich_ExpectedBehavior`.
 
 ## 3. Agent Directives

@@ -2,6 +2,7 @@ using Maliev.AuthService.Application.Interfaces;
 using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Infrastructure.DbContexts;
 using Maliev.MessagingContracts.Contracts.Auth;
+using Maliev.MessagingContracts;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -107,7 +108,7 @@ public class RefreshTokenService : IRefreshTokenService
             await _publishEndpoint.Publish(new SuspiciousActivityDetectedEvent(
                 MessageId: Guid.NewGuid(),
                 MessageName: "SuspiciousActivityDetectedEvent",
-                MessageType: Maliev.MessagingContracts.MessageType.Event,
+                MessageType: MessageType.Event,
                 MessageVersion: "1.0.0",
                 PublishedBy: "AuthService",
                 ConsumedBy: ["NotificationService"],
@@ -210,7 +211,7 @@ public class RefreshTokenService : IRefreshTokenService
         await _publishEndpoint.Publish(new RefreshTokenRevokedEvent(
             MessageId: Guid.NewGuid(),
             MessageName: "RefreshTokenRevokedEvent",
-            MessageType: Maliev.MessagingContracts.MessageType.Event,
+            MessageType: MessageType.Event,
             MessageVersion: "1.0.0",
             PublishedBy: "AuthService",
             ConsumedBy: ["NotificationService"],

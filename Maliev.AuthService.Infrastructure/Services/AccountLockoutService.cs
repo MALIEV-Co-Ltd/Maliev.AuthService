@@ -2,6 +2,7 @@ using Maliev.AuthService.Application.Interfaces;
 using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Infrastructure.DbContexts;
 using Maliev.MessagingContracts.Contracts.Auth;
+using Maliev.MessagingContracts;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -116,7 +117,7 @@ public class AccountLockoutService : IAccountLockoutService
                 await _publishEndpoint.Publish(new UserAccountLockedEvent(
                     MessageId: Guid.NewGuid(),
                     MessageName: "UserAccountLockedEvent",
-                    MessageType: Maliev.MessagingContracts.MessageType.Event,
+                    MessageType: MessageType.Event,
                     MessageVersion: "1.0.0",
                     PublishedBy: "AuthService",
                     ConsumedBy: ["NotificationService"],

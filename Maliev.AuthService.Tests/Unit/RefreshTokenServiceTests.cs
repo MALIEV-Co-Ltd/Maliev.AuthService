@@ -197,4 +197,82 @@ public class RefreshTokenServiceTests : IClassFixture<TestDatabaseFixture>, IAsy
         // Assert
         Assert.False(result);
     }
+
+    [Fact]
+    public async Task ValidateRefreshTokenAsync_ExpiredToken_ReturnsNull()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var familyId = Guid.NewGuid();
+
+        // Set up the mock to hash "expired-token" to "expired-hash"
+        _tokenGeneratorMock.Setup(g => g.HashToken("expired-token")).Returns("expired-hash");
+
+        using (var dbContext = _fixture.CreateDbContext())
+        {
+            dbContext.TokenFamilies.Add(new TokenFamily { FamilyId = familyId, UserId = userId, UserType = UserType.Customer });
+            dbContext.RefreshTokens.Add(new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                FamilyId = familyId,
+                UserId = userId,
+                TokenHash = "expired-hash",
+                ExpiresAt = DateTime.UtcNow.AddDays(-1), // Expired
+                IsUsed = false
+            });
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Act
+        var result = await _service!.ValidateRefreshTokenAsync("expired-token");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task RevokeTokenFamilyAsync_ExistingFamily_RevokesAllTokens()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var familyId = Guid.NewGuid();
+        using (var dbContext = _fixture.CreateDbContext())
+        {
+            dbContext.TokenFamilies.Add(new TokenFamily { FamilyId = familyId, UserId = userId, UserType = UserType.Customer });
+            dbContext.RefreshTokens.Add(new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                FamilyId = familyId,
+                UserId = userId,
+                TokenHash = "token1",
+                IsUsed = false
+            });
+            dbContext.RefreshTokens.Add(new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                FamilyId = familyId,
+                UserId = userId,
+                TokenHash = "token2",
+                IsUsed = false
+            });
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Act
+        await _service!.RevokeTokenFamilyAsync(familyId, "User logout");
+
+        // Assert
+        using (var dbContext = _fixture.CreateDbContext())
+        {
+            var tokens = await dbContext.RefreshTokens.Where(rt => rt.FamilyId == familyId).ToListAsync();
+            Assert.All(tokens, t => Assert.True(t.IsUsed));
+        }
+    }
+
+    [Fact]
+    public async Task RevokeTokenFamilyAsync_NonExistentFamily_DoesNotThrow()
+    {
+        // Act & Assert
+        await _service!.RevokeTokenFamilyAsync(Guid.NewGuid(), "Test");
+    }
 }

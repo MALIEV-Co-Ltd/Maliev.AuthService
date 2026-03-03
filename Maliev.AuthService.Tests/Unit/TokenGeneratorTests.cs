@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Maliev.AuthService.Infrastructure.Services;
@@ -81,5 +82,110 @@ public class TokenGeneratorTests
         var sizeInBytes = Encoding.UTF8.GetByteCount(tokenString);
 
         Assert.True(sizeInBytes < 8192, $"Token size is {sizeInBytes} bytes, which exceeds 8KB limit.");
+    }
+
+    [Fact]
+    public void GenerateRefreshToken_ReturnsValidBase64Token()
+    {
+        // Act
+        var token = _tokenGenerator.GenerateRefreshToken();
+
+        // Assert
+        Assert.NotNull(token);
+        Assert.True(token.Length > 20);
+
+        // Verify it's valid base64
+        var bytes = Convert.FromBase64String(token);
+        Assert.Equal(32, bytes.Length);
+    }
+
+    [Fact]
+    public void HashToken_ReturnsConsistentHash()
+    {
+        // Arrange
+        var token = "test-token";
+
+        // Act
+        var hash1 = _tokenGenerator.HashToken(token);
+        var hash2 = _tokenGenerator.HashToken(token);
+
+        // Assert
+        Assert.Equal(hash1, hash2);
+        Assert.Equal(64, hash1.Length); // SHA256 produces 32 bytes = 64 hex chars
+    }
+
+    [Fact]
+    public async Task GenerateServiceAccessTokenAsync_WithPermissions_ReturnsToken()
+    {
+        // Arrange
+        var clientId = "test-service";
+        var serviceName = "Test Service";
+        var permissions = new List<string> { "service.resources.read" };
+        var roles = new List<string> { "service-role" };
+        var principalId = Guid.NewGuid();
+
+        // Act
+        var token = await _tokenGenerator.GenerateServiceAccessTokenAsync(clientId, serviceName, permissions, roles, principalId);
+
+        // Assert
+        var handler = new JwtSecurityTokenHandler();
+        var jwt = handler.ReadJwtToken(token);
+
+        Assert.Equal("service", jwt.Claims.First(c => c.Type == "user_type").Value);
+        Assert.Equal(clientId, jwt.Claims.First(c => c.Type == "client_id").Value);
+        Assert.Equal(serviceName, jwt.Claims.First(c => c.Type == "service_name").Value);
+    }
+
+    [Fact]
+    public async Task GenerateServiceAccessTokenAsync_WithoutPrincipalId_UsesClientId()
+    {
+        // Arrange
+        var clientId = "test-service-no-principal";
+        var serviceName = "Test Service";
+
+        // Act
+        var token = await _tokenGenerator.GenerateServiceAccessTokenAsync(clientId, serviceName, null, null, null);
+
+        // Assert
+        var handler = new JwtSecurityTokenHandler();
+        var jwt = handler.ReadJwtToken(token);
+
+        Assert.Equal(clientId, jwt.Subject);
+    }
+
+    [Fact]
+    public void GenerateAccessToken_WithNoEmailOrName_StillGeneratesToken()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+
+        // Act
+        string tokenString = _tokenGenerator.GenerateAccessToken(userId, "customer", null, null, null, null);
+
+        // Assert
+        var handler = new JwtSecurityTokenHandler();
+        var token = handler.ReadJwtToken(tokenString);
+
+        Assert.NotNull(token);
+        Assert.Equal(userId.ToString(), token.Subject);
+    }
+
+    [Fact]
+    public void GenerateAccessToken_WithRoles_ContainsRoleClaims()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var roles = new List<string> { "admin", "user" };
+
+        // Act
+        string tokenString = _tokenGenerator.GenerateAccessToken(userId, "employee", "test@test.com", "Test User", null, roles);
+
+        // Assert
+        var handler = new JwtSecurityTokenHandler();
+        var token = handler.ReadJwtToken(tokenString);
+
+        var roleClaims = token.Claims.Where(c => c.Type == "roles").Select(c => c.Value).ToList();
+        Assert.Contains("admin", roleClaims);
+        Assert.Contains("user", roleClaims);
     }
 }
