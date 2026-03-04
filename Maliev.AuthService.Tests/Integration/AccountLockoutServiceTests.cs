@@ -1,11 +1,10 @@
-using Maliev.AuthService.Api.Services;
-using Maliev.AuthService.Data.DbContexts;
-using Maliev.AuthService.Data.Entities;
+using Maliev.AuthService.Application.Interfaces;
+using Maliev.AuthService.Domain.Entities;
+using Maliev.AuthService.Infrastructure.DbContexts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using Maliev.AuthService.Tests.Contract;
-using Maliev.MessagingContracts;
 
 namespace Maliev.AuthService.Tests.Integration;
 

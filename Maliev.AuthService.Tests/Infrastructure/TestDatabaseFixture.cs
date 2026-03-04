@@ -1,4 +1,5 @@
-using Maliev.AuthService.Data.DbContexts;
+using Maliev.AuthService.Domain.Entities;
+using Maliev.AuthService.Infrastructure.DbContexts;
 using Microsoft.EntityFrameworkCore;
 using Testcontainers.PostgreSql;
 using Testcontainers.Redis;
@@ -65,7 +66,7 @@ public class TestDatabaseFixture : IDisposable
 
     private static async Task SeedTestServiceCredentialAsync(AuthDbContext context)
     {
-        var testServiceCredential = new Maliev.AuthService.Data.Entities.ServiceCredential
+        var testServiceCredential = new ServiceCredential
         {
             Id = Guid.NewGuid(),
             ClientId = "service-dev-customer-api",

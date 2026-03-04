@@ -1,8 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Diagnostics.Metrics;
-using Maliev.AuthService.Api.Models.IAM;
-using Maliev.AuthService.Api.Services;
+using Maliev.AuthService.Application.DTOs.IAM;
+using Maliev.AuthService.Infrastructure.HttpClients;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;

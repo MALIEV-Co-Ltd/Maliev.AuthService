@@ -1,8 +1,7 @@
-using Maliev.AuthService.Api.Services;
-using Maliev.AuthService.Data.DbContexts;
-using Maliev.AuthService.Data.Entities;
+using Maliev.AuthService.Domain.Entities;
+using Maliev.AuthService.Infrastructure.DbContexts;
+using Maliev.AuthService.Infrastructure.Services;
 using Maliev.AuthService.Tests.Infrastructure;
-using Maliev.MessagingContracts;
 using Maliev.MessagingContracts.Contracts.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
