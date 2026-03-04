@@ -1,7 +1,7 @@
 <Project>
   <ItemGroup>
-    <PackageReference Update="MassTransit" Version="8.5.8" />
-    <PackageReference Update="MassTransit.RabbitMQ" Version="8.5.8" />
+    <PackageReference Update="MassTransit" Version="[8.5.8, 9.0.0)" />
+    <PackageReference Update="MassTransit.RabbitMQ" Version="[8.5.8, 9.0.0)" />
     <PackageReference Update="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
     <PackageReference Update="Microsoft.EntityFrameworkCore" Version="10.0.3" />
     <PackageReference Update="Microsoft.EntityFrameworkCore.Design" Version="10.0.3" />
