@@ -124,7 +124,7 @@ public class TokenGenerator : ITokenGenerator
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddHours(1),
+            Expires = DateTime.UtcNow.AddMinutes(15),
             Issuer = issuer,
             Audience = audience,
             SigningCredentials = credentials
@@ -199,7 +199,7 @@ public class TokenGenerator : ITokenGenerator
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddHours(1),
+            Expires = DateTime.UtcNow.AddMinutes(15),
             Issuer = issuer,
             Audience = audience,
             SigningCredentials = credentials

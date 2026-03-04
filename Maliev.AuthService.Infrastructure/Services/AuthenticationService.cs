@@ -71,6 +71,7 @@ public class AuthenticationService : IAuthenticationService
     /// <inheritdoc/>
     public async Task<AuthenticationResult> AuthenticateAsync(LoginRequest request, string? ipAddress)
     {
+        // Authenticate user against external services and issue JWT tokens with IAM permissions
         if (string.IsNullOrWhiteSpace(request.UserType))
         {
             throw new ArgumentException("UserType is required");
@@ -84,6 +85,7 @@ public class AuthenticationService : IAuthenticationService
 
         var userType = normalizedType == "customer" ? UserType.Customer : UserType.Employee;
 
+        // Check rate limiting first
         if (!string.IsNullOrEmpty(ipAddress) && await _rateLimitService.IsRateLimitExceededAsync(ipAddress))
         {
             await LogAuditAsync(null, userType, "login", ipAddress, false, "Rate limit exceeded");
@@ -107,6 +109,8 @@ public class AuthenticationService : IAuthenticationService
 
         var validationResult = await ValidateCredentialsAsync(request.Username, request.Password, userType);
 
+        // Check account lockout BEFORE returning invalid credentials error
+        // This ensures locked accounts return 423 instead of 401
         if (validationResult.UserId.HasValue && await _accountLockoutService.IsAccountLockedAsync(validationResult.UserId.Value, userType))
         {
             await LogAuditAsync(validationResult.UserId.Value, userType, "login", ipAddress, false, "Account locked");
@@ -130,11 +134,13 @@ public class AuthenticationService : IAuthenticationService
 
         if (!validationResult.IsValid)
         {
+            // Record failed attempt for rate limiting
             if (!string.IsNullOrEmpty(ipAddress))
             {
                 await _rateLimitService.RecordFailedAttemptAsync(ipAddress);
             }
 
+            // Record failed attempt for account lockout if we have a userId
             if (validationResult.UserId.HasValue)
             {
                 await _accountLockoutService.RecordFailedAttemptAsync(validationResult.UserId.Value, userType);
@@ -185,6 +191,7 @@ public class AuthenticationService : IAuthenticationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to resolve permissions from IAM for user {UserId}. Issuing token without permissions.", userId);
+            // Fail open: Issue token without permissions rather than block login
         }
 
         var accessToken = _tokenGenerator.GenerateAccessToken(principalId, request.UserType, validationResult.Email, validationResult.Name, permissions, roles);
