@@ -25,12 +25,9 @@ public class AccountLockoutConfiguration : IEntityTypeConfiguration<AccountLocko
         builder.Property(e => e.LastAttemptAt).HasColumnName("last_attempt_at").HasDefaultValueSql("NOW()");
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("NOW()");
         builder.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("NOW()");
-        builder.Property(e => e.Version)
-            .HasColumnName("version")
-            .IsRowVersion()
-            .HasDefaultValueSql("'\\x0000000000000000'::bytea")
-            .ValueGeneratedOnAddOrUpdate()
-            .IsRequired();
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion();
 
         // Indexes
         builder.HasIndex(e => new { e.UserId, e.UserType }).IsUnique().HasDatabaseName("idx_account_lockouts_user_id_user_type");

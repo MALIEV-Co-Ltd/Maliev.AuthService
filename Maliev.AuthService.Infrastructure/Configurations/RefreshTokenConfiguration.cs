@@ -29,12 +29,9 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
         builder.Property(e => e.ExpiresAt).HasColumnName("expires_at").IsRequired();
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("NOW()");
         builder.Property(e => e.IpAddress).HasColumnName("ip_address").HasMaxLength(45);
-        builder.Property(e => e.Version)
-            .HasColumnName("version")
-            .IsRowVersion()
-            .HasDefaultValueSql("'\\x0000000000000000'::bytea")
-            .ValueGeneratedOnAddOrUpdate()
-            .IsRequired();
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion();
 
         // Indexes
         builder.HasIndex(e => e.TokenHash).IsUnique().HasDatabaseName("idx_refresh_tokens_token_hash");

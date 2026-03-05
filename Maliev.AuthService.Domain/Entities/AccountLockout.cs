@@ -44,9 +44,4 @@ public class AccountLockout
     /// Last update timestamp
     /// </summary>
     public DateTime UpdatedAt { get; set; }
-
-    /// <summary>
-    /// Row version for optimistic concurrency control
-    /// </summary>
-    public byte[] Version { get; set; } = Array.Empty<byte>();
 }
