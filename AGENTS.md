@@ -1,6 +1,6 @@
 # Maliev.AuthService - Agentic Coding Guidelines
 
-This repository hosts the Maliev Authentication Service, a .NET 9.0 ASP.NET Core Web API using PostgreSQL and Entity Framework Core 9.0.
+This repository hosts the Maliev Authentication Service, a .NET 10.0 ASP.NET Core Web API using PostgreSQL and Entity Framework Core 10.0.
 
 ## 1. Build & Test Commands
 
@@ -75,7 +75,11 @@ dotnet ef database update --project Maliev.AuthService.Data
 - **Environment**: Use Testcontainers (PostgreSQL) for integration tests.
 - **Naming**: `MethodName_StateUnderWhich_ExpectedBehavior`.
 
+### Dependencies
+- **EF Core Design-Time Packages**: Only `Microsoft.EntityFrameworkCore.Design` (or similar design-time packages) may exist in the Infrastructure project where migrations are located. The API project and other projects must NOT reference EF Core design-time packages. This ensures migrations are only managed from a single location.
+
 ## 3. Agent Directives
+- **EF Core Restriction**: Never add EF Core design-time packages (e.g., `Microsoft.EntityFrameworkCore.Design`) to any project except the Infrastructure project where migrations are located. This rule is enforced; any PR with design-time packages in other projects must be rejected.
 - **Safety**: Do not commit secrets/keys. Use Google Secret Manager or environment variables.
 - **Verification**: Always run `dotnet test` after making changes to ensure no regressions.
 - **Context**: Read `CLAUDE.md` for deep architectural details if needed.

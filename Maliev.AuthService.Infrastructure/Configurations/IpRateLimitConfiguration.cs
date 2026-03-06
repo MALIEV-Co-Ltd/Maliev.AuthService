@@ -24,9 +24,6 @@ public class IpRateLimitConfiguration : IEntityTypeConfiguration<IpRateLimit>
         builder.Property(e => e.WindowStart).HasColumnName("window_start").HasDefaultValueSql("NOW()");
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("NOW()");
         builder.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("NOW()");
-        builder.Property<uint>("xmin")
-            .HasColumnType("xid")
-            .IsRowVersion();
 
         // Indexes
         builder.HasIndex(e => e.IpAddress).IsUnique().HasDatabaseName("idx_ip_rate_limits_ip_address");
