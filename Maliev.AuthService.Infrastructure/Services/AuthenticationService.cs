@@ -601,7 +601,7 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "service_unavailable");
             }
 
-            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
             var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions);
             if (result == null)
             {
@@ -638,7 +638,7 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "provision_failed");
             }
 
-            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
             var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions);
             if (result == null)
             {
@@ -746,6 +746,8 @@ public class AuthenticationService : IAuthenticationService
 
     private record EmployeeLookupResult
     {
+        // EmployeeService returns "id" (not "employeeId") in both by-email and auto-provision responses
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
         public Guid EmployeeId { get; init; }
         public Guid PrincipalId { get; init; }
         public string Email { get; init; } = string.Empty;
