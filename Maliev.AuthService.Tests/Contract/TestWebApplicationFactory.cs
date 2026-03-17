@@ -262,11 +262,11 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                 {
                     var response = new
                     {
-                        employee_id = Guid.NewGuid(),
-                        principal_id = Guid.Parse("7c9e6639-7420-4007-8596-f0ad96130444"),
+                        employeeId = Guid.NewGuid(),
+                        principalId = Guid.Parse("7c9e6639-7420-4007-8596-f0ad96130444"),
                         email = email,
-                        full_name = "Existing Employee",
-                        employment_status = "Active"
+                        fullName = "Existing Employee",
+                        employmentStatus = "Active"
                     };
 
                     return new HttpResponseMessage(HttpStatusCode.OK)
@@ -279,11 +279,11 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                 {
                     var response = new
                     {
-                        employee_id = Guid.NewGuid(),
-                        principal_id = Guid.NewGuid(),
+                        employeeId = Guid.NewGuid(),
+                        principalId = Guid.NewGuid(),
                         email = email,
-                        full_name = "Terminated Employee",
-                        employment_status = "Terminated"
+                        fullName = "Terminated Employee",
+                        employmentStatus = "Terminated"
                     };
 
                     return new HttpResponseMessage(HttpStatusCode.OK)
@@ -318,12 +318,12 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
 
                 var response = new
                 {
-                    employee_id = Guid.NewGuid(),
-                    principal_id = Guid.NewGuid(),
+                    employeeId = Guid.NewGuid(),
+                    principalId = Guid.NewGuid(),
                     email = email,
-                    full_name = fullName ?? "New Employee",
-                    employee_number = "EMP-TEST-001",
-                    employment_status = "Active"
+                    fullName = fullName ?? "New Employee",
+                    employeeNumber = "EMP-TEST-001",
+                    employmentStatus = "Active"
                 };
 
                 return new HttpResponseMessage(HttpStatusCode.OK)

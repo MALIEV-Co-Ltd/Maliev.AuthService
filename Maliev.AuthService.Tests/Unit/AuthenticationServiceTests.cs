@@ -132,11 +132,11 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         {
             Content = JsonContent.Create(new
             {
-                employee_id = employeeId,
-                principal_id = principalId,
+                employeeId = employeeId,
+                principalId = principalId,
                 email = email,
-                full_name = "New User",
-                employment_status = "Active"
+                fullName = "New User",
+                employmentStatus = "Active"
             })
         };
         _employeeServiceClientMock.Setup(s => s.ProvisionEmployeeAsync(It.IsAny<object>()))
@@ -212,11 +212,11 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         {
             Content = JsonContent.Create(new
             {
-                employee_id = employeeId,
-                principal_id = Guid.NewGuid(),
+                employeeId = employeeId,
+                principalId = Guid.NewGuid(),
                 email = email,
-                full_name = "User",
-                employment_status = "Terminated"
+                fullName = "User",
+                employmentStatus = "Terminated"
             })
         };
         _employeeServiceClientMock.Setup(s => s.GetEmployeeByEmailAsync(email))
