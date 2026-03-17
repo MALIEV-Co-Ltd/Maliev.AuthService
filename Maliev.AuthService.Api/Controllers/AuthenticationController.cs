@@ -11,7 +11,7 @@ namespace Maliev.AuthService.Api.Controllers;
 /// and service-to-service authentication.
 /// </summary>
 [ApiController]
-[ApiVersion("1.0")]
+[ApiVersion("1")]
 [Route("auth/v{version:apiVersion}")]
 public class AuthenticationController : ControllerBase
 {
