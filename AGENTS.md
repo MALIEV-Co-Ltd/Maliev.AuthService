@@ -83,6 +83,7 @@ dotnet ef database update --project Maliev.AuthService.Infrastructure --startup-
 - **Safety**: Do not commit secrets/keys. Use Google Secret Manager or environment variables.
 - **Verification**: Always run `dotnet test` after making changes to ensure no regressions.
 - **Context**: Read `CLAUDE.md` for deep architectural details if needed.
+- **Employee Auto-Provisioning**: When a Google SSO user with `@maliev.com` domain authenticates for the first time and no employee record exists, the AuthService automatically provisions a new employee via `EmployeeService` and grants the Platform Owner role to the first user. This is by design — no pre-registration is required for employees.
 
 
 ## Git & Version Control — Mandatory Rules
