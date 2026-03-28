@@ -107,4 +107,41 @@ public class IAMServiceClient : IIAMServiceClient
             ResolvedAt = DateTime.UtcNow
         };
     }
+
+    /// <inheritdoc/>
+    public async Task GrantRoleAsync(
+        Guid principalId,
+        string roleId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var request = new GrantRoleRequest { RoleId = roleId };
+            var response = await _httpClient.PostAsJsonAsync(
+                $"/iam/v1/principals/{principalId}/roles",
+                request,
+                JsonOptions,
+                cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Successfully granted role {RoleId} to principal {PrincipalId}",
+                    roleId, principalId);
+            }
+            else
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning(
+                    "Failed to grant role {RoleId} to principal {PrincipalId}. Status: {StatusCode}, Body: {ErrorBody}",
+                    roleId, principalId, response.StatusCode, errorBody);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Error granting role {RoleId} to principal {PrincipalId}",
+                roleId, principalId);
+            throw;
+        }
+    }
 }

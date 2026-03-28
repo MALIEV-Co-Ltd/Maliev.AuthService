@@ -509,6 +509,16 @@ public class AuthenticationService : IAuthenticationService
             employmentStatus = provStatus;
 
             _logger.LogInformation("Successfully auto-provisioned employee for {Email} with PrincipalId {PrincipalId}", request.Email, principalId);
+
+            try
+            {
+                await _iamServiceClient.GrantRoleAsync(principalId!.Value, MalievIamRoles.PlatformOwner);
+                _logger.LogInformation("Synchronously granted Platform Owner role to first @maliev.com employee {Email}", request.Email);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to synchronously grant Platform Owner role to {Email}. The async consumer will handle it.", request.Email);
+            }
         }
 
         if (string.Equals(employmentStatus, "Terminated", StringComparison.OrdinalIgnoreCase))
