@@ -465,6 +465,8 @@ public class AuthenticationService : IAuthenticationService
             };
         }
 
+        bool isFirstTimeProvisioning = false;
+
         var (employeeLookupSuccess, employeeId, principalId, employeeName, employmentStatus, lookupError) =
             await LookupEmployeeByEmailAsync(request.Email);
 
@@ -510,15 +512,7 @@ public class AuthenticationService : IAuthenticationService
 
             _logger.LogInformation("Successfully auto-provisioned employee for {Email} with PrincipalId {PrincipalId}", request.Email, principalId);
 
-            try
-            {
-                await _iamServiceClient.GrantRoleAsync(principalId!.Value, MalievIamRoles.PlatformOwner);
-                _logger.LogInformation("Synchronously granted Platform Owner role to first @maliev.com employee {Email}", request.Email);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to synchronously grant Platform Owner role to {Email}. The async consumer will handle it.", request.Email);
-            }
+            isFirstTimeProvisioning = true;
         }
 
         if (string.Equals(employmentStatus, "Terminated", StringComparison.OrdinalIgnoreCase))
@@ -538,17 +532,60 @@ public class AuthenticationService : IAuthenticationService
 
         try
         {
-            var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId!.Value);
-            roles = iamResponse.Roles;
-
-            if (roles != null && roles.Contains(MalievIamRoles.PlatformOwner))
+            if (isFirstTimeProvisioning)
             {
-                permissions = null;
-                _logger.LogInformation("Google SSO user {Email} is Platform Owner. Excluding granular permissions from JWT.", request.Email);
+                // Wait for IAMService's EmployeeCreatedConsumer to create the principal and bootstrap
+                // the Platform Owner role before issuing the JWT. The consumer runs asynchronously via
+                // RabbitMQ, so we poll until it finishes or we time out.
+                const int maxAttempts = 20; // 20 × 500ms = 10s max
+                const int delayMs = 500;
+
+                for (int attempt = 0; attempt < maxAttempts; attempt++)
+                {
+                    var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId!.Value);
+                    roles = iamResponse.Roles;
+
+                    if (roles?.Any() == true || iamResponse.Permissions?.Any() == true)
+                    {
+                        if (roles?.Contains(MalievIamRoles.PlatformOwner) == true)
+                        {
+                            permissions = null;
+                            _logger.LogInformation("Google SSO user {Email} is Platform Owner. Excluding granular permissions from JWT.", request.Email);
+                        }
+                        else
+                        {
+                            permissions = iamResponse.Permissions;
+                        }
+                        break;
+                    }
+
+                    if (attempt < maxAttempts - 1)
+                    {
+                        _logger.LogInformation("Waiting for IAM bootstrap for {Email} (attempt {Attempt}/{MaxAttempts})...",
+                            request.Email, attempt + 1, maxAttempts);
+                        await Task.Delay(delayMs);
+                    }
+                }
+
+                if (roles?.Any() != true && permissions?.Any() != true)
+                {
+                    _logger.LogWarning("IAM bootstrap timed out for {Email}. JWT issued with no permissions.", request.Email);
+                }
             }
             else
             {
-                permissions = iamResponse.Permissions;
+                var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId!.Value);
+                roles = iamResponse.Roles;
+
+                if (roles != null && roles.Contains(MalievIamRoles.PlatformOwner))
+                {
+                    permissions = null;
+                    _logger.LogInformation("Google SSO user {Email} is Platform Owner. Excluding granular permissions from JWT.", request.Email);
+                }
+                else
+                {
+                    permissions = iamResponse.Permissions;
+                }
             }
         }
         catch (Exception ex)
