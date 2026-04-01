@@ -14,4 +14,10 @@ public class GoogleExchangeRequest
     /// Gets or sets the employee's full name from Google.
     /// </summary>
     public string? FullName { get; set; }
+
+    /// <summary>
+    /// Gets or sets Google's numeric sub claim for the authenticated user.
+    /// Used to correlate Google identity with the platform principal.
+    /// </summary>
+    public string? GoogleUserId { get; set; }
 }
