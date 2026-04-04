@@ -8,7 +8,7 @@ namespace Maliev.AuthService.Application.DTOs.Response;
 public class LoginResponse
 {
     /// <summary>
-    /// JWT access token (15 minutes expiry).
+    /// JWT access token (2 hours expiry).
     /// </summary>
     public string AccessToken { get; set; } = string.Empty;
 
@@ -24,9 +24,9 @@ public class LoginResponse
     public string TokenType { get; set; } = "Bearer";
 
     /// <summary>
-    /// Access token expiration in seconds (900 = 15 minutes).
+    /// Access token expiration in seconds (7200 = 2 hours).
     /// </summary>
-    public int ExpiresIn { get; set; } = 900;
+    public int ExpiresIn { get; set; } = 7200;
 
     /// <summary>
     /// User identity information.

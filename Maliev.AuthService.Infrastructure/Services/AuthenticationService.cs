@@ -88,7 +88,7 @@ public class AuthenticationService : IAuthenticationService
         // Check rate limiting first
         if (!string.IsNullOrEmpty(ipAddress) && await _rateLimitService.IsRateLimitExceededAsync(ipAddress))
         {
-            await LogAuditAsync(null, userType, "login", ipAddress, false, "Rate limit exceeded");
+            EnqueueAuditLog(null, userType, "login", ipAddress, false, "Rate limit exceeded");
 
             await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(), "LoginFailedEvent", MessageType.Event, "1.0.0",
@@ -113,7 +113,7 @@ public class AuthenticationService : IAuthenticationService
         // This ensures locked accounts return 423 instead of 401
         if (validationResult.UserId.HasValue && await _accountLockoutService.IsAccountLockedAsync(validationResult.UserId.Value, userType))
         {
-            await LogAuditAsync(validationResult.UserId.Value, userType, "login", ipAddress, false, "Account locked");
+            EnqueueAuditLog(validationResult.UserId.Value, userType, "login", ipAddress, false, "Account locked");
 
             await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(), "LoginFailedEvent", MessageType.Event, "1.0.0",
@@ -146,7 +146,7 @@ public class AuthenticationService : IAuthenticationService
                 await _accountLockoutService.RecordFailedAttemptAsync(validationResult.UserId.Value, userType);
             }
 
-            await LogAuditAsync(validationResult.UserId, userType, "login", ipAddress, false, validationResult.FailureReason);
+            EnqueueAuditLog(validationResult.UserId, userType, "login", ipAddress, false, validationResult.FailureReason);
 
             await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(), "LoginFailedEvent", MessageType.Event, "1.0.0",
@@ -190,14 +190,21 @@ public class AuthenticationService : IAuthenticationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to resolve permissions from IAM for user {UserId}. Issuing token without permissions.", userId);
-            // Fail open: Issue token without permissions rather than block login
+            _logger.LogError(ex, "Failed to resolve permissions from IAM for user {UserId}. Blocking login.", userId);
+            EnqueueAuditLog(userId, userType, "login", ipAddress, false, "IAM service unavailable");
+            await _dbContext.SaveChangesAsync();
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "service_unavailable",
+                ErrorDescription = "Authentication service temporarily unavailable. Please try again."
+            };
         }
 
         var accessToken = _tokenGenerator.GenerateAccessToken(principalId, request.UserType, validationResult.Email, validationResult.Name, permissions, roles);
         var (_, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(userId, principalId, userType, validationResult.Email, validationResult.Name, ipAddress);
 
-        await LogAuditAsync(userId, userType, "login", ipAddress, true, null);
+        EnqueueAuditLog(userId, userType, "login", ipAddress, true, null);
 
         await _publishEndpoint.Publish(new UserLoggedInEvent(
             Guid.NewGuid(), "UserLoggedInEvent", MessageType.Event, "1.0.0",
@@ -215,7 +222,7 @@ public class AuthenticationService : IAuthenticationService
                 AccessToken = accessToken,
                 RefreshToken = refreshTokenValue,
                 TokenType = "Bearer",
-                ExpiresIn = 900,
+                ExpiresIn = 7200,
                 User = new UserIdentityResponse
                 {
                     UserId = principalId.ToString(),
@@ -260,19 +267,22 @@ public class AuthenticationService : IAuthenticationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to resolve permissions from IAM during token refresh for user {UserId}.", refreshToken.UserId);
+            _logger.LogError(ex, "Failed to resolve permissions from IAM during token refresh for user {UserId}. Blocking refresh.", refreshToken.UserId);
+            EnqueueAuditLog(refreshToken.UserId, refreshToken.UserType, "token_refresh", ipAddress, false, "IAM service unavailable");
+            await _dbContext.SaveChangesAsync();
+            return null;
         }
 
         var accessToken = _tokenGenerator.GenerateAccessToken(refreshToken.PrincipalId, userTypeString, refreshToken.Email, refreshToken.Name, permissions, roles);
 
-        await LogAuditAsync(refreshToken.UserId, refreshToken.UserType, "token_refresh", ipAddress, true, null);
+        EnqueueAuditLog(refreshToken.UserId, refreshToken.UserType, "token_refresh", ipAddress, true, null);
 
         return new TokenResponse
         {
             AccessToken = accessToken,
             RefreshToken = newRefreshTokenValue,
             TokenType = "Bearer",
-            ExpiresIn = 900
+            ExpiresIn = 7200
         };
     }
 
@@ -346,7 +356,7 @@ public class AuthenticationService : IAuthenticationService
         _dbContext.RevokedTokens.Add(revokedToken);
         await _dbContext.SaveChangesAsync();
 
-        await LogAuditAsync(userId, userType, "token_revoke", null, true, null);
+        EnqueueAuditLog(userId, userType, "token_revoke", null, true, null);
 
         return true;
     }
@@ -359,7 +369,7 @@ public class AuthenticationService : IAuthenticationService
 
         await _refreshTokenService.RevokeTokenFamilyAsync(refreshToken.FamilyId, "User logout");
 
-        await LogAuditAsync(refreshToken.UserId, refreshToken.UserType, "logout", null, true, null);
+        EnqueueAuditLog(refreshToken.UserId, refreshToken.UserType, "logout", null, true, null);
 
         await _publishEndpoint.Publish(new UserLoggedOutEvent(
             Guid.NewGuid(), "UserLoggedOutEvent", MessageType.Event, "1.0.0",
@@ -380,7 +390,7 @@ public class AuthenticationService : IAuthenticationService
 
         if (serviceCredential == null)
         {
-            await LogAuditAsync(null, null, "service_login", ipAddress, false, "Invalid client ID");
+            EnqueueAuditLog(null, null, "service_login", ipAddress, false, "Invalid client ID");
 
             await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(), "LoginFailedEvent", MessageType.Event, "1.0.0",
@@ -395,7 +405,7 @@ public class AuthenticationService : IAuthenticationService
             Encoding.UTF8.GetBytes(secretHash),
             Encoding.UTF8.GetBytes(serviceCredential.ClientSecretHash)))
         {
-            await LogAuditAsync(null, null, "service_login", ipAddress, false, "Invalid client secret");
+            EnqueueAuditLog(null, null, "service_login", ipAddress, false, "Invalid client secret");
 
             await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(), "LoginFailedEvent", MessageType.Event, "1.0.0",
@@ -429,7 +439,7 @@ public class AuthenticationService : IAuthenticationService
         var accessToken = await _tokenGenerator.GenerateServiceAccessTokenAsync(
             request.ClientId, serviceCredential.ServiceName, permissions, roles, serviceCredential.PrincipalId);
 
-        await LogAuditAsync(null, null, "service_login", ipAddress, true, null);
+        EnqueueAuditLog(null, null, "service_login", ipAddress, true, null);
 
         await _publishEndpoint.Publish(new UserLoggedInEvent(
             Guid.NewGuid(), "UserLoggedInEvent", MessageType.Event, "1.0.0",
@@ -475,7 +485,7 @@ public class AuthenticationService : IAuthenticationService
             if (lookupError == "service_unavailable")
             {
                 _logger.LogError("EmployeeService unavailable during Google exchange for {Email}", request.Email);
-                await LogAuditAsync(null, UserType.Employee, "google_exchange", ipAddress, false, "EmployeeService unavailable");
+                EnqueueAuditLog(null, UserType.Employee, "google_exchange", ipAddress, false, "EmployeeService unavailable");
                 return new AuthenticationResult
                 {
                     Success = false,
@@ -496,7 +506,7 @@ public class AuthenticationService : IAuthenticationService
             if (!provisionSuccess)
             {
                 _logger.LogError("Auto-provisioning failed for {Email}: {Error}", request.Email, provisionError);
-                await LogAuditAsync(null, UserType.Employee, "google_exchange", ipAddress, false, $"Auto-provision failed: {provisionError}");
+                EnqueueAuditLog(null, UserType.Employee, "google_exchange", ipAddress, false, $"Auto-provision failed: {provisionError}");
                 return new AuthenticationResult
                 {
                     Success = false,
@@ -518,7 +528,7 @@ public class AuthenticationService : IAuthenticationService
         if (string.Equals(employmentStatus, "Terminated", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning("Google exchange rejected for terminated employee: {Email}", request.Email);
-            await LogAuditAsync(employeeId, UserType.Employee, "google_exchange", ipAddress, false, "Account terminated");
+            EnqueueAuditLog(employeeId, UserType.Employee, "google_exchange", ipAddress, false, "Account terminated");
             return new AuthenticationResult
             {
                 Success = false,
@@ -590,7 +600,15 @@ public class AuthenticationService : IAuthenticationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to resolve permissions from IAM for Google SSO user {Email}.", request.Email);
+            _logger.LogError(ex, "Failed to resolve permissions from IAM for Google SSO user {Email}. Blocking login.", request.Email);
+            EnqueueAuditLog(employeeId, UserType.Employee, "google_exchange", ipAddress, false, "IAM service unavailable");
+            await _dbContext.SaveChangesAsync();
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "service_unavailable",
+                ErrorDescription = "Authentication service temporarily unavailable. Please try again."
+            };
         }
 
         var accessToken = _tokenGenerator.GenerateAccessToken(
@@ -601,7 +619,7 @@ public class AuthenticationService : IAuthenticationService
             employeeId!.Value, principalId.Value, UserType.Employee,
             request.Email, employeeName ?? request.FullName ?? request.Email, ipAddress);
 
-        await LogAuditAsync(employeeId.Value, UserType.Employee, "google_exchange", ipAddress, true, null);
+        EnqueueAuditLog(employeeId.Value, UserType.Employee, "google_exchange", ipAddress, true, null);
 
         await _publishEndpoint.Publish(new UserLoggedInEvent(
             Guid.NewGuid(), "UserLoggedInEvent", MessageType.Event, "1.0.0",
@@ -617,7 +635,7 @@ public class AuthenticationService : IAuthenticationService
                 AccessToken = accessToken,
                 RefreshToken = refreshTokenValue,
                 TokenType = "Bearer",
-                ExpiresIn = 900,
+                ExpiresIn = 7200,
                 User = new UserIdentityResponse
                 {
                     UserId = principalId.Value.ToString(),
@@ -764,7 +782,7 @@ public class AuthenticationService : IAuthenticationService
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
-    private async Task LogAuditAsync(Guid? userId, UserType? userType, string action, string? ipAddress, bool success, string? failureReason)
+    private void EnqueueAuditLog(Guid? userId, UserType? userType, string action, string? ipAddress, bool success, string? failureReason)
     {
         var auditLog = new AuthAuditLog
         {
@@ -779,7 +797,6 @@ public class AuthenticationService : IAuthenticationService
         };
 
         _dbContext.AuthAuditLogs.Add(auditLog);
-        await _dbContext.SaveChangesAsync();
     }
 
     private class CredentialValidationResult

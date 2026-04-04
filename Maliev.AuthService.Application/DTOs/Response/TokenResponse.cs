@@ -23,5 +23,5 @@ public class TokenResponse
     /// <summary>
     /// Access token expiration in seconds.
     /// </summary>
-    public int ExpiresIn { get; set; } = 900;
+    public int ExpiresIn { get; set; } = 7200;
 }

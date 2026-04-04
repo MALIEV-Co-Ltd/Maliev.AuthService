@@ -18,6 +18,10 @@ public class TokenGenerator : ITokenGenerator
     private readonly IConfiguration _configuration;
     private readonly ILogger<TokenGenerator> _logger;
     private readonly IHostEnvironment _environment;
+    private readonly SemaphoreSlim _keyLock = new(1, 1);
+    private readonly int _accessTokenExpirationInSeconds;
+    private readonly int _serviceTokenExpirationInSeconds;
+    private RsaSecurityKey? _cachedRsaKey;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TokenGenerator"/> class.
@@ -30,9 +34,28 @@ public class TokenGenerator : ITokenGenerator
         _configuration = configuration;
         _logger = logger;
         _environment = environment;
+        _accessTokenExpirationInSeconds = configuration.GetValue<int>("Jwt:AccessTokenExpirationInSeconds", 7200);
+        _serviceTokenExpirationInSeconds = configuration.GetValue<int>("Jwt:ServiceTokenExpirationInSeconds", 900);
     }
 
     private RsaSecurityKey GetRsaSecurityKey()
+    {
+        if (_cachedRsaKey != null)
+            return _cachedRsaKey;
+
+        _keyLock.Wait();
+        try
+        {
+            _cachedRsaKey ??= ParseRsaKey();
+            return _cachedRsaKey;
+        }
+        finally
+        {
+            _keyLock.Release();
+        }
+    }
+
+    private RsaSecurityKey ParseRsaKey()
     {
         var privateKeyPem = _configuration["Jwt:PrivateKey"]
             ?? throw new InvalidOperationException("JWT private key not configured");
@@ -124,7 +147,7 @@ public class TokenGenerator : ITokenGenerator
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddMinutes(15),
+            Expires = DateTime.UtcNow.AddSeconds(_accessTokenExpirationInSeconds),
             Issuer = issuer,
             Audience = audience,
             SigningCredentials = credentials
@@ -199,7 +222,7 @@ public class TokenGenerator : ITokenGenerator
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddMinutes(15),
+            Expires = DateTime.UtcNow.AddSeconds(_serviceTokenExpirationInSeconds),
             Issuer = issuer,
             Audience = audience,
             SigningCredentials = credentials
