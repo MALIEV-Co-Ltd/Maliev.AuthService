@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace Maliev.AuthService.Application.DTOs.Request;
 
 /// <summary>
@@ -8,6 +10,8 @@ public class GoogleExchangeRequest
     /// <summary>
     /// Gets or sets the employee's work email address.
     /// </summary>
+    [Required(ErrorMessage = "Email is required")]
+    [EmailAddress(ErrorMessage = "Must be a valid email address")]
     public string Email { get; set; } = string.Empty;
 
     /// <summary>

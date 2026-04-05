@@ -42,5 +42,9 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
             .HasForeignKey(e => e.FamilyId)
             .HasConstraintName("fk_refresh_tokens_token_families")
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion();
     }
 }

@@ -19,6 +19,8 @@ public class TokenValidator : ITokenValidator
     private readonly IConfiguration _configuration;
     private readonly AuthDbContext _dbContext;
     private readonly ILogger<TokenValidator> _logger;
+    private readonly SemaphoreSlim _keyLock = new(1, 1);
+    private RSA? _cachedPublicKey;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TokenValidator"/> class.
@@ -45,39 +47,7 @@ public class TokenValidator : ITokenValidator
                 return Task.FromResult<ClaimsPrincipal?>(null);
             }
 
-            var publicKeyPem = _configuration["Jwt:PublicKey"]
-                ?? throw new InvalidOperationException("JWT public key not configured");
-
-            var rsa = RSA.Create();
-
-            if (publicKeyPem.Trim().StartsWith("-----BEGIN", StringComparison.Ordinal))
-            {
-                rsa.ImportFromPem(publicKeyPem);
-            }
-            else
-            {
-                byte[] keyBytes;
-                try
-                {
-                    keyBytes = Convert.FromBase64String(publicKeyPem);
-                }
-                catch (FormatException)
-                {
-                    _logger.LogError("PublicKey is not valid PEM and not valid Base64.");
-                    return Task.FromResult<ClaimsPrincipal?>(null);
-                }
-
-                var decodedString = Encoding.UTF8.GetString(keyBytes);
-                if (decodedString.Trim().StartsWith("-----BEGIN", StringComparison.Ordinal))
-                {
-                    rsa.ImportFromPem(decodedString);
-                }
-                else
-                {
-                    rsa.ImportSubjectPublicKeyInfo(keyBytes, out _);
-                }
-            }
-
+            var rsa = GetPublicRsaKey();
             return ValidateWithRsaAsync(token, rsa);
         }
         catch (SecurityTokenException ex)
@@ -90,6 +60,61 @@ public class TokenValidator : ITokenValidator
             _logger.LogError(ex, "Unexpected error during token validation");
             return Task.FromResult<ClaimsPrincipal?>(null);
         }
+    }
+
+    private RSA GetPublicRsaKey()
+    {
+        if (_cachedPublicKey != null)
+            return _cachedPublicKey;
+
+        _keyLock.Wait();
+        try
+        {
+            _cachedPublicKey = ParsePublicKey();
+            return _cachedPublicKey;
+        }
+        finally
+        {
+            _keyLock.Release();
+        }
+    }
+
+    private RSA ParsePublicKey()
+    {
+        var publicKeyPem = _configuration["Jwt:PublicKey"]
+            ?? throw new InvalidOperationException("JWT public key not configured");
+
+        var rsa = RSA.Create();
+
+        if (publicKeyPem.Trim().StartsWith("-----BEGIN", StringComparison.Ordinal))
+        {
+            rsa.ImportFromPem(publicKeyPem);
+        }
+        else
+        {
+            byte[] keyBytes;
+            try
+            {
+                keyBytes = Convert.FromBase64String(publicKeyPem);
+            }
+            catch (FormatException)
+            {
+                _logger.LogError("PublicKey is not valid PEM and not valid Base64.");
+                throw new InvalidOperationException("Invalid public key format.");
+            }
+
+            var decodedString = Encoding.UTF8.GetString(keyBytes);
+            if (decodedString.Trim().StartsWith("-----BEGIN", StringComparison.Ordinal))
+            {
+                rsa.ImportFromPem(decodedString);
+            }
+            else
+            {
+                rsa.ImportSubjectPublicKeyInfo(keyBytes, out _);
+            }
+        }
+
+        return rsa;
     }
 
     private Task<ClaimsPrincipal?> ValidateWithRsaAsync(string token, RSA rsa)

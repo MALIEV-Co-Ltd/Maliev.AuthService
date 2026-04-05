@@ -25,5 +25,9 @@ public class TokenFamilyConfiguration : IEntityTypeConfiguration<TokenFamily>
 
         // Indexes
         builder.HasIndex(e => e.UserId).HasDatabaseName("idx_token_families_user_id");
+
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion();
     }
 }

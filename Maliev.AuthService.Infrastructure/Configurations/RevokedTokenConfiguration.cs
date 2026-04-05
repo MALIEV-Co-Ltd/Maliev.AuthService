@@ -29,5 +29,9 @@ public class RevokedTokenConfiguration : IEntityTypeConfiguration<RevokedToken>
         builder.HasIndex(e => e.Jti).IsUnique().HasDatabaseName("idx_revoked_tokens_jti");
         builder.HasIndex(e => e.ExpiresAt).HasDatabaseName("idx_revoked_tokens_expires_at");
         builder.HasIndex(e => e.UserId).HasDatabaseName("idx_revoked_tokens_user_id");
+
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion();
     }
 }

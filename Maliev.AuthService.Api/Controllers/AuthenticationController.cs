@@ -46,13 +46,14 @@ public class AuthenticationController : ControllerBase
     /// - Implements account lockout after multiple failed attempts.
     /// </remarks>
     /// <param name="request">The login request containing user credentials.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>Authentication response with JWT and refresh tokens.</returns>
     /// <response code="200">Successful login. Returns access and refresh tokens.</response>
     /// <response code="401">Invalid credentials.</response>
     /// <response code="423">Account is locked due to too many failed attempts.</response>
     /// <response code="429">Too many requests from this IP address.</response>
     [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginRequest request)
+    public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
     {
 
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
@@ -103,11 +104,12 @@ public class AuthenticationController : ControllerBase
     /// Used when an access token (JWT) has expired. Exchange a valid refresh token for a new access token and a new refresh token (rotation).
     /// </remarks>
     /// <param name="request">The refresh request containing the refresh token.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>A new set of JWT and refresh tokens.</returns>
     /// <response code="200">Tokens refreshed successfully.</response>
     /// <response code="401">If the refresh token is invalid, expired, or has already been used.</response>
     [HttpPost("refresh")]
-    public async Task<IActionResult> Refresh([FromBody] RefreshRequest request)
+    public async Task<IActionResult> Refresh([FromBody] RefreshRequest request, CancellationToken cancellationToken)
     {
 
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
@@ -132,10 +134,11 @@ public class AuthenticationController : ControllerBase
     /// Internal endpoint used by other microservices to verify that a token is valid, hasn't been revoked, and to see its associated claims.
     /// </remarks>
     /// <param name="request">The validate request containing the access token.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>The validation result.</returns>
     /// <response code="200">Returns token validity status and payload.</response>
     [HttpPost("validate")]
-    public async Task<IActionResult> Validate([FromBody] ValidateRequest request)
+    public async Task<IActionResult> Validate([FromBody] ValidateRequest request, CancellationToken cancellationToken)
     {
 
         var result = await _authenticationService.ValidateTokenAsync(request);
@@ -149,11 +152,12 @@ public class AuthenticationController : ControllerBase
     /// Manually invalidates a refresh token. Useful for administrative session termination.
     /// </remarks>
     /// <param name="request">The revoke request containing the refresh token.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>Success status.</returns>
     /// <response code="204">Token successfully revoked.</response>
     /// <response code="400">If the token is invalid or cannot be revoked.</response>
     [HttpPost("revoke")]
-    public async Task<IActionResult> Revoke([FromBody] RevokeRequest request)
+    public async Task<IActionResult> Revoke([FromBody] RevokeRequest request, CancellationToken cancellationToken)
     {
 
         var result = await _authenticationService.RevokeTokenAsync(request);
@@ -177,11 +181,12 @@ public class AuthenticationController : ControllerBase
     /// The recommended way to end a user session. Invalidates the provided refresh token.
     /// </remarks>
     /// <param name="request">The logout request containing the refresh token.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>Success status.</returns>
     /// <response code="204">Logged out successfully.</response>
     /// <response code="401">If the token was already invalid.</response>
     [HttpPost("logout")]
-    public async Task<IActionResult> Logout([FromBody] LogoutRequest request)
+    public async Task<IActionResult> Logout([FromBody] LogoutRequest request, CancellationToken cancellationToken)
     {
 
         var result = await _authenticationService.LogoutAsync(request);
@@ -205,11 +210,12 @@ public class AuthenticationController : ControllerBase
     /// Machine-to-machine authentication using a `client_id` and `client_secret` (API Key).
     /// </remarks>
     /// <param name="request">The service login request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>Service authentication response with a JWT.</returns>
     /// <response code="200">Successful authentication.</response>
     /// <response code="401">Invalid client credentials.</response>
     [HttpPost("service/login")]
-    public async Task<IActionResult> ServiceLogin([FromBody] ServiceLoginRequest request)
+    public async Task<IActionResult> ServiceLogin([FromBody] ServiceLoginRequest request, CancellationToken cancellationToken)
     {
 
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
@@ -245,6 +251,7 @@ public class AuthenticationController : ControllerBase
     /// If employee doesn't exist, triggers auto-provisioning with minimal permissions.
     /// </remarks>
     /// <param name="request">The Google exchange request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>Authentication response with JWT and refresh tokens.</returns>
     /// <response code="200">Successful exchange. Returns access and refresh tokens.</response>
     /// <response code="403">Non-@maliev.com email or inactive employee account.</response>
@@ -253,7 +260,7 @@ public class AuthenticationController : ControllerBase
     [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
-    public async Task<IActionResult> ExchangeGoogleToken([FromBody] GoogleExchangeRequest request)
+    public async Task<IActionResult> ExchangeGoogleToken([FromBody] GoogleExchangeRequest request, CancellationToken cancellationToken)
     {
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
 

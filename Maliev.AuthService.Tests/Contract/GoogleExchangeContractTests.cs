@@ -1,8 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Maliev.AuthService.Api.Models.Request;
-using Maliev.AuthService.Api.Models.Response;
+using Maliev.AuthService.Application.DTOs.Request;
+using Maliev.AuthService.Application.DTOs.Response;
 using Maliev.AuthService.Tests.Infrastructure;
 using Xunit;
 

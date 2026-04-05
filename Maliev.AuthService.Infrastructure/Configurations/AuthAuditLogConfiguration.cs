@@ -33,5 +33,9 @@ public class AuthAuditLogConfiguration : IEntityTypeConfiguration<AuthAuditLog>
         builder.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_auth_audit_logs_created_at");
         builder.HasIndex(e => e.CorrelationId).HasDatabaseName("idx_auth_audit_logs_correlation_id");
         builder.HasIndex(e => new { e.Action, e.Success }).HasDatabaseName("idx_auth_audit_logs_action_success");
+
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion();
     }
 }

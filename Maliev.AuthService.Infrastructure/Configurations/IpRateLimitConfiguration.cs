@@ -28,5 +28,9 @@ public class IpRateLimitConfiguration : IEntityTypeConfiguration<IpRateLimit>
         // Indexes
         builder.HasIndex(e => e.IpAddress).IsUnique().HasDatabaseName("idx_ip_rate_limits_ip_address");
         builder.HasIndex(e => e.BlockedUntil).HasDatabaseName("idx_ip_rate_limits_blocked_until");
+
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion();
     }
 }

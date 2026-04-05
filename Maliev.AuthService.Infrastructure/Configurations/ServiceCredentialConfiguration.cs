@@ -28,5 +28,9 @@ public class ServiceCredentialConfiguration : IEntityTypeConfiguration<ServiceCr
         // Indexes
         builder.HasIndex(e => e.ClientId).IsUnique().HasDatabaseName("idx_service_credentials_client_id");
         builder.HasIndex(e => e.IsActive).HasDatabaseName("idx_service_credentials_is_active");
+
+        builder.Property<uint>("xmin")
+            .HasColumnType("xid")
+            .IsRowVersion();
     }
 }
