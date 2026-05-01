@@ -34,8 +34,14 @@ public class TokenGenerator : ITokenGenerator
         _configuration = configuration;
         _logger = logger;
         _environment = environment;
-        _accessTokenExpirationInSeconds = configuration.GetValue<int>("Jwt:AccessTokenExpirationInSeconds", 7200);
-        _serviceTokenExpirationInSeconds = configuration.GetValue<int>("Jwt:ServiceTokenExpirationInSeconds", 900);
+        _accessTokenExpirationInSeconds = GetConfiguredInt("Jwt:AccessTokenExpirationInSeconds", 7200);
+        _serviceTokenExpirationInSeconds = GetConfiguredInt("Jwt:ServiceTokenExpirationInSeconds", 900);
+    }
+
+    private int GetConfiguredInt(string key, int defaultValue)
+    {
+        var value = _configuration[key];
+        return int.TryParse(value, out var parsedValue) ? parsedValue : defaultValue;
     }
 
     private RsaSecurityKey GetRsaSecurityKey()

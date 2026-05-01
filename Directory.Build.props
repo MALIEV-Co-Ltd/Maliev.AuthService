@@ -1,4 +1,8 @@
 <Project>
+  <PropertyGroup>
+    <SharedLibraryVersion Condition="'$(SharedLibraryVersion)' == ''">1.0.*-alpha*</SharedLibraryVersion>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Update="MassTransit" Version="[8.5.8, 9.0.0)" />
     <PackageReference Update="MassTransit.RabbitMQ" Version="[8.5.8, 9.0.0)" />
