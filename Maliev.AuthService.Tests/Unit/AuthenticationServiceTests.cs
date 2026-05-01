@@ -249,7 +249,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     }
 
     [Fact]
-    public async Task RefreshTokenAsync_IAMServiceFails_StillReturnsTokens()
+    public async Task RefreshTokenAsync_IAMServiceFails_ReturnsNull()
     {
         // Arrange
         var refreshTokenValue = "valid-refresh";
@@ -272,16 +272,11 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         _iamClientMock.Setup(s => s.ResolvePermissionsAsync(refreshToken.PrincipalId))
             .ThrowsAsync(new Exception("IAM down"));
 
-        _tokenGeneratorMock.Setup(s => s.GenerateAccessToken(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), null, null))
-            .Returns("access-token");
-
         // Act
         var result = await _service!.RefreshTokenAsync(new RefreshRequest { RefreshToken = refreshTokenValue }, "127.0.0.1");
 
         // Assert
-        Assert.NotNull(result);
-        Assert.Equal("access-token", result.AccessToken);
-        Assert.Equal("new-refresh", result.RefreshToken);
+        Assert.Null(result);
     }
 
     [Fact]

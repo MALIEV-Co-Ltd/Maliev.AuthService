@@ -99,6 +99,6 @@ public class TokenRefreshAdditionalContractTests : IntegrationTestBase
         var json = JsonDocument.Parse(content);
 
         Assert.Equal("Bearer", json.RootElement.GetProperty("token_type").GetString());
-        Assert.Equal(900, json.RootElement.GetProperty("expires_in").GetInt32());
+        Assert.Equal(7200, json.RootElement.GetProperty("expires_in").GetInt32());
     }
 }

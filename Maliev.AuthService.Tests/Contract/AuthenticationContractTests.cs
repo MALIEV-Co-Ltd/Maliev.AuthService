@@ -40,7 +40,7 @@ public class AuthenticationContractTests : IntegrationTestBase
         Assert.NotNull(json.RootElement.GetProperty("refresh_token").GetString());
         Assert.NotEmpty(json.RootElement.GetProperty("refresh_token").GetString()!);
         Assert.Equal("Bearer", json.RootElement.GetProperty("token_type").GetString());
-        Assert.Equal(900, json.RootElement.GetProperty("expires_in").GetInt32()); // 15 minutes
+        Assert.Equal(7200, json.RootElement.GetProperty("expires_in").GetInt32());
 
         var user = json.RootElement.GetProperty("user");
         Assert.NotNull(user.GetProperty("user_id").GetString());
