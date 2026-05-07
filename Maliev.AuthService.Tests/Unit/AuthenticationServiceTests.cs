@@ -14,6 +14,7 @@ using Moq.Protected;
 using Xunit;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using MassTransit;
 
 namespace Maliev.AuthService.Tests.Unit;
@@ -306,6 +307,96 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         // Assert
         Assert.False(result.Success);
         Assert.Equal("invalid_credentials", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task AuthenticateAsync_EmployeeValidationReturnsCamelCaseResponse_Succeeds()
+    {
+        // Arrange
+        const string email = "codex.admin@seed.maliev.local";
+        const string password = "ValidTestPassword123!";
+        var principalId = Guid.NewGuid();
+        var request = new LoginRequest { Username = email, Password = password, UserType = "employee" };
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["EmployeeService:BaseUrl"] = "http://EmployeeService",
+                ["EmployeeService:ValidationEndpoint"] = "/employee/v1/auth/validate"
+            })
+            .Build();
+
+        var handlerMock = new Mock<HttpMessageHandler>();
+        handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    $$"""
+                    {
+                      "isValid": true,
+                      "principalId": "{{principalId}}",
+                      "email": "{{email}}",
+                      "name": "Codex Admin"
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            });
+
+        _httpClientFactoryMock.Setup(f => f.CreateClient("ExternalValidation"))
+            .Returns(new HttpClient(handlerMock.Object));
+
+        _iamClientMock.Setup(s => s.ResolvePermissionsAsync(principalId))
+            .ReturnsAsync(new PermissionResolutionResponse { Roles = ["roles.platform.owner"], Permissions = ["*"] });
+
+        _tokenGeneratorMock.Setup(s => s.GenerateAccessToken(
+                principalId,
+                "employee",
+                email,
+                "Codex Admin",
+                null,
+                It.Is<IEnumerable<string>>(roles => roles.Contains("roles.platform.owner"))))
+            .Returns("access-token");
+
+        _refreshTokenServiceMock.Setup(s => s.CreateRefreshTokenAsync(
+                principalId,
+                principalId,
+                UserType.Employee,
+                email,
+                "Codex Admin",
+                "127.0.0.1"))
+            .ReturnsAsync((new RefreshToken(), "refresh-token"));
+
+        var service = new AuthenticationService(
+            _fixture.CreateDbContext(),
+            _tokenGeneratorMock.Object,
+            _tokenValidatorMock.Object,
+            _refreshTokenServiceMock.Object,
+            _accountLockoutServiceMock.Object,
+            _rateLimitServiceMock.Object,
+            _iamClientMock.Object,
+            _loggerMock.Object,
+            _httpClientFactoryMock.Object,
+            configuration,
+            _publishEndpointMock.Object,
+            _employeeServiceClientMock.Object);
+
+        // Act
+        var result = await service.AuthenticateAsync(request, "127.0.0.1");
+
+        // Assert
+        handlerMock.Protected().Verify(
+            "SendAsync",
+            Times.Once(),
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>());
+        Assert.True(result.Success, $"{result.ErrorCode}: {result.ErrorDescription}");
+        Assert.Equal(principalId, result.PrincipalId);
+        Assert.Equal("access-token", result.Response!.AccessToken);
     }
 
     [Fact]

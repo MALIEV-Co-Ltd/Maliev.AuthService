@@ -753,15 +753,14 @@ public class AuthenticationService : IAuthenticationService
                 return (false, null, null, null, null, "Invalid credentials");
             }
 
-            var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
-            var result = await response.Content.ReadFromJsonAsync<CredentialValidationResult>(jsonOptions);
+            var result = await CredentialValidationResult.ReadFromJsonAsync(response.Content, cts.Token);
             if (result == null || !result.IsValid)
             {
-                var userId2 = result?.UserId == Guid.Empty ? null : result?.UserId;
+                var userId2 = result?.ResolvedUserId == Guid.Empty ? null : result?.ResolvedUserId;
                 return (false, userId2, result?.PrincipalId, null, null, "Invalid credentials");
             }
 
-            return (true, result.UserId, result.PrincipalId, result.Email, result.Name, null);
+            return (true, result.ResolvedUserId, result.PrincipalId, result.Email, result.Name, null);
         }
         catch (OperationCanceledException)
         {
@@ -806,6 +805,76 @@ public class AuthenticationService : IAuthenticationService
         public Guid? PrincipalId { get; set; }
         public string? Email { get; set; }
         public string? Name { get; set; }
+
+        public Guid ResolvedUserId => UserId != Guid.Empty ? UserId : PrincipalId ?? Guid.Empty;
+
+        public static async Task<CredentialValidationResult?> ReadFromJsonAsync(
+            HttpContent content,
+            CancellationToken cancellationToken)
+        {
+            var json = await content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+
+            return new CredentialValidationResult
+            {
+                IsValid = GetBoolean(root, "is_valid", "isValid", "IsValid"),
+                UserId = GetGuid(root, "user_id", "userId", "UserId") ?? Guid.Empty,
+                PrincipalId = GetGuid(root, "principal_id", "principalId", "PrincipalId"),
+                Email = GetString(root, "email", "Email"),
+                Name = GetString(root, "name", "Name")
+            };
+        }
+
+        private static bool GetBoolean(JsonElement root, params string[] propertyNames)
+        {
+            var value = GetProperty(root, propertyNames);
+            return value.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+                _ => false
+            };
+        }
+
+        private static Guid? GetGuid(JsonElement root, params string[] propertyNames)
+        {
+            var value = GetProperty(root, propertyNames);
+            if (value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+
+            return null;
+        }
+
+        private static string? GetString(JsonElement root, params string[] propertyNames)
+        {
+            var value = GetProperty(root, propertyNames);
+            return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        }
+
+        private static JsonElement GetProperty(JsonElement root, params string[] propertyNames)
+        {
+            foreach (var propertyName in propertyNames)
+            {
+                if (root.TryGetProperty(propertyName, out var value))
+                {
+                    return value;
+                }
+            }
+
+            foreach (var property in root.EnumerateObject())
+            {
+                if (propertyNames.Any(name => string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return property.Value;
+                }
+            }
+
+            return default;
+        }
     }
 
     private record EmployeeLookupResult
