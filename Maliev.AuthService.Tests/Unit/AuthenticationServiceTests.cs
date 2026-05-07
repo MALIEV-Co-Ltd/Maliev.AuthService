@@ -313,7 +313,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     public async Task AuthenticateAsync_EmployeeValidationReturnsCamelCaseResponse_Succeeds()
     {
         // Arrange
-        const string email = "codex.admin@seed.maliev.local";
+        const string email = "aspire-automation@debug.com";
         const string password = "ValidTestPassword123!";
         var principalId = Guid.NewGuid();
         var request = new LoginRequest { Username = email, Password = password, UserType = "employee" };
