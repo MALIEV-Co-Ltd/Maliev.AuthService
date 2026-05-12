@@ -143,4 +143,35 @@ public class GoogleExchangeContractTests : IntegrationTestBase
         var result = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions);
         Assert.Equal("provision_failed", result?.Error);
     }
+
+    [Fact]
+    public async Task ExchangeCustomerGoogleToken_WithPublicGoogleAccount_ShouldReturnCustomerSession()
+    {
+        await CleanDatabaseAsync();
+        // Arrange
+        var request = new
+        {
+            email = "customer@gmail.com",
+            full_name = "Customer User",
+            google_user_id = "google-sub-123",
+            email_verified = true
+        };
+
+        // Act
+        var response = await Client.PostAsJsonAsync("/auth/v1/exchange/google/customer", request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<LoginResponse>(JsonOptions);
+
+        Assert.NotNull(result?.AccessToken);
+        Assert.NotNull(result?.RefreshToken);
+        Assert.Equal("customer", result?.User.UserType);
+        Assert.Equal("customer@gmail.com", result?.User.Email);
+
+        var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+        var token = handler.ReadJwtToken(result!.AccessToken);
+        Assert.NotNull(token.Claims.FirstOrDefault(c => c.Type == "customer_id"));
+        Assert.Equal(token.Subject, token.Claims.First(c => c.Type == "principal_id").Value);
+    }
 }

@@ -95,6 +95,13 @@ public class AuthenticationAdditionalContractTests : IntegrationTestBase
         var userTypeClaim = token.Claims.FirstOrDefault(c => c.Type == "user_type");
         Assert.NotNull(userTypeClaim);
         Assert.Equal("customer", userTypeClaim.Value);
+
+        var principalIdClaim = token.Claims.FirstOrDefault(c => c.Type == "principal_id");
+        Assert.NotNull(principalIdClaim);
+        Assert.Equal(token.Subject, principalIdClaim.Value);
+
+        var customerIdClaim = token.Claims.FirstOrDefault(c => c.Type == "customer_id");
+        Assert.NotNull(customerIdClaim);
     }
 
     [Fact]

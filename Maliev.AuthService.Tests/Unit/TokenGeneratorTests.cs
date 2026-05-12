@@ -188,4 +188,30 @@ public class TokenGeneratorTests
         Assert.Contains("admin", roleClaims);
         Assert.Contains("user", roleClaims);
     }
+
+    [Fact]
+    public void GenerateAccessToken_ForCustomerSession_ContainsPrincipalAndCustomerClaims()
+    {
+        // Arrange
+        var principalId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+
+        // Act
+        var tokenString = _tokenGenerator.GenerateAccessToken(
+            principalId,
+            "customer",
+            "customer@example.com",
+            "Customer",
+            null,
+            null,
+            customerId);
+
+        // Assert
+        var handler = new JwtSecurityTokenHandler();
+        var token = handler.ReadJwtToken(tokenString);
+
+        Assert.Equal(principalId.ToString(), token.Subject);
+        Assert.Equal(principalId.ToString(), token.Claims.First(c => c.Type == "principal_id").Value);
+        Assert.Equal(customerId.ToString(), token.Claims.First(c => c.Type == "customer_id").Value);
+    }
 }

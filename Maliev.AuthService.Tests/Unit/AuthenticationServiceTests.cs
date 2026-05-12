@@ -146,7 +146,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         _iamClientMock.Setup(s => s.ResolvePermissionsAsync(principalId))
             .ReturnsAsync(new PermissionResolutionResponse { Permissions = new List<string> { "read" }, Roles = new List<string> { "user" } });
 
-        _tokenGeneratorMock.Setup(s => s.GenerateAccessToken(principalId, "employee", email, "New User", It.IsAny<IEnumerable<string>>(), It.IsAny<IEnumerable<string>>()))
+        _tokenGeneratorMock.Setup(s => s.GenerateAccessToken(principalId, "employee", email, "New User", It.IsAny<IEnumerable<string>>(), It.IsAny<IEnumerable<string>>(), null))
             .Returns("access-token");
 
         _refreshTokenServiceMock.Setup(s => s.CreateRefreshTokenAsync(employeeId, principalId, UserType.Employee, email, "New User", It.IsAny<string>()))
@@ -359,7 +359,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
                 email,
                 "Codex Admin",
                 null,
-                It.Is<IEnumerable<string>>(roles => roles.Contains("roles.platform.owner"))))
+                It.Is<IEnumerable<string>>(roles => roles.Contains("roles.platform.owner")),
+                null))
             .Returns("access-token");
 
         _refreshTokenServiceMock.Setup(s => s.CreateRefreshTokenAsync(

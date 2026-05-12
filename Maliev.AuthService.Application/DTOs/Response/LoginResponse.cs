@@ -45,6 +45,16 @@ public class UserIdentityResponse
     public string UserId { get; set; } = string.Empty;
 
     /// <summary>
+    /// IAM principal identifier used as the JWT subject.
+    /// </summary>
+    public string? PrincipalId { get; set; }
+
+    /// <summary>
+    /// Canonical CustomerService customer identifier for customer sessions.
+    /// </summary>
+    public string? CustomerId { get; set; }
+
+    /// <summary>
     /// User type: "customer" or "employee".
     /// </summary>
     public string UserType { get; set; } = string.Empty;

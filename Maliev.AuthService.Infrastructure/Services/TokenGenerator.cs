@@ -108,15 +108,21 @@ public class TokenGenerator : ITokenGenerator
     }
 
     /// <inheritdoc/>
-    public string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null)
+    public string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null, Guid? customerId = null)
     {
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, userId.ToString()),
+            new("principal_id", userId.ToString()),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             new("user_type", userType),
             new(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
         };
+
+        if (customerId.HasValue && userType.Equals("customer", StringComparison.OrdinalIgnoreCase))
+        {
+            claims.Add(new Claim("customer_id", customerId.Value.ToString()));
+        }
 
         if (!string.IsNullOrEmpty(email))
         {

@@ -60,4 +60,26 @@ public interface IAuthenticationService
     /// <param name="ipAddress">The IP address of the client.</param>
     /// <returns>The authentication result.</returns>
     Task<AuthenticationResult> ExchangeGoogleTokenAsync(GoogleExchangeRequest request, string? ipAddress);
+
+    /// <summary>
+    /// Exchanges a verified customer Google identity for a platform JWT.
+    /// </summary>
+    /// <param name="request">The customer Google exchange request.</param>
+    /// <param name="ipAddress">The IP address of the client.</param>
+    /// <returns>The authentication result.</returns>
+    Task<AuthenticationResult> ExchangeCustomerGoogleTokenAsync(CustomerGoogleExchangeRequest request, string? ipAddress);
+
+    /// <summary>
+    /// Starts a customer password reset.
+    /// </summary>
+    /// <param name="request">The password reset request.</param>
+    /// <returns>The reset response.</returns>
+    Task<PasswordResetResponse?> RequestPasswordResetAsync(PasswordResetRequest request);
+
+    /// <summary>
+    /// Confirms a customer password reset.
+    /// </summary>
+    /// <param name="request">The password reset confirmation request.</param>
+    /// <returns>The reset confirmation response.</returns>
+    Task<ConfirmPasswordResetResponse?> ConfirmPasswordResetAsync(ConfirmPasswordResetRequest request);
 }

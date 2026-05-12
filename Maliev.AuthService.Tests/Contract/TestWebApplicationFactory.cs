@@ -161,6 +161,8 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
 
                     if (jsonDoc.RootElement.TryGetProperty("username", out var usernameElement))
                         username = usernameElement.GetString();
+                    if (jsonDoc.RootElement.TryGetProperty("email", out var emailElement))
+                        username = emailElement.GetString();
                     if (jsonDoc.RootElement.TryGetProperty("password", out var passwordElement))
                         password = passwordElement.GetString();
                 }
@@ -173,13 +175,17 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
 
                 if (username != null && validUsers.TryGetValue(username, out var expectedPassword) && password == expectedPassword)
                 {
+                    var userId = Guid.NewGuid();
+                    var principalId = Guid.NewGuid();
                     var response = new
                     {
                         is_valid = true,
-                        user_id = Guid.NewGuid(),
-                        principal_id = Guid.NewGuid(),
+                        user_id = userId,
+                        customer_id = username.EndsWith("@maliev.com", StringComparison.OrdinalIgnoreCase) ? (Guid?)null : userId,
+                        principal_id = principalId,
                         email = username,
-                        name = "Test User"
+                        name = "Test User",
+                        display_name = "Test User"
                     };
 
                     return new HttpResponseMessage(HttpStatusCode.OK)
@@ -245,6 +251,57 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = JsonContent.Create(response)
+                };
+            }
+
+            // Mock CustomerService customer Google link/register endpoint
+            if (request.RequestUri?.PathAndQuery.Contains("/customer/v1/customers/google/link-or-register") == true)
+            {
+                string? email = null;
+                string? firstName = null;
+                string? lastName = null;
+
+                if (request.Content != null)
+                {
+                    var requestBody = await request.Content.ReadAsStringAsync(cancellationToken);
+                    var jsonDoc = JsonDocument.Parse(requestBody);
+                    if (jsonDoc.RootElement.TryGetProperty("email", out var emailElement))
+                        email = emailElement.GetString();
+                    if (jsonDoc.RootElement.TryGetProperty("firstName", out var firstNameElement))
+                        firstName = firstNameElement.GetString();
+                    if (jsonDoc.RootElement.TryGetProperty("lastName", out var lastNameElement))
+                        lastName = lastNameElement.GetString();
+                }
+
+                var response = new
+                {
+                    customerId = Guid.NewGuid(),
+                    principalId = Guid.NewGuid(),
+                    email = email ?? "customer@gmail.com",
+                    displayName = $"{firstName} {lastName}".Trim(),
+                    preferredLanguage = "th"
+                };
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(response)
+                };
+            }
+
+            // Mock CustomerService password reset endpoints
+            if (request.RequestUri?.PathAndQuery.Contains("/customer/v1/customers/password-reset/request") == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new { accepted = true, resetToken = "reset-token" })
+                };
+            }
+
+            if (request.RequestUri?.PathAndQuery.Contains("/customer/v1/customers/password-reset/confirm") == true)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(new { accepted = true, customerId = Guid.NewGuid() })
                 };
             }
 

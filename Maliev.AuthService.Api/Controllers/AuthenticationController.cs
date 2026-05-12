@@ -313,4 +313,99 @@ public class AuthenticationController : ControllerBase
 
         return Ok(result.Response);
     }
+
+    /// <summary>
+    /// Exchanges a verified customer Google identity for a customer JWT.
+    /// </summary>
+    /// <remarks>
+    /// Used by the public Web BFF after successful customer Google authentication.
+    /// Customer Google accounts are not restricted to the MALIEV Workspace domain.
+    /// </remarks>
+    /// <param name="request">The customer Google exchange request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Authentication response with JWT and refresh tokens.</returns>
+    /// <response code="200">Successful exchange. Returns access and refresh tokens.</response>
+    /// <response code="401">Google identity is invalid or unverified.</response>
+    /// <response code="503">CustomerService or IAM is unavailable.</response>
+    [HttpPost("exchange/google/customer")]
+    [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ExchangeCustomerGoogleToken([FromBody] CustomerGoogleExchangeRequest request, CancellationToken cancellationToken)
+    {
+        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var result = await _authenticationService.ExchangeCustomerGoogleTokenAsync(request, ipAddress);
+
+        if (!result.Success)
+        {
+            if (result.ErrorCode == "service_unavailable")
+            {
+                return StatusCode(503, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
+            return Unauthorized(new ErrorResponse
+            {
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
+            });
+        }
+
+        return Ok(result.Response);
+    }
+
+    /// <summary>
+    /// Starts a customer password reset through CustomerService.
+    /// </summary>
+    /// <param name="request">The password reset request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Reset request status.</returns>
+    /// <response code="200">Reset request accepted.</response>
+    /// <response code="503">CustomerService is unavailable.</response>
+    [HttpPost("password-reset/request")]
+    [ProducesResponseType(typeof(PasswordResetResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> RequestPasswordReset([FromBody] PasswordResetRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _authenticationService.RequestPasswordResetAsync(request);
+        if (result == null)
+        {
+            return StatusCode(503, new ErrorResponse
+            {
+                Error = "service_unavailable",
+                ErrorDescription = "Customer account service is currently unavailable"
+            });
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Confirms a customer password reset through CustomerService.
+    /// </summary>
+    /// <param name="request">The password reset confirmation request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Password reset status.</returns>
+    /// <response code="200">Password reset completed.</response>
+    /// <response code="400">Reset token is invalid.</response>
+    [HttpPost("password-reset/confirm")]
+    [ProducesResponseType(typeof(ConfirmPasswordResetResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ConfirmPasswordReset([FromBody] ConfirmPasswordResetRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _authenticationService.ConfirmPasswordResetAsync(request);
+        if (result == null || !result.Reset)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = "invalid_reset_token",
+                ErrorDescription = "Invalid or expired password reset token"
+            });
+        }
+
+        return Ok(result);
+    }
 }

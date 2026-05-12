@@ -201,7 +201,8 @@ public class AuthenticationService : IAuthenticationService
             };
         }
 
-        var accessToken = _tokenGenerator.GenerateAccessToken(principalId, request.UserType, validationResult.Email, validationResult.Name, permissions, roles);
+        var customerId = userType == UserType.Customer ? userId : (Guid?)null;
+        var accessToken = _tokenGenerator.GenerateAccessToken(principalId, request.UserType, validationResult.Email, validationResult.Name, permissions, roles, customerId);
         var (_, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(userId, principalId, userType, validationResult.Email, validationResult.Name, ipAddress);
 
         EnqueueAuditLog(userId, userType, "login", ipAddress, true, null);
@@ -226,6 +227,8 @@ public class AuthenticationService : IAuthenticationService
                 User = new UserIdentityResponse
                 {
                     UserId = principalId.ToString(),
+                    PrincipalId = principalId.ToString(),
+                    CustomerId = customerId?.ToString(),
                     UserType = request.UserType,
                     Email = validationResult.Email,
                     Name = validationResult.Name
@@ -273,7 +276,8 @@ public class AuthenticationService : IAuthenticationService
             return null;
         }
 
-        var accessToken = _tokenGenerator.GenerateAccessToken(refreshToken.PrincipalId, userTypeString, refreshToken.Email, refreshToken.Name, permissions, roles);
+        var customerId = refreshToken.UserType == UserType.Customer ? refreshToken.UserId : (Guid?)null;
+        var accessToken = _tokenGenerator.GenerateAccessToken(refreshToken.PrincipalId, userTypeString, refreshToken.Email, refreshToken.Name, permissions, roles, customerId);
 
         EnqueueAuditLog(refreshToken.UserId, refreshToken.UserType, "token_refresh", ipAddress, true, null);
 
@@ -302,6 +306,8 @@ public class AuthenticationService : IAuthenticationService
         }
 
         var userId = principal.FindFirst("sub")?.Value;
+        var principalId = principal.FindFirst("principal_id")?.Value ?? userId;
+        var customerId = principal.FindFirst("customer_id")?.Value;
         var userType = principal.FindFirst("user_type")?.Value;
         var email = principal.FindFirst("email")?.Value;
         var name = principal.FindFirst("name")?.Value;
@@ -312,6 +318,8 @@ public class AuthenticationService : IAuthenticationService
         {
             Valid = true,
             UserId = userId,
+            PrincipalId = principalId,
+            CustomerId = customerId,
             UserType = userType,
             Email = email,
             Name = name,
@@ -334,7 +342,10 @@ public class AuthenticationService : IAuthenticationService
 
         if (await _tokenValidator.IsTokenRevokedAsync(jtiClaim)) return true;
 
-        var userId = Guid.Parse(userIdClaim);
+        var customerIdClaim = principal.FindFirst("customer_id")?.Value;
+        var userId = userTypeClaim?.ToLowerInvariant() == "customer" && Guid.TryParse(customerIdClaim, out var parsedCustomerId)
+            ? parsedCustomerId
+            : Guid.Parse(userIdClaim);
         var userType = userTypeClaim?.ToLowerInvariant() == "customer" ? UserType.Customer : UserType.Employee;
 
         var expClaim = principal.FindFirst("exp")?.Value;
@@ -455,6 +466,7 @@ public class AuthenticationService : IAuthenticationService
             User = new UserIdentityResponse
             {
                 UserId = request.ClientId,
+                PrincipalId = serviceCredential.PrincipalId?.ToString(),
                 UserType = "service",
                 Name = serviceCredential.ServiceName
             }
@@ -639,12 +651,311 @@ public class AuthenticationService : IAuthenticationService
                 User = new UserIdentityResponse
                 {
                     UserId = principalId.Value.ToString(),
+                    PrincipalId = principalId.Value.ToString(),
                     UserType = "employee",
                     Email = request.Email,
                     Name = employeeName ?? request.FullName ?? request.Email
                 }
             }
         };
+    }
+
+    /// <inheritdoc/>
+    public async Task<AuthenticationResult> ExchangeCustomerGoogleTokenAsync(CustomerGoogleExchangeRequest request, string? ipAddress)
+    {
+        if (!request.EmailVerified)
+        {
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "unverified_email",
+                ErrorDescription = "Google email must be verified"
+            };
+        }
+
+        var session = await LinkOrRegisterGoogleCustomerAsync(request);
+        if (session == null)
+        {
+            EnqueueAuditLog(null, UserType.Customer, "customer_google_exchange", ipAddress, false, "CustomerService unavailable");
+            await _dbContext.SaveChangesAsync();
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "service_unavailable",
+                ErrorDescription = "Customer account service is currently unavailable"
+            };
+        }
+
+        IEnumerable<string>? permissions = null;
+        IEnumerable<string>? roles = null;
+
+        try
+        {
+            var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(session.PrincipalId);
+            roles = iamResponse.Roles;
+            permissions = roles != null && roles.Contains(MalievIamRoles.PlatformOwner)
+                ? null
+                : iamResponse.Permissions;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resolve permissions from IAM for customer Google SSO user {Email}. Blocking login.", request.Email);
+            EnqueueAuditLog(session.CustomerId, UserType.Customer, "customer_google_exchange", ipAddress, false, "IAM service unavailable");
+            await _dbContext.SaveChangesAsync();
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "service_unavailable",
+                ErrorDescription = "Authentication service temporarily unavailable. Please try again."
+            };
+        }
+
+        var accessToken = _tokenGenerator.GenerateAccessToken(
+            session.PrincipalId,
+            "customer",
+            session.Email,
+            session.DisplayName,
+            permissions,
+            roles,
+            session.CustomerId);
+
+        var (_, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(
+            session.CustomerId,
+            session.PrincipalId,
+            UserType.Customer,
+            session.Email,
+            session.DisplayName,
+            ipAddress);
+
+        EnqueueAuditLog(session.CustomerId, UserType.Customer, "customer_google_exchange", ipAddress, true, null);
+
+        await _publishEndpoint.Publish(new UserLoggedInEvent(
+            Guid.NewGuid(), "UserLoggedInEvent", MessageType.Event, "1.0.0",
+            "AuthService", ["NotificationService"], Guid.NewGuid(), null, DateTimeOffset.UtcNow, false,
+            new UserLoggedInEventPayload(session.CustomerId.ToString(), session.PrincipalId.ToString(), "Customer", ipAddress, "GoogleSSO", DateTimeOffset.UtcNow)));
+
+        return new AuthenticationResult
+        {
+            Success = true,
+            PrincipalId = session.PrincipalId,
+            Response = new LoginResponse
+            {
+                AccessToken = accessToken,
+                RefreshToken = refreshTokenValue,
+                TokenType = "Bearer",
+                ExpiresIn = 7200,
+                User = new UserIdentityResponse
+                {
+                    UserId = session.PrincipalId.ToString(),
+                    PrincipalId = session.PrincipalId.ToString(),
+                    CustomerId = session.CustomerId.ToString(),
+                    UserType = "customer",
+                    Email = session.Email,
+                    Name = session.DisplayName
+                }
+            }
+        };
+    }
+
+    /// <inheritdoc/>
+    public async Task<PasswordResetResponse?> RequestPasswordResetAsync(PasswordResetRequest request)
+    {
+        var serviceUrl = _configuration["CustomerService:BaseUrl"] ?? "http://CustomerService";
+        var endpoint = _configuration["CustomerService:PasswordResetRequestEndpoint"]
+            ?? "/customer/v1/customers/password-reset/request";
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("ExternalValidation");
+            var response = await client.PostAsJsonAsync($"{serviceUrl}{endpoint}", new { email = request.Email });
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var accepted = GetBoolean(document.RootElement, "accepted", "Accepted");
+            return new PasswordResetResponse { Accepted = accepted };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to request password reset for {Email}", request.Email);
+            return null;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<ConfirmPasswordResetResponse?> ConfirmPasswordResetAsync(ConfirmPasswordResetRequest request)
+    {
+        var serviceUrl = _configuration["CustomerService:BaseUrl"] ?? "http://CustomerService";
+        var endpoint = _configuration["CustomerService:PasswordResetConfirmEndpoint"]
+            ?? "/customer/v1/customers/password-reset/confirm";
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("ExternalValidation");
+            var response = await client.PostAsJsonAsync($"{serviceUrl}{endpoint}", new
+            {
+                email = request.Email,
+                token = request.Token,
+                newPassword = request.NewPassword
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var accepted = GetBoolean(document.RootElement, "accepted", "Accepted", "reset", "Reset");
+            var customerId = GetGuid(document.RootElement, "customerId", "customer_id", "CustomerId");
+            if (accepted && customerId.HasValue)
+            {
+                await RevokeCustomerRefreshTokensAsync(customerId.Value);
+            }
+
+            return new ConfirmPasswordResetResponse { Reset = accepted };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to confirm password reset for {Email}", request.Email);
+            return null;
+        }
+    }
+
+    private async Task<CustomerAccountSessionResult?> LinkOrRegisterGoogleCustomerAsync(CustomerGoogleExchangeRequest request)
+    {
+        var serviceUrl = _configuration["CustomerService:BaseUrl"] ?? "http://CustomerService";
+        var endpoint = _configuration["CustomerService:GoogleLinkOrRegisterEndpoint"]
+            ?? "/customer/v1/customers/google/link-or-register";
+        var (firstName, lastName) = SplitFullName(request.FullName, request.Email);
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("ExternalValidation");
+            var response = await client.PostAsJsonAsync($"{serviceUrl}{endpoint}", new
+            {
+                email = request.Email,
+                firstName,
+                lastName,
+                googleSubject = request.GoogleUserId,
+                emailVerified = request.EmailVerified,
+                preferredLanguage = request.PreferredLanguage,
+                timezone = request.Timezone
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("Customer Google link/register failed with status {StatusCode}: {Error}", response.StatusCode, errorBody);
+                return null;
+            }
+
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var root = document.RootElement;
+            var customerId = GetGuid(root, "customerId", "customer_id", "CustomerId");
+            var principalId = GetGuid(root, "principalId", "principal_id", "PrincipalId");
+            var email = GetString(root, "email", "Email");
+            var displayName = GetString(root, "displayName", "display_name", "DisplayName", "name", "Name");
+
+            if (!customerId.HasValue || !principalId.HasValue || string.IsNullOrWhiteSpace(email))
+            {
+                _logger.LogWarning("CustomerService returned an incomplete Google link/register session for {Email}", request.Email);
+                return null;
+            }
+
+            return new CustomerAccountSessionResult(
+                customerId.Value,
+                principalId.Value,
+                email,
+                string.IsNullOrWhiteSpace(displayName) ? request.FullName ?? request.Email : displayName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to link/register Google customer for {Email}", request.Email);
+            return null;
+        }
+    }
+
+    private async Task RevokeCustomerRefreshTokensAsync(Guid customerId)
+    {
+        var activeTokens = await _dbContext.RefreshTokens
+            .Where(token => token.UserId == customerId && token.UserType == UserType.Customer && !token.IsUsed)
+            .ToListAsync();
+
+        foreach (var token in activeTokens)
+        {
+            token.IsUsed = true;
+            token.UsedAt = DateTime.UtcNow;
+        }
+
+        if (activeTokens.Count > 0)
+        {
+            await _dbContext.SaveChangesAsync();
+        }
+    }
+
+    private static (string FirstName, string LastName) SplitFullName(string? fullName, string email)
+    {
+        var fallback = email.Split('@')[0];
+        var name = string.IsNullOrWhiteSpace(fullName) ? fallback : fullName.Trim();
+        var parts = name.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length switch
+        {
+            0 => (fallback, "-"),
+            1 => (parts[0], "-"),
+            _ => (parts[0], parts[1])
+        };
+    }
+
+    private static bool GetBoolean(JsonElement root, params string[] propertyNames)
+    {
+        var value = GetProperty(root, propertyNames);
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+            _ => false
+        };
+    }
+
+    private static Guid? GetGuid(JsonElement root, params string[] propertyNames)
+    {
+        var value = GetProperty(root, propertyNames);
+        if (value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+
+    private static string? GetString(JsonElement root, params string[] propertyNames)
+    {
+        var value = GetProperty(root, propertyNames);
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    }
+
+    private static JsonElement GetProperty(JsonElement root, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (root.TryGetProperty(propertyName, out var value))
+            {
+                return value;
+            }
+        }
+
+        foreach (var property in root.EnumerateObject())
+        {
+            if (propertyNames.Any(name => string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                return property.Value;
+            }
+        }
+
+        return default;
     }
 
     private async Task<(bool Success, Guid? EmployeeId, Guid? PrincipalId, string? Name, string? EmploymentStatus, string? Error)>
@@ -746,7 +1057,10 @@ public class AuthenticationService : IAuthenticationService
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
 
             var client = _httpClientFactory.CreateClient("ExternalValidation");
-            var response = await client.PostAsJsonAsync($"{serviceUrl}{validationEndpoint}", new { username, password }, cts.Token);
+            object payload = userType == UserType.Customer
+                ? new { email = username, password }
+                : new { username, password };
+            var response = await client.PostAsJsonAsync($"{serviceUrl}{validationEndpoint}", payload, cts.Token);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -760,7 +1074,7 @@ public class AuthenticationService : IAuthenticationService
                 return (false, userId2, result?.PrincipalId, null, null, "Invalid credentials");
             }
 
-            return (true, result.ResolvedUserId, result.PrincipalId, result.Email, result.Name, null);
+            return (true, result.ResolvedUserId, result.PrincipalId, result.Email, result.ResolvedName, null);
         }
         catch (OperationCanceledException)
         {
@@ -802,11 +1116,15 @@ public class AuthenticationService : IAuthenticationService
     {
         public bool IsValid { get; set; }
         public Guid UserId { get; set; }
+        public Guid? CustomerId { get; set; }
         public Guid? PrincipalId { get; set; }
         public string? Email { get; set; }
         public string? Name { get; set; }
+        public string? DisplayName { get; set; }
 
-        public Guid ResolvedUserId => UserId != Guid.Empty ? UserId : PrincipalId ?? Guid.Empty;
+        public Guid ResolvedUserId => UserId != Guid.Empty ? UserId : CustomerId ?? PrincipalId ?? Guid.Empty;
+
+        public string? ResolvedName => Name ?? DisplayName;
 
         public static async Task<CredentialValidationResult?> ReadFromJsonAsync(
             HttpContent content,
@@ -820,9 +1138,11 @@ public class AuthenticationService : IAuthenticationService
             {
                 IsValid = GetBoolean(root, "is_valid", "isValid", "IsValid"),
                 UserId = GetGuid(root, "user_id", "userId", "UserId") ?? Guid.Empty,
+                CustomerId = GetGuid(root, "customer_id", "customerId", "CustomerId"),
                 PrincipalId = GetGuid(root, "principal_id", "principalId", "PrincipalId"),
                 Email = GetString(root, "email", "Email"),
-                Name = GetString(root, "name", "Name")
+                Name = GetString(root, "name", "Name"),
+                DisplayName = GetString(root, "display_name", "displayName", "DisplayName")
             };
         }
 
@@ -876,6 +1196,12 @@ public class AuthenticationService : IAuthenticationService
             return default;
         }
     }
+
+    private sealed record CustomerAccountSessionResult(
+        Guid CustomerId,
+        Guid PrincipalId,
+        string Email,
+        string DisplayName);
 
     private record EmployeeLookupResult
     {

@@ -16,6 +16,16 @@ public class ValidateResponse
     public string? UserId { get; set; }
 
     /// <summary>
+    /// IAM principal ID if token is valid.
+    /// </summary>
+    public string? PrincipalId { get; set; }
+
+    /// <summary>
+    /// Customer ID if token belongs to a customer session.
+    /// </summary>
+    public string? CustomerId { get; set; }
+
+    /// <summary>
     /// User type if token is valid.
     /// </summary>
     public string? UserType { get; set; }

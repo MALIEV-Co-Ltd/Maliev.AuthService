@@ -62,6 +62,7 @@ try
 
     builder.Services.AddHttpClient("ExternalValidation")
         .AddServiceDiscovery()
+        .AddHttpMessageHandler<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>()
         .AddStandardResilienceHandler();
 
     // Authenticated client for EmployeeService calls (Lookup/Provision)
