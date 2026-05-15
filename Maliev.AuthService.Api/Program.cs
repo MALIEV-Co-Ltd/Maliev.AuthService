@@ -90,9 +90,9 @@ try
         }
         else
         {
-            // Use service name for Aspire service discovery
-            // Service discovery will resolve "http://IAMService" to actual endpoint
-            client.BaseAddress = new Uri("http://IAMService");
+            // Prefer HTTPS when Aspire exposes it so redirects do not strip the
+            // service-account Authorization header before IAM permission resolution.
+            client.BaseAddress = new Uri("https+http://IAMService");
         }
 
         client.DefaultRequestHeaders.Add("X-Service-Name", "auth");

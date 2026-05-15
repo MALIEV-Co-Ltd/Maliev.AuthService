@@ -6,6 +6,15 @@ namespace Maliev.AuthService.Tests.Unit;
 public class IAMServiceClientAdditionalTests
 {
     [Fact]
+    public void Program_DefaultIamClient_UsesHttpsFirstServiceDiscovery()
+    {
+        var programSource = File.ReadAllText(FindProgramSource());
+
+        Assert.Contains("new Uri(\"https+http://IAMService\")", programSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("new Uri(\"http://IAMService\")", programSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PermissionResolutionResponse_SetsPropertiesCorrectly()
     {
         var principalId = Guid.NewGuid();
@@ -32,5 +41,28 @@ public class IAMServiceClientAdditionalTests
         };
 
         Assert.Equal(principalId, request.PrincipalId);
+    }
+
+    private static string FindProgramSource()
+    {
+        var current = AppContext.BaseDirectory;
+        var directory = new DirectoryInfo(current);
+
+        while (directory != null)
+        {
+            var candidate = Path.Combine(
+                directory.FullName,
+                "Maliev.AuthService.Api",
+                "Program.cs");
+
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException("Unable to locate Maliev.AuthService.Api/Program.cs.");
     }
 }
