@@ -760,7 +760,7 @@ public class AuthenticationService : IAuthenticationService
     /// <inheritdoc/>
     public async Task<PasswordResetResponse?> RequestPasswordResetAsync(PasswordResetRequest request)
     {
-        var serviceUrl = _configuration["CustomerService:BaseUrl"] ?? "http://CustomerService";
+        var serviceUrl = _configuration["CustomerService:BaseUrl"] ?? "https+http://CustomerService";
         var endpoint = _configuration["CustomerService:PasswordResetRequestEndpoint"]
             ?? "/customer/v1/customers/password-reset/request";
 
@@ -787,7 +787,7 @@ public class AuthenticationService : IAuthenticationService
     /// <inheritdoc/>
     public async Task<ConfirmPasswordResetResponse?> ConfirmPasswordResetAsync(ConfirmPasswordResetRequest request)
     {
-        var serviceUrl = _configuration["CustomerService:BaseUrl"] ?? "http://CustomerService";
+        var serviceUrl = _configuration["CustomerService:BaseUrl"] ?? "https+http://CustomerService";
         var endpoint = _configuration["CustomerService:PasswordResetConfirmEndpoint"]
             ?? "/customer/v1/customers/password-reset/confirm";
 
@@ -825,7 +825,7 @@ public class AuthenticationService : IAuthenticationService
 
     private async Task<CustomerAccountSessionResult?> LinkOrRegisterGoogleCustomerAsync(CustomerGoogleExchangeRequest request)
     {
-        var serviceUrl = _configuration["CustomerService:BaseUrl"] ?? "http://CustomerService";
+        var serviceUrl = _configuration["CustomerService:BaseUrl"] ?? "https+http://CustomerService";
         var endpoint = _configuration["CustomerService:GoogleLinkOrRegisterEndpoint"]
             ?? "/customer/v1/customers/google/link-or-register";
         var (firstName, lastName) = SplitFullName(request.FullName, request.Email);
@@ -1034,8 +1034,8 @@ public class AuthenticationService : IAuthenticationService
         string username, string password, UserType userType)
     {
         var serviceUrl = userType == UserType.Customer
-            ? _configuration["CustomerService:BaseUrl"] ?? "http://CustomerService"
-            : _configuration["EmployeeService:BaseUrl"] ?? "http://EmployeeService";
+            ? _configuration["CustomerService:BaseUrl"] ?? "https+http://CustomerService"
+            : _configuration["EmployeeService:BaseUrl"] ?? "https+http://EmployeeService";
 
         var validationEndpoint = userType == UserType.Customer
             ? _configuration["CustomerService:ValidationEndpoint"]
