@@ -751,7 +751,8 @@ public class AuthenticationService : IAuthenticationService
                     CustomerId = session.CustomerId.ToString(),
                     UserType = "customer",
                     Email = session.Email,
-                    Name = session.DisplayName
+                    Name = session.DisplayName,
+                    ProfileImageUrl = session.ProfileImageUrl
                 }
             }
         };
@@ -840,6 +841,7 @@ public class AuthenticationService : IAuthenticationService
                 lastName,
                 googleSubject = request.GoogleUserId,
                 emailVerified = request.EmailVerified,
+                profileImageUrl = request.ProfileImageUrl,
                 preferredLanguage = request.PreferredLanguage,
                 timezone = request.Timezone
             });
@@ -857,6 +859,7 @@ public class AuthenticationService : IAuthenticationService
             var principalId = GetGuid(root, "principalId", "principal_id", "PrincipalId");
             var email = GetString(root, "email", "Email");
             var displayName = GetString(root, "displayName", "display_name", "DisplayName", "name", "Name");
+            var profileImageUrl = GetString(root, "profileImageUrl", "profile_image_url", "ProfileImageUrl");
 
             if (!customerId.HasValue || !principalId.HasValue || string.IsNullOrWhiteSpace(email))
             {
@@ -868,7 +871,8 @@ public class AuthenticationService : IAuthenticationService
                 customerId.Value,
                 principalId.Value,
                 email,
-                string.IsNullOrWhiteSpace(displayName) ? request.FullName ?? request.Email : displayName);
+                string.IsNullOrWhiteSpace(displayName) ? request.FullName ?? request.Email : displayName,
+                profileImageUrl);
         }
         catch (Exception ex)
         {
@@ -1201,7 +1205,8 @@ public class AuthenticationService : IAuthenticationService
         Guid CustomerId,
         Guid PrincipalId,
         string Email,
-        string DisplayName);
+        string DisplayName,
+        string? ProfileImageUrl);
 
     private record EmployeeLookupResult
     {

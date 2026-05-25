@@ -68,4 +68,9 @@ public class UserIdentityResponse
     /// User full name.
     /// </summary>
     public string? Name { get; set; }
+
+    /// <summary>
+    /// User profile image URL.
+    /// </summary>
+    public string? ProfileImageUrl { get; set; }
 }

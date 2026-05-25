@@ -31,6 +31,11 @@ public class CustomerGoogleExchangeRequest
     public bool EmailVerified { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets the profile image URL from Google.
+    /// </summary>
+    public string? ProfileImageUrl { get; set; }
+
+    /// <summary>
     /// Gets or sets the customer's preferred language.
     /// </summary>
     public string PreferredLanguage { get; set; } = "th";

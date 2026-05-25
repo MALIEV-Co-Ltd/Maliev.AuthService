@@ -94,6 +94,20 @@ public class DtoValidationTests
     }
 
     [Fact]
+    public void CustomerGoogleExchangeRequest_WithGoogleProfileImageUrl_SetsProperties()
+    {
+        var request = new CustomerGoogleExchangeRequest
+        {
+            Email = "customer@gmail.com",
+            FullName = "Customer User",
+            GoogleUserId = "google-sub-123",
+            ProfileImageUrl = "https://lh3.googleusercontent.com/a/profile-photo"
+        };
+
+        Assert.Equal("https://lh3.googleusercontent.com/a/profile-photo", request.ProfileImageUrl);
+    }
+
+    [Fact]
     public void TokenResponse_SetsPropertiesCorrectly()
     {
         var response = new TokenResponse
@@ -124,7 +138,8 @@ public class DtoValidationTests
                 UserId = "user-123",
                 UserType = "customer",
                 Email = "user@example.com",
-                Name = "Test User"
+                Name = "Test User",
+                ProfileImageUrl = "https://cdn.maliev.test/profile.jpg"
             }
         };
 
@@ -132,6 +147,7 @@ public class DtoValidationTests
         Assert.Equal("user-123", response.User.UserId);
         Assert.Equal("customer", response.User.UserType);
         Assert.Equal("user@example.com", response.User.Email);
+        Assert.Equal("https://cdn.maliev.test/profile.jpg", response.User.ProfileImageUrl);
     }
 
     [Fact]
