@@ -38,6 +38,12 @@ public class AuthDbContext : DbContext
     /// <summary>Gets or sets service credentials.</summary>
     public DbSet<ServiceCredential> ServiceCredentials => Set<ServiceCredential>();
 
+    /// <summary>Gets or sets user principals.</summary>
+    public DbSet<UserPrincipal> UserPrincipals => Set<UserPrincipal>();
+
+    /// <summary>Gets or sets verification tokens.</summary>
+    public DbSet<VerificationToken> VerificationTokens => Set<VerificationToken>();
+
     /// <inheritdoc/>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -111,6 +111,7 @@ try
     builder.Services.AddScoped<IAccountLockoutService, AccountLockoutService>();
     builder.Services.AddScoped<IRateLimitService, RateLimitService>();
     builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
+    builder.Services.AddScoped<IEmailVerificationService, EmailVerificationService>();
 
     // Build the application
     var app = builder.Build();
