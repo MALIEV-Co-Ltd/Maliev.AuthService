@@ -16,18 +16,22 @@ namespace Maliev.AuthService.Api.Controllers;
 public class AuthenticationController : ControllerBase
 {
     private readonly IAuthenticationService _authenticationService;
+    private readonly IEmailVerificationService _emailVerificationService;
     private readonly ILogger<AuthenticationController> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AuthenticationController"/> class.
     /// </summary>
     /// <param name="authenticationService">The service responsible for authentication logic.</param>
+    /// <param name="emailVerificationService">The service responsible for email verification.</param>
     /// <param name="logger">The logger for this controller.</param>
     public AuthenticationController(
         IAuthenticationService authenticationService,
+        IEmailVerificationService emailVerificationService,
         ILogger<AuthenticationController> logger)
     {
         _authenticationService = authenticationService;
+        _emailVerificationService = emailVerificationService;
         _logger = logger;
     }
 
@@ -407,5 +411,116 @@ public class AuthenticationController : ControllerBase
         }
 
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Initiates email verification for a user principal.
+    /// </summary>
+    /// <remarks>
+    /// Sends a verification email with a unique token to the specified email address.
+    /// Subsequent requests for the same principal within the cooldown period will return
+    /// a 400 with a cooldown_until timestamp.
+    /// </remarks>
+    /// <param name="request">The verification initiation request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Verification initiation result.</returns>
+    /// <response code="200">Verification email sent successfully.</response>
+    /// <response code="400">Verification already initiated within cooldown period.</response>
+    [HttpPost("initiate-email-verification")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> InitiateEmailVerification([FromBody] InitiateVerificationRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _emailVerificationService.InitiateVerificationAsync(
+            request.PrincipalId, request.Email, request.FirstName, cancellationToken);
+
+        if (!result.Success)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
+            });
+        }
+
+        return Ok(new { message = "Verification email sent" });
+    }
+
+    /// <summary>
+    /// Verifies an email address using a verification token.
+    /// </summary>
+    /// <remarks>
+    /// Validates the provided token and, if valid, marks the associated email as verified.
+    /// Tokens are one-time use and expire after a configured duration.
+    /// </remarks>
+    /// <param name="request">The verify email request containing the token.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Verification result.</returns>
+    /// <response code="200">Email verified successfully.</response>
+    /// <response code="400">Token is invalid or expired.</response>
+    [HttpPost("verify-email")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _emailVerificationService.VerifyEmailAsync(request.Token, cancellationToken);
+
+        if (!result.Success)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
+            });
+        }
+
+        return Ok(new { message = "Email verified successfully" });
+    }
+
+    /// <summary>
+    /// Resends a verification email for a user principal.
+    /// </summary>
+    /// <remarks>
+    /// Generates a new verification token and sends a new email to the principal's
+    /// email address. Subject to the same cooldown rules as initial verification.
+    /// </remarks>
+    /// <param name="request">The resend verification request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Resend initiation result.</returns>
+    /// <response code="200">Verification email resent successfully.</response>
+    /// <response code="400">Resend not allowed (cooldown active or email already verified).</response>
+    [HttpPost("resend-verification-email")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResendVerificationEmail([FromBody] ResendVerificationRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _emailVerificationService.ResendVerificationAsync(request.PrincipalId, cancellationToken);
+
+        if (!result.Success)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
+            });
+        }
+
+        return Ok(new { message = "Verification email resent" });
+    }
+
+    /// <summary>
+    /// Checks if a user principal's email is verified.
+    /// </summary>
+    /// <param name="principalId">The principal identifier.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>The email verification status.</returns>
+    /// <response code="200">Returns the principal ID and verification status.</response>
+    [HttpGet("me")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPrincipalVerificationStatus([FromQuery] Guid principalId, CancellationToken cancellationToken)
+    {
+        var isVerified = await _emailVerificationService.IsEmailVerifiedAsync(principalId, cancellationToken);
+
+        return Ok(new { principalId, emailVerified = isVerified });
     }
 }
