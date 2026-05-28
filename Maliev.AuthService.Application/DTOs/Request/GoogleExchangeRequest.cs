@@ -24,4 +24,9 @@ public class GoogleExchangeRequest
     /// Used to correlate Google identity with the platform principal.
     /// </summary>
     public string? GoogleUserId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the profile image URL from Google.
+    /// </summary>
+    public string? ProfileImageUrl { get; set; }
 }

@@ -625,7 +625,7 @@ public class AuthenticationService : IAuthenticationService
 
         var accessToken = _tokenGenerator.GenerateAccessToken(
             principalId!.Value, "employee", request.Email,
-            employeeName ?? request.FullName ?? request.Email, permissions, roles);
+            employeeName ?? request.FullName ?? request.Email, permissions, roles, profileImageUrl: request.ProfileImageUrl);
 
         var (_, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(
             employeeId!.Value, principalId.Value, UserType.Employee,
@@ -654,7 +654,8 @@ public class AuthenticationService : IAuthenticationService
                     PrincipalId = principalId.Value.ToString(),
                     UserType = "employee",
                     Email = request.Email,
-                    Name = employeeName ?? request.FullName ?? request.Email
+                    Name = employeeName ?? request.FullName ?? request.Email,
+                    ProfileImageUrl = request.ProfileImageUrl
                 }
             }
         };

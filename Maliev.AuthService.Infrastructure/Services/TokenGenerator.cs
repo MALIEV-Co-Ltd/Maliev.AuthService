@@ -108,7 +108,7 @@ public class TokenGenerator : ITokenGenerator
     }
 
     /// <inheritdoc/>
-    public string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null, Guid? customerId = null)
+    public string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null, Guid? customerId = null, string? profileImageUrl = null)
     {
         var claims = new List<Claim>
         {
@@ -132,6 +132,11 @@ public class TokenGenerator : ITokenGenerator
         if (!string.IsNullOrEmpty(name))
         {
             claims.Add(new Claim(JwtRegisteredClaimNames.Name, name));
+        }
+
+        if (!string.IsNullOrEmpty(profileImageUrl))
+        {
+            claims.Add(new Claim("picture", profileImageUrl));
         }
 
         var rolesList = roles?.ToList() ?? [];

@@ -17,6 +17,7 @@ public class AuthenticationController : ControllerBase
 {
     private readonly IAuthenticationService _authenticationService;
     private readonly IEmailVerificationService _emailVerificationService;
+    private readonly IPasskeyService _passkeyService;
     private readonly ILogger<AuthenticationController> _logger;
 
     /// <summary>
@@ -24,14 +25,17 @@ public class AuthenticationController : ControllerBase
     /// </summary>
     /// <param name="authenticationService">The service responsible for authentication logic.</param>
     /// <param name="emailVerificationService">The service responsible for email verification.</param>
+    /// <param name="passkeyService">The service responsible for WebAuthn passkey operations.</param>
     /// <param name="logger">The logger for this controller.</param>
     public AuthenticationController(
         IAuthenticationService authenticationService,
         IEmailVerificationService emailVerificationService,
+        IPasskeyService passkeyService,
         ILogger<AuthenticationController> logger)
     {
         _authenticationService = authenticationService;
         _emailVerificationService = emailVerificationService;
+        _passkeyService = passkeyService;
         _logger = logger;
     }
 
@@ -522,5 +526,148 @@ public class AuthenticationController : ControllerBase
         var isVerified = await _emailVerificationService.IsEmailVerifiedAsync(principalId, cancellationToken);
 
         return Ok(new { principalId, emailVerified = isVerified });
+    }
+
+    /// <summary>
+    /// Begins WebAuthn passkey registration by generating a challenge and creation options.
+    /// </summary>
+    /// <remarks>
+    /// Returns credential creation options needed by the client to invoke navigator.credentials.create().
+    /// The challenge is stored server-side and expires after 5 minutes.
+    /// </remarks>
+    /// <param name="request">The registration begin request containing the principal ID.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>WebAuthn credential creation options.</returns>
+    /// <response code="200">Registration challenge created successfully.</response>
+    [HttpPost("passkey/register/begin")]
+    [ProducesResponseType(typeof(PasskeyRegistrationBeginResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> BeginPasskeyRegistration([FromBody] PasskeyRegistrationBeginRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _passkeyService.BeginRegistrationAsync(request.PrincipalId, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Completes WebAuthn passkey registration by verifying and storing the credential.
+    /// </summary>
+    /// <remarks>
+    /// Verifies the challenge, enforces max passkeys per principal, and stores the credential.
+    /// Publishes a PasskeyRegisteredEvent upon success.
+    /// </remarks>
+    /// <param name="request">The registration completion request with authenticator response.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Registration result.</returns>
+    /// <response code="200">Passkey registered successfully.</response>
+    /// <response code="400">Registration failed (challenge expired, duplicate credential, or max reached).</response>
+    [HttpPost("passkey/register/complete")]
+    [ProducesResponseType(typeof(PasskeyRegistrationCompleteResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CompletePasskeyRegistration([FromBody] PasskeyRegistrationCompleteRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _passkeyService.CompleteRegistrationAsync(request, cancellationToken);
+
+        if (!result.Success)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = "registration_failed",
+                ErrorDescription = result.Error ?? "Failed to complete passkey registration"
+            });
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Begins WebAuthn passkey authentication by generating a challenge and credential request options.
+    /// </summary>
+    /// <remarks>
+    /// Returns credential request options needed by the client to invoke navigator.credentials.get().
+    /// If a principal ID is provided, the allowed credentials are scoped to that principal.
+    /// </remarks>
+    /// <param name="request">The authentication begin request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>WebAuthn credential request options.</returns>
+    /// <response code="200">Authentication challenge created successfully.</response>
+    [HttpPost("passkey/auth/begin")]
+    [ProducesResponseType(typeof(PasskeyAuthBeginResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> BeginPasskeyAuthentication([FromBody] PasskeyAuthBeginRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _passkeyService.BeginAuthenticationAsync(request.PrincipalId, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Completes WebAuthn passkey authentication by verifying the assertion signature.
+    /// </summary>
+    /// <remarks>
+    /// Validates the authenticator signature against the stored public key.
+    /// Updates the sign count and last used timestamp on successful verification.
+    /// </remarks>
+    /// <param name="request">The authentication completion request with assertion response.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Authentication result with principal information.</returns>
+    /// <response code="200">Authentication successful.</response>
+    /// <response code="401">Invalid credential or signature.</response>
+    [HttpPost("passkey/auth/complete")]
+    [ProducesResponseType(typeof(PasskeyAuthCompleteResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> CompletePasskeyAuthentication([FromBody] PasskeyAuthCompleteRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _passkeyService.CompleteAuthenticationAsync(request, cancellationToken);
+
+        if (!result.Success)
+        {
+            return Unauthorized(new ErrorResponse
+            {
+                Error = "authentication_failed",
+                ErrorDescription = result.Error ?? "Invalid credentials"
+            });
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Lists all passkey credentials for a principal.
+    /// </summary>
+    /// <param name="principalId">The principal identifier.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>List of passkey credentials.</returns>
+    /// <response code="200">Returns the list of credentials.</response>
+    [HttpGet("passkey/credentials")]
+    [ProducesResponseType(typeof(PasskeyListResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListPasskeyCredentials([FromQuery] Guid principalId, CancellationToken cancellationToken)
+    {
+        var result = await _passkeyService.ListCredentialsAsync(principalId, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Deletes a passkey credential.
+    /// </summary>
+    /// <param name="credentialId">The credential identifier.</param>
+    /// <param name="principalId">The principal who owns the credential.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Deletion result.</returns>
+    /// <response code="204">Credential deleted successfully.</response>
+    /// <response code="404">Credential not found.</response>
+    [HttpDelete("passkey/credentials/{credentialId}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeletePasskeyCredential(Guid credentialId, [FromQuery] Guid principalId, CancellationToken cancellationToken)
+    {
+        var result = await _passkeyService.DeleteCredentialAsync(credentialId, principalId, cancellationToken);
+
+        if (!result)
+        {
+            return NotFound(new ErrorResponse
+            {
+                Error = "credential_not_found",
+                ErrorDescription = "Credential not found"
+            });
+        }
+
+        return NoContent();
     }
 }

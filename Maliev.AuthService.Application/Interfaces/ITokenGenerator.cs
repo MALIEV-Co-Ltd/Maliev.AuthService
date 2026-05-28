@@ -15,8 +15,9 @@ public interface ITokenGenerator
     /// <param name="permissions">The user's permissions.</param>
     /// <param name="roles">The user's roles.</param>
     /// <param name="customerId">The canonical customer identifier for customer sessions.</param>
+    /// <param name="profileImageUrl">The user's profile image URL.</param>
     /// <returns>The JWT access token.</returns>
-    string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null, Guid? customerId = null);
+    string GenerateAccessToken(Guid userId, string userType, string? email = null, string? name = null, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null, Guid? customerId = null, string? profileImageUrl = null);
 
     /// <summary>
     /// Generates a cryptographically secure refresh token.

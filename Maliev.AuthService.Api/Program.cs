@@ -112,6 +112,7 @@ try
     builder.Services.AddScoped<IRateLimitService, RateLimitService>();
     builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
     builder.Services.AddScoped<IEmailVerificationService, EmailVerificationService>();
+    builder.Services.AddScoped<IPasskeyService, PasskeyService>();
 
     // Build the application
     var app = builder.Build();
