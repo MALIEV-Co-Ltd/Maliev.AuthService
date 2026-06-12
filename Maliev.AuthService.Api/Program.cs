@@ -3,6 +3,7 @@ using Maliev.AuthService.Application.Interfaces;
 using Maliev.AuthService.Infrastructure.DbContexts;
 using Maliev.AuthService.Infrastructure.HttpClients;
 using Maliev.AuthService.Infrastructure.Services;
+using MassTransit;
 
 // Initialize bootstrap logging
 using var loggerFactory = LoggerFactory.Create(logBuilder => logBuilder.AddConsole());
@@ -31,6 +32,12 @@ try
     builder.AddStandardCache("auth:"); // Redis + in-memory fallback, memory-optimized // Redis with in-memory fallback
     builder.AddMassTransitWithRabbitMq(x =>
     {
+        x.AddEntityFrameworkOutbox<AuthDbContext>(options =>
+        {
+            _ = options.UsePostgres();
+            options.UseBusOutbox();
+        });
+
         // Register all event consumers here
     }); // RabbitMQ message bus (non-blocking startup)
 

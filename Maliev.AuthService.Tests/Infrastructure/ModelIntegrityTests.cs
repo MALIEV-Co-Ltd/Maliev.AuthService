@@ -1,4 +1,5 @@
 using Maliev.AuthService.Infrastructure.DbContexts;
+using MassTransit.EntityFrameworkCoreIntegration;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -27,5 +28,19 @@ public class ModelIntegrityTests
         Assert.False(hasChanges,
             "The EF Core model for 'AuthDbContext' has changed but no migration has been added. " +
             "Run 'dotnet ef migrations add <Name> --project Maliev.AuthService.Data --startup-project Maliev.AuthService.Api' to fix this.");
+    }
+
+    [Fact]
+    public void Model_ShouldIncludeMassTransitOutboxEntities()
+    {
+        var options = new DbContextOptionsBuilder<AuthDbContext>()
+            .UseNpgsql("Host=localhost;Database=auth_model_test;Username=postgres;Password=postgres")
+            .Options;
+
+        using var context = new AuthDbContext(options);
+
+        Assert.NotNull(context.Model.FindEntityType(typeof(InboxState)));
+        Assert.NotNull(context.Model.FindEntityType(typeof(OutboxMessage)));
+        Assert.NotNull(context.Model.FindEntityType(typeof(OutboxState)));
     }
 }
