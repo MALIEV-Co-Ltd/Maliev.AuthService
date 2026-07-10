@@ -1,6 +1,7 @@
 using Maliev.AuthService.Application.DTOs.IAM;
 using Maliev.AuthService.Application.DTOs.Request;
 using Maliev.AuthService.Application.DTOs.Response;
+using Maliev.AuthService.Application.Identity;
 using Maliev.AuthService.Application.Interfaces;
 using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Infrastructure.DbContexts;
@@ -15,6 +16,7 @@ using Xunit;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using MassTransit;
 
 namespace Maliev.AuthService.Tests.Unit;
@@ -33,6 +35,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     private readonly Mock<IConfiguration> _configurationMock;
     private readonly Mock<IPublishEndpoint> _publishEndpointMock;
     private readonly Mock<IEmployeeServiceClient> _employeeServiceClientMock;
+    private readonly Mock<IGoogleIdentityTokenValidator> _googleIdentityTokenValidatorMock;
     private AuthenticationService? _service;
 
     public AuthenticationServiceTests(TestDatabaseFixture fixture)
@@ -47,8 +50,12 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         _loggerMock = new Mock<ILogger<AuthenticationService>>();
         _httpClientFactoryMock = new Mock<IHttpClientFactory>();
         _configurationMock = new Mock<IConfiguration>();
+        _configurationMock
+            .Setup(configuration => configuration["GoogleIdentity:Employee:HostedDomain"])
+            .Returns("maliev.com");
         _publishEndpointMock = new Mock<IPublishEndpoint>();
         _employeeServiceClientMock = new Mock<IEmployeeServiceClient>();
+        _googleIdentityTokenValidatorMock = new Mock<IGoogleIdentityTokenValidator>();
     }
 
     public async Task InitializeAsync()
@@ -66,10 +73,25 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             _httpClientFactoryMock.Object,
             _configurationMock.Object,
             _publishEndpointMock.Object,
-            _employeeServiceClientMock.Object);
+            _employeeServiceClientMock.Object,
+            _googleIdentityTokenValidatorMock.Object);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
+
+    [Fact]
+    public void Constructor_ExposesApplicationGoogleIdentityValidatorBoundary()
+    {
+        var validatorParameter = typeof(AuthenticationService)
+            .GetConstructors()
+            .SelectMany(constructor => constructor.GetParameters())
+            .SingleOrDefault(parameter => string.Equals(
+                parameter.ParameterType.FullName,
+                "Maliev.AuthService.Application.Interfaces.IGoogleIdentityTokenValidator",
+                StringComparison.Ordinal));
+
+        Assert.NotNull(validatorParameter);
+    }
 
     [Fact]
     public async Task AuthenticateAsync_InvalidUserType_ThrowsArgumentException()
@@ -107,7 +129,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     public async Task ExchangeGoogleTokenAsync_InvalidDomain_ReturnsInvalidDomain()
     {
         // Arrange
-        var request = new GoogleExchangeRequest { Email = "user@gmail.com", FullName = "User" };
+        var request = ValidEmployeeRequest();
+        ArrangeVerifiedEmployeeIdentity("user@gmail.com", "User", hostedDomain: "gmail.com");
 
         // Act
         var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
@@ -118,11 +141,196 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     }
 
     [Fact]
+    public async Task ExchangeGoogleTokenAsync_InvalidCredential_StopsBeforeEmployeeLookup()
+    {
+        var request = ValidEmployeeRequest();
+        _googleIdentityTokenValidatorMock
+            .Setup(validator => validator.ValidateAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                GoogleIdentityExchangeType.Employee,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GoogleIdentityValidationResult
+            {
+                Success = false,
+                ErrorCode = "invalid_google_credential",
+                ErrorDescription = "Google credential is invalid or expired"
+            });
+
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+
+        Assert.False(result.Success);
+        Assert.Equal("invalid_google_credential", result.ErrorCode);
+        _employeeServiceClientMock.Verify(
+            client => client.GetEmployeeByEmailAsync(It.IsAny<string>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleTokenAsync_ValidCredential_UsesOnlyVerifiedClaims()
+    {
+        const string verifiedEmail = "verified.user@maliev.com";
+        const string verifiedName = "Verified User";
+        const string verifiedPicture = "https://lh3.googleusercontent.com/a/verified";
+        var employeeId = Guid.NewGuid();
+        var principalId = Guid.NewGuid();
+        var request = ValidEmployeeRequest();
+
+        _googleIdentityTokenValidatorMock
+            .Setup(validator => validator.ValidateAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                GoogleIdentityExchangeType.Employee,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GoogleIdentityValidationResult
+            {
+                Success = true,
+                Identity = new VerifiedGoogleIdentity
+                {
+                    Subject = "verified-google-sub",
+                    Email = verifiedEmail,
+                    EmailVerified = true,
+                    HostedDomain = "maliev.com",
+                    FullName = verifiedName,
+                    ProfileImageUrl = verifiedPicture
+                }
+            });
+
+        _employeeServiceClientMock.Setup(client => client.GetEmployeeByEmailAsync(verifiedEmail))
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    employeeId,
+                    principalId,
+                    email = verifiedEmail,
+                    fullName = verifiedName,
+                    employmentStatus = "Active"
+                })
+            });
+        _iamClientMock.Setup(client => client.ResolvePermissionsAsync(principalId))
+            .ReturnsAsync(new PermissionResolutionResponse { Permissions = ["read"], Roles = ["user"] });
+        _tokenGeneratorMock.Setup(generator => generator.GenerateAccessToken(
+                principalId,
+                "employee",
+                verifiedEmail,
+                verifiedName,
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<IEnumerable<string>>(),
+                null,
+                verifiedPicture))
+            .Returns("access-token");
+        _refreshTokenServiceMock.Setup(service => service.CreateRefreshTokenAsync(
+                employeeId,
+                principalId,
+                UserType.Employee,
+                verifiedEmail,
+                verifiedName,
+                "127.0.0.1"))
+            .ReturnsAsync((new RefreshToken(), "refresh-token"));
+
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+
+        Assert.True(result.Success, $"{result.ErrorCode}: {result.ErrorDescription}");
+        Assert.Equal(verifiedEmail, result.Response!.User.Email);
+        Assert.Equal(verifiedPicture, result.Response.User.ProfileImageUrl);
+        _employeeServiceClientMock.Verify(client => client.GetEmployeeByEmailAsync(verifiedEmail), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExchangeCustomerGoogleTokenAsync_ValidCredential_ForwardsVerifiedSubjectAndProfile()
+    {
+        const string verifiedSubject = "verified-google-sub";
+        const string verifiedEmail = "verified.customer@gmail.com";
+        const string verifiedName = "Verified Customer";
+        const string verifiedPicture = "https://lh3.googleusercontent.com/a/customer";
+        var customerId = Guid.NewGuid();
+        var principalId = Guid.NewGuid();
+        string? outboundBody = null;
+        var request = new CustomerGoogleExchangeRequest
+        {
+            Credential = "customer-google-id-token",
+            Application = "web"
+        };
+
+        _googleIdentityTokenValidatorMock
+            .Setup(validator => validator.ValidateAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                GoogleIdentityExchangeType.Customer,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GoogleIdentityValidationResult
+            {
+                Success = true,
+                Identity = new VerifiedGoogleIdentity
+                {
+                    Subject = verifiedSubject,
+                    Email = verifiedEmail,
+                    EmailVerified = true,
+                    FullName = verifiedName,
+                    ProfileImageUrl = verifiedPicture
+                }
+            });
+
+        var handler = new DelegatingTestHandler(async (message, cancellationToken) =>
+        {
+            outboundBody = await message.Content!.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    customerId,
+                    principalId,
+                    email = verifiedEmail,
+                    displayName = verifiedName,
+                    profileImageUrl = verifiedPicture
+                })
+            };
+        });
+        _httpClientFactoryMock.Setup(factory => factory.CreateClient("ExternalValidation"))
+            .Returns(new HttpClient(handler));
+        _configurationMock.Setup(configuration => configuration["CustomerService:BaseUrl"])
+            .Returns("http://CustomerService");
+        _configurationMock.Setup(configuration => configuration["CustomerService:GoogleLinkOrRegisterEndpoint"])
+            .Returns("/customer/v1/customers/google/link-or-register");
+        _iamClientMock.Setup(client => client.ResolvePermissionsAsync(principalId))
+            .ReturnsAsync(new PermissionResolutionResponse { Permissions = ["read"], Roles = ["customer"] });
+        _tokenGeneratorMock.Setup(generator => generator.GenerateAccessToken(
+                principalId,
+                "customer",
+                verifiedEmail,
+                verifiedName,
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<IEnumerable<string>>(),
+                customerId,
+                It.IsAny<string?>()))
+            .Returns("access-token");
+        _refreshTokenServiceMock.Setup(service => service.CreateRefreshTokenAsync(
+                customerId,
+                principalId,
+                UserType.Customer,
+                verifiedEmail,
+                verifiedName,
+                "127.0.0.1"))
+            .ReturnsAsync((new RefreshToken(), "refresh-token"));
+
+        var result = await _service!.ExchangeCustomerGoogleTokenAsync(request, "127.0.0.1");
+
+        Assert.True(result.Success, $"{result.ErrorCode}: {result.ErrorDescription}");
+        Assert.NotNull(outboundBody);
+        using var document = JsonDocument.Parse(outboundBody);
+        Assert.Equal(verifiedSubject, document.RootElement.GetProperty("googleSubject").GetString());
+        Assert.Equal(verifiedEmail, document.RootElement.GetProperty("email").GetString());
+        Assert.Equal(verifiedPicture, document.RootElement.GetProperty("profileImageUrl").GetString());
+    }
+
+    [Fact]
     public async Task ExchangeGoogleTokenAsync_EmployeeNotFound_AutoProvisions()
     {
         // Arrange
         var email = "new.user@maliev.com";
-        var request = new GoogleExchangeRequest { Email = email, FullName = "New User" };
+        var request = ValidEmployeeRequest();
+        ArrangeVerifiedEmployeeIdentity(email, "New User");
         var employeeId = Guid.NewGuid();
         var principalId = Guid.NewGuid();
 
@@ -167,7 +375,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     {
         // Arrange
         var email = "user@maliev.com";
-        var request = new GoogleExchangeRequest { Email = email };
+        var request = ValidEmployeeRequest();
+        ArrangeVerifiedEmployeeIdentity(email, "User");
 
         _employeeServiceClientMock.Setup(s => s.GetEmployeeByEmailAsync(email))
             .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.InternalServerError));
@@ -185,7 +394,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     {
         // Arrange
         var email = "new.user@maliev.com";
-        var request = new GoogleExchangeRequest { Email = email };
+        var request = ValidEmployeeRequest();
+        ArrangeVerifiedEmployeeIdentity(email, "New User");
 
         _employeeServiceClientMock.Setup(s => s.GetEmployeeByEmailAsync(email))
             .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.NotFound));
@@ -206,7 +416,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     {
         // Arrange
         var email = "user@maliev.com";
-        var request = new GoogleExchangeRequest { Email = email };
+        var request = ValidEmployeeRequest();
+        ArrangeVerifiedEmployeeIdentity(email, "User");
         var employeeId = Guid.NewGuid();
 
         var lookupResponse = new HttpResponseMessage(HttpStatusCode.OK)
@@ -236,7 +447,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     {
         // Arrange
         var email = "user@maliev.com";
-        var request = new GoogleExchangeRequest { Email = email };
+        var request = ValidEmployeeRequest();
+        ArrangeVerifiedEmployeeIdentity(email, "User");
 
         _employeeServiceClientMock.Setup(s => s.GetEmployeeByEmailAsync(email))
             .ThrowsAsync(new OperationCanceledException());
@@ -247,6 +459,62 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         // Assert
         Assert.False(result.Success);
         Assert.Equal("service_unavailable", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleTokenAsync_CallerCancellationDuringEmployeeLookup_Propagates()
+    {
+        var email = "user@maliev.com";
+        var request = ValidEmployeeRequest();
+        ArrangeVerifiedEmployeeIdentity(email, "User");
+        var pendingLookup = new TaskCompletionSource<HttpResponseMessage>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _employeeServiceClientMock
+            .Setup(service => service.GetEmployeeByEmailAsync(email))
+            .Returns(pendingLookup.Task);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1", cancellation.Token));
+    }
+
+    [Fact]
+    public async Task ExchangeCustomerGoogleTokenAsync_CallerCancellationDuringCustomerLink_Propagates()
+    {
+        var request = new CustomerGoogleExchangeRequest
+        {
+            Credential = "customer-google-id-token",
+            Application = "web"
+        };
+        _googleIdentityTokenValidatorMock
+            .Setup(validator => validator.ValidateAsync(
+                request.Credential,
+                request.Application,
+                GoogleIdentityExchangeType.Customer,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GoogleIdentityValidationResult
+            {
+                Success = true,
+                Identity = new VerifiedGoogleIdentity
+                {
+                    Subject = "verified-google-sub",
+                    Email = "verified.customer@gmail.com",
+                    EmailVerified = true,
+                    FullName = "Verified Customer"
+                }
+            });
+        _httpClientFactoryMock
+            .Setup(factory => factory.CreateClient("ExternalValidation"))
+            .Returns(new HttpClient(new DelegatingTestHandler(
+                (_, token) => Task.FromCanceled<HttpResponseMessage>(token))));
+        _configurationMock.Setup(configuration => configuration["CustomerService:BaseUrl"])
+            .Returns("http://CustomerService");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _service!.ExchangeCustomerGoogleTokenAsync(request, "127.0.0.1", cancellation.Token));
     }
 
     [Fact]
@@ -384,7 +652,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             _httpClientFactoryMock.Object,
             configuration,
             _publishEndpointMock.Object,
-            _employeeServiceClientMock.Object);
+            _employeeServiceClientMock.Object,
+            _googleIdentityTokenValidatorMock.Object);
 
         // Act
         var result = await service.AuthenticateAsync(request, "127.0.0.1");
@@ -629,5 +898,46 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     public async Task AuthenticateAsync_InvalidCredentials_RecordsFailedAttempt()
     {
         // This test requires complex HTTP mocking - skip for now
+    }
+
+    private sealed class DelegatingTestHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> sendAsync) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) => sendAsync(request, cancellationToken);
+    }
+
+    private static GoogleExchangeRequest ValidEmployeeRequest() => new()
+    {
+        Credential = "employee-google-id-token",
+        Application = "intranet"
+    };
+
+    private void ArrangeVerifiedEmployeeIdentity(
+        string email,
+        string fullName,
+        string? profileImageUrl = null,
+        string hostedDomain = "maliev.com")
+    {
+        _googleIdentityTokenValidatorMock
+            .Setup(validator => validator.ValidateAsync(
+                "employee-google-id-token",
+                "intranet",
+                GoogleIdentityExchangeType.Employee,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GoogleIdentityValidationResult
+            {
+                Success = true,
+                Identity = new VerifiedGoogleIdentity
+                {
+                    Subject = $"google-sub-{email}",
+                    Email = email,
+                    EmailVerified = true,
+                    HostedDomain = hostedDomain,
+                    FullName = fullName,
+                    ProfileImageUrl = profileImageUrl
+                }
+            });
     }
 }

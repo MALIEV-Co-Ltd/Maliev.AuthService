@@ -117,6 +117,8 @@ try
     builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
     builder.Services.AddScoped<IAccountLockoutService, AccountLockoutService>();
     builder.Services.AddScoped<IRateLimitService, RateLimitService>();
+    builder.Services.AddScoped<IGoogleIdTokenVerifier, GoogleJsonWebSignatureVerifier>();
+    builder.Services.AddScoped<IGoogleIdentityTokenValidator, GoogleIdentityTokenValidator>();
     builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
     builder.Services.AddScoped<IEmailVerificationService, EmailVerificationService>();
     builder.Services.AddScoped<IPasskeyService, PasskeyService>();

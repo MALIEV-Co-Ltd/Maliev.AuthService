@@ -1,5 +1,6 @@
 using Maliev.AuthService.Application.DTOs.Request;
 using Maliev.AuthService.Application.DTOs.Response;
+using Maliev.AuthService.Application.Identity;
 using Maliev.AuthService.Application.Interfaces;
 using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Infrastructure.DbContexts;
@@ -36,6 +37,7 @@ public class AuthenticationService : IAuthenticationService
     private readonly IConfiguration _configuration;
     private readonly IPublishEndpoint _publishEndpoint;
     private readonly IEmployeeServiceClient _employeeServiceClient;
+    private readonly IGoogleIdentityTokenValidator _googleIdentityTokenValidator;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AuthenticationService"/> class.
@@ -52,7 +54,8 @@ public class AuthenticationService : IAuthenticationService
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         IPublishEndpoint publishEndpoint,
-        IEmployeeServiceClient employeeServiceClient)
+        IEmployeeServiceClient employeeServiceClient,
+        IGoogleIdentityTokenValidator googleIdentityTokenValidator)
     {
         _dbContext = dbContext;
         _tokenGenerator = tokenGenerator;
@@ -66,6 +69,7 @@ public class AuthenticationService : IAuthenticationService
         _configuration = configuration;
         _publishEndpoint = publishEndpoint;
         _employeeServiceClient = employeeServiceClient ?? throw new ArgumentNullException(nameof(employeeServiceClient));
+        _googleIdentityTokenValidator = googleIdentityTokenValidator ?? throw new ArgumentNullException(nameof(googleIdentityTokenValidator));
     }
 
     /// <inheritdoc/>
@@ -474,29 +478,74 @@ public class AuthenticationService : IAuthenticationService
     }
 
     /// <inheritdoc/>
-    public async Task<AuthenticationResult> ExchangeGoogleTokenAsync(GoogleExchangeRequest request, string? ipAddress)
+    public async Task<AuthenticationResult> ExchangeGoogleTokenAsync(
+        GoogleExchangeRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken = default)
     {
-        if (!request.Email.EndsWith("@maliev.com", StringComparison.OrdinalIgnoreCase))
+        var googleValidation = await _googleIdentityTokenValidator.ValidateAsync(
+            request.Credential,
+            request.Application,
+            GoogleIdentityExchangeType.Employee,
+            cancellationToken);
+        if (!googleValidation.Success || googleValidation.Identity == null)
         {
-            _logger.LogWarning("Google exchange rejected for non-maliev.com email: {Email}", request.Email);
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = googleValidation.ErrorCode ?? "invalid_google_credential",
+                ErrorDescription = googleValidation.ErrorDescription ?? "Google credential is invalid or expired"
+            };
+        }
+
+        var identity = googleValidation.Identity;
+        var email = identity.Email;
+        var fullName = identity.FullName;
+        var profileImageUrl = identity.ProfileImageUrl;
+
+        if (!identity.EmailVerified || string.IsNullOrWhiteSpace(identity.Subject))
+        {
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "invalid_google_credential",
+                ErrorDescription = "Google credential is missing required verified identity claims"
+            };
+        }
+
+        var hostedDomain = _configuration["GoogleIdentity:Employee:HostedDomain"];
+        if (string.IsNullOrWhiteSpace(hostedDomain))
+        {
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "service_unavailable",
+                ErrorDescription = "Google sign-in is not configured"
+            };
+        }
+
+        if (!string.Equals(identity.HostedDomain, hostedDomain, StringComparison.OrdinalIgnoreCase) ||
+            !email.EndsWith($"@{hostedDomain}", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Google employee exchange rejected a credential outside the configured hosted domain");
             return new AuthenticationResult
             {
                 Success = false,
                 ErrorCode = "invalid_domain",
-                ErrorDescription = "Only @maliev.com email addresses are allowed"
+                ErrorDescription = $"Only @{hostedDomain} Google Workspace accounts are allowed"
             };
         }
 
         bool isFirstTimeProvisioning = false;
 
         var (employeeLookupSuccess, employeeId, principalId, employeeName, employmentStatus, lookupError) =
-            await LookupEmployeeByEmailAsync(request.Email);
+            await LookupEmployeeByEmailAsync(email, cancellationToken);
 
         if (!employeeLookupSuccess)
         {
             if (lookupError == "service_unavailable")
             {
-                _logger.LogError("EmployeeService unavailable during Google exchange for {Email}", request.Email);
+                _logger.LogError("EmployeeService unavailable during Google exchange for {Email}", email);
                 EnqueueAuditLog(null, UserType.Employee, "google_exchange", ipAddress, false, "EmployeeService unavailable");
                 return new AuthenticationResult
                 {
@@ -506,18 +555,18 @@ public class AuthenticationService : IAuthenticationService
                 };
             }
 
-            _logger.LogInformation("Employee not found for email {Email} during Google exchange. Triggering auto-provisioning.", request.Email);
+            _logger.LogInformation("Employee not found for email {Email} during Google exchange. Triggering auto-provisioning.", email);
 
-            var nameParts = (request.FullName ?? request.Email).Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-            var firstName = nameParts.Length > 0 ? nameParts[0] : request.Email;
+            var nameParts = (fullName ?? email).Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            var firstName = nameParts.Length > 0 ? nameParts[0] : email;
             var lastName = nameParts.Length > 1 ? nameParts[1] : "-";
 
             var (provisionSuccess, provEmployeeId, provPrincipalId, provName, provStatus, provisionError) =
-                await ProvisionEmployeeAsync(request.Email, firstName, lastName);
+                await ProvisionEmployeeAsync(email, firstName, lastName, profileImageUrl, cancellationToken);
 
             if (!provisionSuccess)
             {
-                _logger.LogError("Auto-provisioning failed for {Email}: {Error}", request.Email, provisionError);
+                _logger.LogError("Auto-provisioning failed for {Email}: {Error}", email, provisionError);
                 EnqueueAuditLog(null, UserType.Employee, "google_exchange", ipAddress, false, $"Auto-provision failed: {provisionError}");
                 return new AuthenticationResult
                 {
@@ -532,14 +581,14 @@ public class AuthenticationService : IAuthenticationService
             employeeName = provName;
             employmentStatus = provStatus;
 
-            _logger.LogInformation("Successfully auto-provisioned employee for {Email} with PrincipalId {PrincipalId}", request.Email, principalId);
+            _logger.LogInformation("Successfully auto-provisioned employee for {Email} with PrincipalId {PrincipalId}", email, principalId);
 
             isFirstTimeProvisioning = true;
         }
 
         if (string.Equals(employmentStatus, "Terminated", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogWarning("Google exchange rejected for terminated employee: {Email}", request.Email);
+            _logger.LogWarning("Google exchange rejected for terminated employee: {Email}", email);
             EnqueueAuditLog(employeeId, UserType.Employee, "google_exchange", ipAddress, false, "Account terminated");
             return new AuthenticationResult
             {
@@ -572,7 +621,7 @@ public class AuthenticationService : IAuthenticationService
                         if (roles?.Contains(MalievIamRoles.PlatformOwner) == true)
                         {
                             permissions = null;
-                            _logger.LogInformation("Google SSO user {Email} is Platform Owner. Excluding granular permissions from JWT.", request.Email);
+                            _logger.LogInformation("Google SSO user {Email} is Platform Owner. Excluding granular permissions from JWT.", email);
                         }
                         else
                         {
@@ -584,14 +633,14 @@ public class AuthenticationService : IAuthenticationService
                     if (attempt < maxAttempts - 1)
                     {
                         _logger.LogInformation("Waiting for IAM bootstrap for {Email} (attempt {Attempt}/{MaxAttempts})...",
-                            request.Email, attempt + 1, maxAttempts);
-                        await Task.Delay(delayMs);
+                            email, attempt + 1, maxAttempts);
+                        await Task.Delay(delayMs, cancellationToken);
                     }
                 }
 
                 if (roles?.Any() != true && permissions?.Any() != true)
                 {
-                    _logger.LogWarning("IAM bootstrap timed out for {Email}. JWT issued with no permissions.", request.Email);
+                    _logger.LogWarning("IAM bootstrap timed out for {Email}. JWT issued with no permissions.", email);
                 }
             }
             else
@@ -602,7 +651,7 @@ public class AuthenticationService : IAuthenticationService
                 if (roles != null && roles.Contains(MalievIamRoles.PlatformOwner))
                 {
                     permissions = null;
-                    _logger.LogInformation("Google SSO user {Email} is Platform Owner. Excluding granular permissions from JWT.", request.Email);
+                    _logger.LogInformation("Google SSO user {Email} is Platform Owner. Excluding granular permissions from JWT.", email);
                 }
                 else
                 {
@@ -610,9 +659,13 @@ public class AuthenticationService : IAuthenticationService
                 }
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to resolve permissions from IAM for Google SSO user {Email}. Blocking login.", request.Email);
+            _logger.LogError(ex, "Failed to resolve permissions from IAM for Google SSO user {Email}. Blocking login.", email);
             EnqueueAuditLog(employeeId, UserType.Employee, "google_exchange", ipAddress, false, "IAM service unavailable");
             await _dbContext.SaveChangesAsync();
             return new AuthenticationResult
@@ -624,12 +677,12 @@ public class AuthenticationService : IAuthenticationService
         }
 
         var accessToken = _tokenGenerator.GenerateAccessToken(
-            principalId!.Value, "employee", request.Email,
-            employeeName ?? request.FullName ?? request.Email, permissions, roles, profileImageUrl: request.ProfileImageUrl);
+            principalId!.Value, "employee", email,
+            employeeName ?? fullName ?? email, permissions, roles, profileImageUrl: profileImageUrl);
 
         var (_, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(
             employeeId!.Value, principalId.Value, UserType.Employee,
-            request.Email, employeeName ?? request.FullName ?? request.Email, ipAddress);
+            email, employeeName ?? fullName ?? email, ipAddress);
 
         EnqueueAuditLog(employeeId.Value, UserType.Employee, "google_exchange", ipAddress, true, null);
 
@@ -653,28 +706,53 @@ public class AuthenticationService : IAuthenticationService
                     UserId = principalId.Value.ToString(),
                     PrincipalId = principalId.Value.ToString(),
                     UserType = "employee",
-                    Email = request.Email,
-                    Name = employeeName ?? request.FullName ?? request.Email,
-                    ProfileImageUrl = request.ProfileImageUrl
+                    Email = email,
+                    Name = employeeName ?? fullName ?? email,
+                    ProfileImageUrl = profileImageUrl
                 }
             }
         };
     }
 
     /// <inheritdoc/>
-    public async Task<AuthenticationResult> ExchangeCustomerGoogleTokenAsync(CustomerGoogleExchangeRequest request, string? ipAddress)
+    public async Task<AuthenticationResult> ExchangeCustomerGoogleTokenAsync(
+        CustomerGoogleExchangeRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken = default)
     {
-        if (!request.EmailVerified)
+        var googleValidation = await _googleIdentityTokenValidator.ValidateAsync(
+            request.Credential,
+            request.Application,
+            GoogleIdentityExchangeType.Customer,
+            cancellationToken);
+        if (!googleValidation.Success || googleValidation.Identity == null)
         {
             return new AuthenticationResult
             {
                 Success = false,
-                ErrorCode = "unverified_email",
-                ErrorDescription = "Google email must be verified"
+                ErrorCode = googleValidation.ErrorCode ?? "invalid_google_credential",
+                ErrorDescription = googleValidation.ErrorDescription ?? "Google credential is invalid or expired"
             };
         }
 
-        var session = await LinkOrRegisterGoogleCustomerAsync(request);
+        var identity = googleValidation.Identity;
+        if (!identity.EmailVerified ||
+            string.IsNullOrWhiteSpace(identity.Subject) ||
+            string.IsNullOrWhiteSpace(identity.Email))
+        {
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "invalid_google_credential",
+                ErrorDescription = "Google credential is missing required verified identity claims"
+            };
+        }
+
+        var session = await LinkOrRegisterGoogleCustomerAsync(
+            identity,
+            request.PreferredLanguage,
+            request.Timezone,
+            cancellationToken);
         if (session == null)
         {
             EnqueueAuditLog(null, UserType.Customer, "customer_google_exchange", ipAddress, false, "CustomerService unavailable");
@@ -698,9 +776,13 @@ public class AuthenticationService : IAuthenticationService
                 ? null
                 : iamResponse.Permissions;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to resolve permissions from IAM for customer Google SSO user {Email}. Blocking login.", request.Email);
+            _logger.LogError(ex, "Failed to resolve permissions from IAM for customer Google SSO user {Email}. Blocking login.", identity.Email);
             EnqueueAuditLog(session.CustomerId, UserType.Customer, "customer_google_exchange", ipAddress, false, "IAM service unavailable");
             await _dbContext.SaveChangesAsync();
             return new AuthenticationResult
@@ -825,36 +907,40 @@ public class AuthenticationService : IAuthenticationService
         }
     }
 
-    private async Task<CustomerAccountSessionResult?> LinkOrRegisterGoogleCustomerAsync(CustomerGoogleExchangeRequest request)
+    private async Task<CustomerAccountSessionResult?> LinkOrRegisterGoogleCustomerAsync(
+        VerifiedGoogleIdentity identity,
+        string preferredLanguage,
+        string timezone,
+        CancellationToken cancellationToken)
     {
         var serviceUrl = _configuration["CustomerService:BaseUrl"] ?? "https+http://CustomerService";
         var endpoint = _configuration["CustomerService:GoogleLinkOrRegisterEndpoint"]
             ?? "/customer/v1/customers/google/link-or-register";
-        var (firstName, lastName) = SplitFullName(request.FullName, request.Email);
+        var (firstName, lastName) = SplitFullName(identity.FullName, identity.Email);
 
         try
         {
             var client = _httpClientFactory.CreateClient("ExternalValidation");
             var response = await client.PostAsJsonAsync($"{serviceUrl}{endpoint}", new
             {
-                email = request.Email,
+                email = identity.Email,
                 firstName,
                 lastName,
-                googleSubject = request.GoogleUserId,
-                emailVerified = request.EmailVerified,
-                profileImageUrl = request.ProfileImageUrl,
-                preferredLanguage = request.PreferredLanguage,
-                timezone = request.Timezone
-            });
+                googleSubject = identity.Subject,
+                emailVerified = identity.EmailVerified,
+                profileImageUrl = identity.ProfileImageUrl,
+                preferredLanguage,
+                timezone
+            }, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync();
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogWarning("Customer Google link/register failed with status {StatusCode}: {Error}", response.StatusCode, errorBody);
                 return null;
             }
 
-            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
             var root = document.RootElement;
             var customerId = GetGuid(root, "customerId", "customer_id", "CustomerId");
             var principalId = GetGuid(root, "principalId", "principal_id", "PrincipalId");
@@ -864,7 +950,7 @@ public class AuthenticationService : IAuthenticationService
 
             if (!customerId.HasValue || !principalId.HasValue || string.IsNullOrWhiteSpace(email))
             {
-                _logger.LogWarning("CustomerService returned an incomplete Google link/register session for {Email}", request.Email);
+                _logger.LogWarning("CustomerService returned an incomplete Google link/register session for {Email}", identity.Email);
                 return null;
             }
 
@@ -872,12 +958,16 @@ public class AuthenticationService : IAuthenticationService
                 customerId.Value,
                 principalId.Value,
                 email,
-                string.IsNullOrWhiteSpace(displayName) ? request.FullName ?? request.Email : displayName,
+                string.IsNullOrWhiteSpace(displayName) ? identity.FullName ?? identity.Email : displayName,
                 profileImageUrl);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to link/register Google customer for {Email}", request.Email);
+            _logger.LogError(ex, "Failed to link/register Google customer for {Email}", identity.Email);
             return null;
         }
     }
@@ -964,11 +1054,13 @@ public class AuthenticationService : IAuthenticationService
     }
 
     private async Task<(bool Success, Guid? EmployeeId, Guid? PrincipalId, string? Name, string? EmploymentStatus, string? Error)>
-        LookupEmployeeByEmailAsync(string email)
+        LookupEmployeeByEmailAsync(string email, CancellationToken cancellationToken)
     {
         try
         {
-            var response = await _employeeServiceClient.GetEmployeeByEmailAsync(email);
+            var response = await _employeeServiceClient
+                .GetEmployeeByEmailAsync(email)
+                .WaitAsync(cancellationToken);
 
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
@@ -983,13 +1075,17 @@ public class AuthenticationService : IAuthenticationService
             }
 
             var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions);
+            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions, cancellationToken);
             if (result == null)
             {
                 return (false, null, null, null, null, "service_unavailable");
             }
 
             return (true, result.EmployeeId, result.PrincipalId, result.FullName, result.EmploymentStatus, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (OperationCanceledException)
         {
@@ -1004,29 +1100,40 @@ public class AuthenticationService : IAuthenticationService
     }
 
     private async Task<(bool Success, Guid? EmployeeId, Guid? PrincipalId, string? Name, string? EmploymentStatus, string? Error)>
-        ProvisionEmployeeAsync(string email, string firstName, string lastName)
+        ProvisionEmployeeAsync(
+            string email,
+            string firstName,
+            string lastName,
+            string? profileImageUrl,
+            CancellationToken cancellationToken)
     {
         try
         {
-            var request = new { email, first_name = firstName, last_name = lastName };
-            var response = await _employeeServiceClient.ProvisionEmployeeAsync(request);
+            var request = new { email, first_name = firstName, last_name = lastName, picture_url = profileImageUrl };
+            var response = await _employeeServiceClient
+                .ProvisionEmployeeAsync(request)
+                .WaitAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync();
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogWarning("Employee auto-provision failed with status {StatusCode} for email: {Email}. Error: {Error}",
                     response.StatusCode, email, errorBody);
                 return (false, null, null, null, null, "provision_failed");
             }
 
             var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions);
+            var result = await response.Content.ReadFromJsonAsync<EmployeeLookupResult>(jsonOptions, cancellationToken);
             if (result == null)
             {
                 return (false, null, null, null, null, "service_unavailable");
             }
 
             return (true, result.EmployeeId, result.PrincipalId, result.FullName, result.EmploymentStatus, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

@@ -58,16 +58,24 @@ public interface IAuthenticationService
     /// </summary>
     /// <param name="request">The Google exchange request.</param>
     /// <param name="ipAddress">The IP address of the client.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>The authentication result.</returns>
-    Task<AuthenticationResult> ExchangeGoogleTokenAsync(GoogleExchangeRequest request, string? ipAddress);
+    Task<AuthenticationResult> ExchangeGoogleTokenAsync(
+        GoogleExchangeRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Exchanges a verified customer Google identity for a platform JWT.
     /// </summary>
     /// <param name="request">The customer Google exchange request.</param>
     /// <param name="ipAddress">The IP address of the client.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>The authentication result.</returns>
-    Task<AuthenticationResult> ExchangeCustomerGoogleTokenAsync(CustomerGoogleExchangeRequest request, string? ipAddress);
+    Task<AuthenticationResult> ExchangeCustomerGoogleTokenAsync(
+        CustomerGoogleExchangeRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Starts a customer password reset.

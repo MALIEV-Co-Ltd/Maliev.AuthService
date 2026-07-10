@@ -23,12 +23,18 @@ public static class AuthPermissions
     public const string ManageUsers = "auth.users.manage";
 
     /// <summary>
+    /// Permission for trusted BFF services to exchange verified external identities for MALIEV sessions.
+    /// </summary>
+    public const string ExchangeIdentities = "auth.identities.exchange";
+
+    /// <summary>
     /// Dictionary of all permissions with their descriptions.
     /// </summary>
     public static readonly ReadOnlyDictionary<string, string> AllWithDescriptions = new(new Dictionary<string, string>
     {
         { RevokeTokens, "Can revoke access and refresh tokens" },
         { ViewUsers, "Can view user details and sessions" },
-        { ManageUsers, "Can manage user accounts and locks" }
+        { ManageUsers, "Can manage user accounts and locks" },
+        { ExchangeIdentities, "Can exchange verified external identities for MALIEV sessions" }
     });
 }

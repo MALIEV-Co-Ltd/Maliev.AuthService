@@ -81,30 +81,36 @@ public class DtoValidationTests
     }
 
     [Fact]
-    public void GoogleExchangeRequest_WithValidData_SetsProperties()
+    public void GoogleExchangeRequest_ExposesOnlyCredentialAndApplicationIdentityInputs()
     {
-        var request = new GoogleExchangeRequest
-        {
-            Email = "user@maliev.com",
-            FullName = "Test User"
-        };
+        var propertyNames = typeof(GoogleExchangeRequest)
+            .GetProperties()
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.Ordinal);
 
-        Assert.Equal("user@maliev.com", request.Email);
-        Assert.Equal("Test User", request.FullName);
+        Assert.Contains("Credential", propertyNames);
+        Assert.Contains("Application", propertyNames);
+        Assert.DoesNotContain("Email", propertyNames);
+        Assert.DoesNotContain("FullName", propertyNames);
+        Assert.DoesNotContain("GoogleUserId", propertyNames);
+        Assert.DoesNotContain("ProfileImageUrl", propertyNames);
     }
 
     [Fact]
-    public void CustomerGoogleExchangeRequest_WithGoogleProfileImageUrl_SetsProperties()
+    public void CustomerGoogleExchangeRequest_DoesNotTrustCallerAssertedIdentityClaims()
     {
-        var request = new CustomerGoogleExchangeRequest
-        {
-            Email = "customer@gmail.com",
-            FullName = "Customer User",
-            GoogleUserId = "google-sub-123",
-            ProfileImageUrl = "https://lh3.googleusercontent.com/a/profile-photo"
-        };
+        var propertyNames = typeof(CustomerGoogleExchangeRequest)
+            .GetProperties()
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.Ordinal);
 
-        Assert.Equal("https://lh3.googleusercontent.com/a/profile-photo", request.ProfileImageUrl);
+        Assert.Contains("Credential", propertyNames);
+        Assert.Contains("Application", propertyNames);
+        Assert.DoesNotContain("Email", propertyNames);
+        Assert.DoesNotContain("FullName", propertyNames);
+        Assert.DoesNotContain("GoogleUserId", propertyNames);
+        Assert.DoesNotContain("EmailVerified", propertyNames);
+        Assert.DoesNotContain("ProfileImageUrl", propertyNames);
     }
 
     [Fact]

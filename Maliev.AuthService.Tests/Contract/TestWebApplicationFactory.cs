@@ -1,8 +1,11 @@
 using Maliev.AuthService.Domain.Entities;
+using Maliev.AuthService.Application.Identity;
+using Maliev.AuthService.Application.Interfaces;
 using Maliev.AuthService.Infrastructure.DbContexts;
 using Maliev.AuthService.Tests.Infrastructure;
 using Maliev.AuthService.Tests.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using System.Net;
@@ -104,6 +107,9 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
 
     protected override void ConfigureAdditionalServices(IServiceCollection services)
     {
+        services.RemoveAll<IGoogleIdentityTokenValidator>();
+        services.AddSingleton<IGoogleIdentityTokenValidator, TestGoogleIdentityTokenValidator>();
+
         // Remove existing HttpClient registration
         var httpClientDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IHttpClientFactory));
         if (httpClientDescriptor != null)
@@ -113,6 +119,46 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
 
         // Add mock HTTP client factory that returns successful validation responses
         services.AddSingleton<IHttpClientFactory>(sp => new MockHttpClientFactory(sp.GetRequiredService<IConfiguration>()));
+    }
+
+    private sealed class TestGoogleIdentityTokenValidator : IGoogleIdentityTokenValidator
+    {
+        public Task<GoogleIdentityValidationResult> ValidateAsync(
+            string credential,
+            string application,
+            GoogleIdentityExchangeType exchangeType,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(credential) || string.IsNullOrWhiteSpace(application))
+            {
+                return Task.FromResult(new GoogleIdentityValidationResult
+                {
+                    Success = false,
+                    ErrorCode = "invalid_google_credential",
+                    ErrorDescription = "Google credential is invalid or expired"
+                });
+            }
+
+            var email = credential.Trim();
+            var hostedDomain = email.EndsWith("@maliev.com", StringComparison.OrdinalIgnoreCase)
+                ? "maliev.com"
+                : null;
+            var name = email.Split('@', 2)[0].Replace('.', ' ');
+
+            return Task.FromResult(new GoogleIdentityValidationResult
+            {
+                Success = true,
+                Identity = new VerifiedGoogleIdentity
+                {
+                    Subject = $"test-google-sub-{email}",
+                    Email = email,
+                    EmailVerified = true,
+                    HostedDomain = hostedDomain,
+                    FullName = name,
+                    ProfileImageUrl = $"https://lh3.googleusercontent.com/a/{Uri.EscapeDataString(email)}"
+                }
+            });
+        }
     }
 
     private class MockHttpClientFactory : IHttpClientFactory

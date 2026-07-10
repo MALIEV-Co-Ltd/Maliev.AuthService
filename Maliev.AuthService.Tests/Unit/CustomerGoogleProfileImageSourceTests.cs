@@ -16,7 +16,7 @@ public sealed class CustomerGoogleProfileImageSourceTests
     {
         var service = ReadRepoFile("Maliev.AuthService.Infrastructure", "Services", "AuthenticationService.cs");
 
-        Assert.Contains("profileImageUrl = request.ProfileImageUrl", service, StringComparison.Ordinal);
+        Assert.Contains("profileImageUrl = identity.ProfileImageUrl", service, StringComparison.Ordinal);
         Assert.Contains("var profileImageUrl = GetString(root, \"profileImageUrl\", \"profile_image_url\", \"ProfileImageUrl\")", service, StringComparison.Ordinal);
         Assert.Contains("ProfileImageUrl = session.ProfileImageUrl", service, StringComparison.Ordinal);
         Assert.Contains("string? ProfileImageUrl", service, StringComparison.Ordinal);

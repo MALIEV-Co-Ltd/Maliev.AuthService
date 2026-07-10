@@ -64,12 +64,12 @@ public class AuthenticationServiceDtoTests
     {
         var request = new GoogleExchangeRequest
         {
-            Email = "user@maliev.com",
-            FullName = "Test User"
+            Credential = "google-id-token",
+            Application = "intranet"
         };
 
-        Assert.Equal("user@maliev.com", request.Email);
-        Assert.Equal("Test User", request.FullName);
+        Assert.Equal("google-id-token", request.Credential);
+        Assert.Equal("intranet", request.Application);
     }
 
     [Fact]

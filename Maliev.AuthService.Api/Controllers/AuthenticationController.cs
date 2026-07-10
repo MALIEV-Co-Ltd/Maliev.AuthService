@@ -1,4 +1,6 @@
 using Asp.Versioning;
+using Maliev.Aspire.ServiceDefaults.Authorization;
+using Maliev.AuthService.Api.Authorization;
 using Maliev.AuthService.Application.DTOs.Request;
 using Maliev.AuthService.Application.DTOs.Response;
 using Maliev.AuthService.Application.Interfaces;
@@ -19,6 +21,7 @@ public class AuthenticationController : ControllerBase
     private readonly IEmailVerificationService _emailVerificationService;
     private readonly IPasskeyService _passkeyService;
     private readonly ILogger<AuthenticationController> _logger;
+    private readonly HashSet<string> _allowedGoogleExchangeCallers;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AuthenticationController"/> class.
@@ -26,17 +29,26 @@ public class AuthenticationController : ControllerBase
     /// <param name="authenticationService">The service responsible for authentication logic.</param>
     /// <param name="emailVerificationService">The service responsible for email verification.</param>
     /// <param name="passkeyService">The service responsible for WebAuthn passkey operations.</param>
+    /// <param name="configuration">The application configuration.</param>
     /// <param name="logger">The logger for this controller.</param>
     public AuthenticationController(
         IAuthenticationService authenticationService,
         IEmailVerificationService emailVerificationService,
         IPasskeyService passkeyService,
+        IConfiguration configuration,
         ILogger<AuthenticationController> logger)
     {
         _authenticationService = authenticationService;
         _emailVerificationService = emailVerificationService;
         _passkeyService = passkeyService;
         _logger = logger;
+        _allowedGoogleExchangeCallers = configuration
+            .GetSection("GoogleIdentity:AllowedCallers")
+            .GetChildren()
+            .Select(child => child.Value)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -242,11 +254,12 @@ public class AuthenticationController : ControllerBase
     }
 
     /// <summary>
-    /// Exchanges a verified Google Workspace identity for a platform JWT.
+    /// Exchanges a Google Identity Services credential for an employee platform JWT.
     /// </summary>
     /// <remarks>
-    /// Used by the Intranet BFF after successful Google OAuth authentication.
-    /// Assumes the email has already been validated by Google (trusted provider).
+    /// Used by an authenticated Intranet BFF after it receives a raw GIS credential.
+    /// AuthService validates the credential signature, issuer, expiry, configured audience,
+    /// verified email, and hosted domain before using any identity claims.
     ///
     /// **Process:**
     /// 1. Validates email is @maliev.com domain.
@@ -265,14 +278,20 @@ public class AuthenticationController : ControllerBase
     /// <response code="403">Non-@maliev.com email or inactive employee account.</response>
     /// <response code="503">EmployeeService unavailable.</response>
     [HttpPost("exchange/google")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
     [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> ExchangeGoogleToken([FromBody] GoogleExchangeRequest request, CancellationToken cancellationToken)
     {
+        if (!IsAllowedGoogleExchangeCaller())
+        {
+            return Forbid();
+        }
+
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
 
-        var result = await _authenticationService.ExchangeGoogleTokenAsync(request, ipAddress);
+        var result = await _authenticationService.ExchangeGoogleTokenAsync(request, ipAddress, cancellationToken);
 
         if (!result.Success)
         {
@@ -290,7 +309,7 @@ public class AuthenticationController : ControllerBase
                 return StatusCode(403, new ErrorResponse
                 {
                     Error = result.ErrorCode,
-                    ErrorDescription = "Only @maliev.com email addresses are allowed"
+                    ErrorDescription = result.ErrorDescription!
                 });
             }
 
@@ -323,10 +342,10 @@ public class AuthenticationController : ControllerBase
     }
 
     /// <summary>
-    /// Exchanges a verified customer Google identity for a customer JWT.
+    /// Exchanges a Google Identity Services credential for a customer JWT.
     /// </summary>
     /// <remarks>
-    /// Used by the public Web BFF after successful customer Google authentication.
+    /// Used by an authenticated customer-facing BFF after it receives a raw GIS credential.
     /// Customer Google accounts are not restricted to the MALIEV Workspace domain.
     /// </remarks>
     /// <param name="request">The customer Google exchange request.</param>
@@ -336,13 +355,19 @@ public class AuthenticationController : ControllerBase
     /// <response code="401">Google identity is invalid or unverified.</response>
     /// <response code="503">CustomerService or IAM is unavailable.</response>
     [HttpPost("exchange/google/customer")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
     [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> ExchangeCustomerGoogleToken([FromBody] CustomerGoogleExchangeRequest request, CancellationToken cancellationToken)
     {
+        if (!IsAllowedGoogleExchangeCaller())
+        {
+            return Forbid();
+        }
+
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-        var result = await _authenticationService.ExchangeCustomerGoogleTokenAsync(request, ipAddress);
+        var result = await _authenticationService.ExchangeCustomerGoogleTokenAsync(request, ipAddress, cancellationToken);
 
         if (!result.Success)
         {
@@ -363,6 +388,23 @@ public class AuthenticationController : ControllerBase
         }
 
         return Ok(result.Response);
+    }
+
+    private bool IsAllowedGoogleExchangeCaller()
+    {
+        var userType = User.FindFirst("user_type")?.Value;
+        var serviceName = User.FindFirst("service_name")?.Value;
+        var allowed = string.Equals(userType, "service", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(serviceName) &&
+            _allowedGoogleExchangeCallers.Contains(serviceName);
+        if (!allowed)
+        {
+            _logger.LogWarning(
+                "Rejected Google identity exchange from service caller {ServiceName}",
+                string.IsNullOrWhiteSpace(serviceName) ? "missing" : serviceName);
+        }
+
+        return allowed;
     }
 
     /// <summary>

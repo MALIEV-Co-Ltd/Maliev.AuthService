@@ -1,47 +1,37 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Maliev.AuthService.Application.DTOs.Request;
 
 /// <summary>
 /// Request model for exchanging a customer Google identity for a Maliev customer JWT.
 /// </summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class CustomerGoogleExchangeRequest
 {
     /// <summary>
-    /// Gets or sets the customer email address from Google.
+    /// Gets or sets the raw Google Identity Services ID token.
     /// </summary>
-    [Required(ErrorMessage = "Email is required")]
-    [EmailAddress(ErrorMessage = "Must be a valid email address")]
-    public string Email { get; set; } = string.Empty;
+    [Required(ErrorMessage = "Google credential is required")]
+    [StringLength(8192, MinimumLength = 1, ErrorMessage = "Google credential is invalid")]
+    public string Credential { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the customer full name from Google.
+    /// Gets or sets the configured MALIEV application selector.
     /// </summary>
-    public string? FullName { get; set; }
-
-    /// <summary>
-    /// Gets or sets Google's OpenID Connect subject claim.
-    /// </summary>
-    [Required(ErrorMessage = "Google user id is required")]
-    public string GoogleUserId { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Gets or sets whether Google reports the email as verified.
-    /// </summary>
-    public bool EmailVerified { get; set; } = true;
-
-    /// <summary>
-    /// Gets or sets the profile image URL from Google.
-    /// </summary>
-    public string? ProfileImageUrl { get; set; }
+    [Required(ErrorMessage = "Application is required")]
+    [RegularExpression("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", ErrorMessage = "Application selector is invalid")]
+    public string Application { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the customer's preferred language.
     /// </summary>
+    [StringLength(12, MinimumLength = 2)]
     public string PreferredLanguage { get; set; } = "th";
 
     /// <summary>
     /// Gets or sets the customer's preferred timezone.
     /// </summary>
+    [StringLength(100, MinimumLength = 1)]
     public string Timezone { get; set; } = "Asia/Bangkok";
 }

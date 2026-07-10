@@ -1,32 +1,25 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Maliev.AuthService.Application.DTOs.Request;
 
 /// <summary>
 /// Request model for exchanging a Google OAuth token for a Maliev JWT.
 /// </summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class GoogleExchangeRequest
 {
     /// <summary>
-    /// Gets or sets the employee's work email address.
+    /// Gets or sets the raw Google Identity Services ID token.
     /// </summary>
-    [Required(ErrorMessage = "Email is required")]
-    [EmailAddress(ErrorMessage = "Must be a valid email address")]
-    public string Email { get; set; } = string.Empty;
+    [Required(ErrorMessage = "Google credential is required")]
+    [StringLength(8192, MinimumLength = 1, ErrorMessage = "Google credential is invalid")]
+    public string Credential { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the employee's full name from Google.
+    /// Gets or sets the configured MALIEV application selector.
     /// </summary>
-    public string? FullName { get; set; }
-
-    /// <summary>
-    /// Gets or sets Google's numeric sub claim for the authenticated user.
-    /// Used to correlate Google identity with the platform principal.
-    /// </summary>
-    public string? GoogleUserId { get; set; }
-
-    /// <summary>
-    /// Gets or sets the profile image URL from Google.
-    /// </summary>
-    public string? ProfileImageUrl { get; set; }
+    [Required(ErrorMessage = "Application is required")]
+    [RegularExpression("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", ErrorMessage = "Application selector is invalid")]
+    public string Application { get; set; } = string.Empty;
 }

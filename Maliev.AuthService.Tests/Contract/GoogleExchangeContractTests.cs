@@ -1,6 +1,8 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Maliev.AuthService.Api.Authorization;
 using Maliev.AuthService.Application.DTOs.Request;
 using Maliev.AuthService.Application.DTOs.Response;
 using Maliev.AuthService.Tests.Infrastructure;
@@ -22,12 +24,13 @@ public class GoogleExchangeContractTests : IntegrationTestBase
         // Arrange
         var request = new
         {
-            email = "existing.employee@maliev.com",
-            full_name = "Existing Employee"
+            credential = "existing.employee@maliev.com",
+            application = "intranet"
         };
+        using var exchangeClient = CreateExchangeClient();
 
         // Act
-        var response = await Client.PostAsJsonAsync("/auth/v1/exchange/google", request);
+        var response = await exchangeClient.PostAsJsonAsync("/auth/v1/exchange/google", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -47,12 +50,13 @@ public class GoogleExchangeContractTests : IntegrationTestBase
         // Arrange
         var request = new
         {
-            email = "new.employee@maliev.com",
-            full_name = "New Employee"
+            credential = "new.employee@maliev.com",
+            application = "intranet"
         };
+        using var exchangeClient = CreateExchangeClient();
 
         // Act
-        var response = await Client.PostAsJsonAsync("/auth/v1/exchange/google", request);
+        var response = await exchangeClient.PostAsJsonAsync("/auth/v1/exchange/google", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -71,12 +75,13 @@ public class GoogleExchangeContractTests : IntegrationTestBase
         // Arrange
         var request = new
         {
-            email = "user@gmail.com",
-            full_name = "Gmail User"
+            credential = "user@gmail.com",
+            application = "intranet"
         };
+        using var exchangeClient = CreateExchangeClient();
 
         // Act
-        var response = await Client.PostAsJsonAsync("/auth/v1/exchange/google", request);
+        var response = await exchangeClient.PostAsJsonAsync("/auth/v1/exchange/google", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -91,12 +96,13 @@ public class GoogleExchangeContractTests : IntegrationTestBase
         // Arrange
         var request = new
         {
-            email = "terminated.employee@maliev.com",
-            full_name = "Terminated Employee"
+            credential = "terminated.employee@maliev.com",
+            application = "intranet"
         };
+        using var exchangeClient = CreateExchangeClient();
 
         // Act
-        var response = await Client.PostAsJsonAsync("/auth/v1/exchange/google", request);
+        var response = await exchangeClient.PostAsJsonAsync("/auth/v1/exchange/google", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -111,12 +117,13 @@ public class GoogleExchangeContractTests : IntegrationTestBase
         // Arrange
         var request = new
         {
-            email = "service.down@maliev.com",
-            full_name = "Service Down"
+            credential = "service.down@maliev.com",
+            application = "intranet"
         };
+        using var exchangeClient = CreateExchangeClient();
 
         // Act
-        var response = await Client.PostAsJsonAsync("/auth/v1/exchange/google", request);
+        var response = await exchangeClient.PostAsJsonAsync("/auth/v1/exchange/google", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
@@ -131,17 +138,63 @@ public class GoogleExchangeContractTests : IntegrationTestBase
         // Arrange
         var request = new
         {
-            email = "provision.fail@maliev.com",
-            full_name = "Provision Fail"
+            credential = "provision.fail@maliev.com",
+            application = "intranet"
         };
+        using var exchangeClient = CreateExchangeClient();
 
         // Act
-        var response = await Client.PostAsJsonAsync("/auth/v1/exchange/google", request);
+        var response = await exchangeClient.PostAsJsonAsync("/auth/v1/exchange/google", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<ErrorResponse>(JsonOptions);
         Assert.Equal("provision_failed", result?.Error);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleToken_WithoutServiceAuthentication_ReturnsUnauthorized()
+    {
+        await CleanDatabaseAsync();
+        using var anonymousClient = Factory.CreateClient();
+
+        var response = await anonymousClient.PostAsJsonAsync("/auth/v1/exchange/google", new
+        {
+            credential = "existing.employee@maliev.com",
+            application = "intranet"
+        });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleToken_WithoutExchangePermission_ReturnsForbidden()
+    {
+        await CleanDatabaseAsync();
+
+        var response = await Client.PostAsJsonAsync("/auth/v1/exchange/google", new
+        {
+            credential = "existing.employee@maliev.com",
+            application = "intranet"
+        });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Login_WithoutServiceAuthentication_RemainsPublic()
+    {
+        await CleanDatabaseAsync();
+        using var anonymousClient = Factory.CreateClient();
+
+        var response = await anonymousClient.PostAsJsonAsync("/auth/v1/login", new
+        {
+            username = "customer@example.com",
+            password = TestConstants.DummyPassword,
+            user_type = "customer"
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
@@ -151,14 +204,13 @@ public class GoogleExchangeContractTests : IntegrationTestBase
         // Arrange
         var request = new
         {
-            email = "customer@gmail.com",
-            full_name = "Customer User",
-            google_user_id = "google-sub-123",
-            email_verified = true
+            credential = "customer@gmail.com",
+            application = "web"
         };
+        using var exchangeClient = CreateExchangeClient();
 
         // Act
-        var response = await Client.PostAsJsonAsync("/auth/v1/exchange/google/customer", request);
+        var response = await exchangeClient.PostAsJsonAsync("/auth/v1/exchange/google/customer", request);
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -173,5 +225,64 @@ public class GoogleExchangeContractTests : IntegrationTestBase
         var token = handler.ReadJwtToken(result!.AccessToken);
         Assert.NotNull(token.Claims.FirstOrDefault(c => c.Type == "customer_id"));
         Assert.Equal(token.Subject, token.Claims.First(c => c.Type == "principal_id").Value);
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleToken_WithCallerAssertedIdentityFields_ReturnsBadRequest()
+    {
+        await CleanDatabaseAsync();
+        using var exchangeClient = CreateExchangeClient();
+
+        var response = await exchangeClient.PostAsJsonAsync("/auth/v1/exchange/google", new
+        {
+            credential = "existing.employee@maliev.com",
+            application = "intranet",
+            email = "attacker@maliev.com",
+            google_user_id = "attacker-sub"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    private HttpClient CreateExchangeClient()
+    {
+        var token = Factory.CreateTestJwtToken(
+            Guid.NewGuid().ToString(),
+            ["service"],
+            new Dictionary<string, string>
+            {
+                ["permission"] = AuthPermissions.ExchangeIdentities,
+                ["user_type"] = "service",
+                ["service_name"] = "QuoteEngineBff"
+            });
+        var client = Factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        client.DefaultRequestHeaders.Add("X-Test-Client-IP", "127.0.0.1");
+        return client;
+    }
+
+    [Fact]
+    public async Task ExchangeGoogleToken_FromUnapprovedService_ReturnsForbidden()
+    {
+        await CleanDatabaseAsync();
+        var token = Factory.CreateTestJwtToken(
+            Guid.NewGuid().ToString(),
+            ["service"],
+            new Dictionary<string, string>
+            {
+                ["permission"] = AuthPermissions.ExchangeIdentities,
+                ["user_type"] = "service",
+                ["service_name"] = "UnrelatedService"
+            });
+        using var client = Factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.PostAsJsonAsync("/auth/v1/exchange/google", new
+        {
+            credential = "existing.employee@maliev.com",
+            application = "intranet"
+        });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 }
