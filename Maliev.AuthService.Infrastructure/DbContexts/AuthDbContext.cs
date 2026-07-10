@@ -48,6 +48,9 @@ public class AuthDbContext : DbContext
     /// <summary>Gets or sets verification tokens.</summary>
     public DbSet<VerificationToken> VerificationTokens => Set<VerificationToken>();
 
+    /// <summary>Gets or sets one-time Google identity exchange nonces.</summary>
+    public DbSet<GoogleIdentityNonce> GoogleIdentityNonces => Set<GoogleIdentityNonce>();
+
     /// <inheritdoc/>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

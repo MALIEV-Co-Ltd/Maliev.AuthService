@@ -3,6 +3,7 @@ using Maliev.Aspire.ServiceDefaults.Authorization;
 using Maliev.AuthService.Api.Authorization;
 using Maliev.AuthService.Application.DTOs.Request;
 using Maliev.AuthService.Application.DTOs.Response;
+using Maliev.AuthService.Application.Identity;
 using Maliev.AuthService.Application.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -20,8 +21,9 @@ public class AuthenticationController : ControllerBase
     private readonly IAuthenticationService _authenticationService;
     private readonly IEmailVerificationService _emailVerificationService;
     private readonly IPasskeyService _passkeyService;
+    private readonly IGoogleIdentityNonceService _googleIdentityNonceService;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<AuthenticationController> _logger;
-    private readonly HashSet<string> _allowedGoogleExchangeCallers;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AuthenticationController"/> class.
@@ -29,26 +31,23 @@ public class AuthenticationController : ControllerBase
     /// <param name="authenticationService">The service responsible for authentication logic.</param>
     /// <param name="emailVerificationService">The service responsible for email verification.</param>
     /// <param name="passkeyService">The service responsible for WebAuthn passkey operations.</param>
+    /// <param name="googleIdentityNonceService">The one-time Google identity nonce service.</param>
     /// <param name="configuration">The application configuration.</param>
     /// <param name="logger">The logger for this controller.</param>
     public AuthenticationController(
         IAuthenticationService authenticationService,
         IEmailVerificationService emailVerificationService,
         IPasskeyService passkeyService,
+        IGoogleIdentityNonceService googleIdentityNonceService,
         IConfiguration configuration,
         ILogger<AuthenticationController> logger)
     {
         _authenticationService = authenticationService;
         _emailVerificationService = emailVerificationService;
         _passkeyService = passkeyService;
+        _googleIdentityNonceService = googleIdentityNonceService;
+        _configuration = configuration;
         _logger = logger;
-        _allowedGoogleExchangeCallers = configuration
-            .GetSection("GoogleIdentity:AllowedCallers")
-            .GetChildren()
-            .Select(child => child.Value)
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value!)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -284,14 +283,21 @@ public class AuthenticationController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> ExchangeGoogleToken([FromBody] GoogleExchangeRequest request, CancellationToken cancellationToken)
     {
-        if (!IsAllowedGoogleExchangeCaller())
+        if (!TryGetBoundGoogleExchangeCaller(
+                GoogleIdentityExchangeType.Employee,
+                request.Application,
+                out var serviceName))
         {
             return Forbid();
         }
 
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
 
-        var result = await _authenticationService.ExchangeGoogleTokenAsync(request, ipAddress, cancellationToken);
+        var result = await _authenticationService.ExchangeGoogleTokenAsync(
+            request,
+            ipAddress,
+            serviceName,
+            cancellationToken);
 
         if (!result.Success)
         {
@@ -361,19 +367,35 @@ public class AuthenticationController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> ExchangeCustomerGoogleToken([FromBody] CustomerGoogleExchangeRequest request, CancellationToken cancellationToken)
     {
-        if (!IsAllowedGoogleExchangeCaller())
+        if (!TryGetBoundGoogleExchangeCaller(
+                GoogleIdentityExchangeType.Customer,
+                request.Application,
+                out var serviceName))
         {
             return Forbid();
         }
 
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-        var result = await _authenticationService.ExchangeCustomerGoogleTokenAsync(request, ipAddress, cancellationToken);
+        var result = await _authenticationService.ExchangeCustomerGoogleTokenAsync(
+            request,
+            ipAddress,
+            serviceName,
+            cancellationToken);
 
         if (!result.Success)
         {
             if (result.ErrorCode == "service_unavailable")
             {
                 return StatusCode(503, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
+            if (result.ErrorCode == "account_verification_required")
+            {
+                return Conflict(new ErrorResponse
                 {
                     Error = result.ErrorCode,
                     ErrorDescription = result.ErrorDescription!
@@ -390,17 +412,76 @@ public class AuthenticationController : ControllerBase
         return Ok(result.Response);
     }
 
-    private bool IsAllowedGoogleExchangeCaller()
+    /// <summary>Issues a one-time nonce for the employee Google exchange.</summary>
+    [HttpPost("exchange/google/nonce")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(GoogleIdentityNonceResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> IssueEmployeeGoogleNonce(
+        [FromBody] GoogleIdentityNonceRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await IssueGoogleNonceAsync(
+            request,
+            GoogleIdentityExchangeType.Employee,
+            cancellationToken);
+    }
+
+    /// <summary>Issues a one-time nonce for the customer Google exchange.</summary>
+    [HttpPost("exchange/google/customer/nonce")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(GoogleIdentityNonceResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> IssueCustomerGoogleNonce(
+        [FromBody] GoogleIdentityNonceRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await IssueGoogleNonceAsync(
+            request,
+            GoogleIdentityExchangeType.Customer,
+            cancellationToken);
+    }
+
+    private async Task<IActionResult> IssueGoogleNonceAsync(
+        GoogleIdentityNonceRequest request,
+        GoogleIdentityExchangeType exchangeType,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetBoundGoogleExchangeCaller(exchangeType, request.Application, out var serviceName))
+        {
+            return Forbid();
+        }
+
+        var issued = await _googleIdentityNonceService.IssueAsync(
+            serviceName,
+            request.Application,
+            exchangeType,
+            cancellationToken);
+        return Ok(new GoogleIdentityNonceResponse
+        {
+            Nonce = issued.Nonce,
+            ExpiresAtUtc = issued.ExpiresAtUtc
+        });
+    }
+
+    private bool TryGetBoundGoogleExchangeCaller(
+        GoogleIdentityExchangeType exchangeType,
+        string application,
+        out string serviceName)
     {
         var userType = User.FindFirst("user_type")?.Value;
-        var serviceName = User.FindFirst("service_name")?.Value;
+        serviceName = User.FindFirst("service_name")?.Value ?? string.Empty;
+        var applicationSelector = application.Trim().ToLowerInvariant();
+        var configuredServiceName = _configuration[
+            $"GoogleIdentity:Bindings:{exchangeType}:{applicationSelector}"];
         var allowed = string.Equals(userType, "service", StringComparison.OrdinalIgnoreCase) &&
             !string.IsNullOrWhiteSpace(serviceName) &&
-            _allowedGoogleExchangeCallers.Contains(serviceName);
+            !string.IsNullOrWhiteSpace(configuredServiceName) &&
+            string.Equals(serviceName, configuredServiceName, StringComparison.OrdinalIgnoreCase);
         if (!allowed)
         {
             _logger.LogWarning(
-                "Rejected Google identity exchange from service caller {ServiceName}",
+                "Rejected {ExchangeType} Google identity exchange for application {Application} from service caller {ServiceName}",
+                exchangeType,
+                applicationSelector,
                 string.IsNullOrWhiteSpace(serviceName) ? "missing" : serviceName);
         }
 

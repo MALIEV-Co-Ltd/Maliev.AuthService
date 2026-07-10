@@ -20,15 +20,24 @@ public class EmployeeServiceClient : IEmployeeServiceClient
     }
 
     /// <inheritdoc/>
-    public async Task<HttpResponseMessage> GetEmployeeByEmailAsync(string email)
+    public async Task<HttpResponseMessage> GetEmployeeByEmailAsync(
+        string email,
+        CancellationToken cancellationToken = default)
     {
         var encodedEmail = Uri.EscapeDataString(email);
-        return await _httpClient.GetAsync($"/employee/v1/employees/by-email/{encodedEmail}");
+        return await _httpClient.GetAsync(
+            $"/employee/v1/employees/by-email/{encodedEmail}",
+            cancellationToken);
     }
 
     /// <inheritdoc/>
-    public async Task<HttpResponseMessage> ProvisionEmployeeAsync(object request)
+    public async Task<HttpResponseMessage> ProvisionEmployeeAsync(
+        object request,
+        CancellationToken cancellationToken = default)
     {
-        return await _httpClient.PostAsJsonAsync("/employee/v1/employees/auto-provision", request);
+        return await _httpClient.PostAsJsonAsync(
+            "/employee/v1/employees/auto-provision",
+            request,
+            cancellationToken);
     }
 }

@@ -87,6 +87,10 @@ public class IAMServiceClient : IIAMServiceClient
             errorTags.Add("status_code", (int)response.StatusCode);
             _resolutionErrors.Add(1, errorTags);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             stopwatch.Stop();

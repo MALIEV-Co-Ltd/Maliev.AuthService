@@ -16,8 +16,16 @@ public interface IRefreshTokenService
     /// <param name="email">The user email address.</param>
     /// <param name="name">The user display name.</param>
     /// <param name="ipAddress">The IP address of the client.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>The refresh token entity and token value.</returns>
-    Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(Guid userId, Guid principalId, UserType userType, string? email, string? name, string? ipAddress);
+    Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(
+        Guid userId,
+        Guid principalId,
+        UserType userType,
+        string? email,
+        string? name,
+        string? ipAddress,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Validates a refresh token.

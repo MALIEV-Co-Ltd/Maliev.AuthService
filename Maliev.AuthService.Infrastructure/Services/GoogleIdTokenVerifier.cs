@@ -1,4 +1,5 @@
 using Google.Apis.Auth;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace Maliev.AuthService.Infrastructure.Services;
 
@@ -37,6 +38,15 @@ public sealed record GoogleIdentityTokenPayload
     /// <summary>Gets the optional Google Workspace hosted-domain claim.</summary>
     public string? HostedDomain { get; init; }
 
+    /// <summary>Gets the nonce bound to the browser credential request.</summary>
+    public string? Nonce { get; init; }
+
+    /// <summary>Gets the OAuth client identified by the optional azp claim.</summary>
+    public string? AuthorizedParty { get; init; }
+
+    /// <summary>Gets every audience asserted by the verified token.</summary>
+    public IReadOnlyCollection<string> Audiences { get; init; } = [];
+
     /// <summary>Gets the optional display name.</summary>
     public string? FullName { get; init; }
 
@@ -62,6 +72,10 @@ public sealed class GoogleJsonWebSignatureVerifier : IGoogleIdTokenVerifier
         var payload = await GoogleJsonWebSignature
             .ValidateAsync(credential, settings)
             .WaitAsync(cancellationToken);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(credential);
+        var authorizedParty = jwt.Payload.TryGetValue("azp", out var azp)
+            ? Convert.ToString(azp, System.Globalization.CultureInfo.InvariantCulture)
+            : null;
 
         return new GoogleIdentityTokenPayload
         {
@@ -69,6 +83,9 @@ public sealed class GoogleJsonWebSignatureVerifier : IGoogleIdTokenVerifier
             Email = payload.Email,
             EmailVerified = payload.EmailVerified,
             HostedDomain = payload.HostedDomain,
+            Nonce = payload.Nonce,
+            AuthorizedParty = authorizedParty,
+            Audiences = payload.AudienceAsList?.ToArray() ?? [],
             FullName = payload.Name,
             ProfileImageUrl = payload.Picture
         };

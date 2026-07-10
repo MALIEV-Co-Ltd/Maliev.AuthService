@@ -119,6 +119,8 @@ try
     builder.Services.AddScoped<IRateLimitService, RateLimitService>();
     builder.Services.AddScoped<IGoogleIdTokenVerifier, GoogleJsonWebSignatureVerifier>();
     builder.Services.AddScoped<IGoogleIdentityTokenValidator, GoogleIdentityTokenValidator>();
+    builder.Services.AddSingleton(TimeProvider.System);
+    builder.Services.AddScoped<IGoogleIdentityNonceService, GoogleIdentityNonceService>();
     builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
     builder.Services.AddScoped<IEmailVerificationService, EmailVerificationService>();
     builder.Services.AddScoped<IPasskeyService, PasskeyService>();

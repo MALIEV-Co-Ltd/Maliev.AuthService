@@ -22,4 +22,11 @@ public class GoogleExchangeRequest
     [Required(ErrorMessage = "Application is required")]
     [RegularExpression("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", ErrorMessage = "Application selector is invalid")]
     public string Application { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the one-time nonce issued by AuthService for this browser exchange.
+    /// </summary>
+    [Required(ErrorMessage = "Google sign-in nonce is required")]
+    [StringLength(256, MinimumLength = 32, ErrorMessage = "Google sign-in nonce is invalid")]
+    public string Nonce { get; set; } = string.Empty;
 }

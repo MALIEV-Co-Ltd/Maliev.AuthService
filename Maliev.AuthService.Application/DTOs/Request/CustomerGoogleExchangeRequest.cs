@@ -24,6 +24,13 @@ public class CustomerGoogleExchangeRequest
     public string Application { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the one-time nonce issued by AuthService for this browser exchange.
+    /// </summary>
+    [Required(ErrorMessage = "Google sign-in nonce is required")]
+    [StringLength(256, MinimumLength = 32, ErrorMessage = "Google sign-in nonce is invalid")]
+    public string Nonce { get; set; } = string.Empty;
+
+    /// <summary>
     /// Gets or sets the customer's preferred language.
     /// </summary>
     [StringLength(12, MinimumLength = 2)]

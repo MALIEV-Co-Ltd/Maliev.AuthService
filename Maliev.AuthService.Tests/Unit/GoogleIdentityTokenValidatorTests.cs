@@ -3,6 +3,7 @@ using Maliev.AuthService.Application.Identity;
 using Maliev.AuthService.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Newtonsoft.Json;
 using Xunit;
 
 namespace Maliev.AuthService.Tests.Unit;
@@ -13,6 +14,121 @@ namespace Maliev.AuthService.Tests.Unit;
 public sealed class GoogleIdentityTokenValidatorTests
 {
     [Fact]
+    public async Task ValidateAsync_MatchingNonceAndAuthorizedParty_AreAccepted()
+    {
+        var verifier = new RecordingGoogleIdTokenVerifier
+        {
+            Payload = ValidPayload() with
+            {
+                Nonce = "one-time-nonce",
+                AuthorizedParty = "configured-client-id.apps.googleusercontent.com",
+                Audiences = ["configured-client-id.apps.googleusercontent.com"]
+            }
+        };
+        var validator = CreateValidator(verifier, CustomerConfiguration());
+
+        var result = await validator.ValidateAsync(
+            "signed-google-credential",
+            "web",
+            GoogleIdentityExchangeType.Customer,
+            "one-time-nonce");
+
+        Assert.True(result.Success);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("different-nonce")]
+    public async Task ValidateAsync_MissingOrMismatchedNonce_IsRejected(string? tokenNonce)
+    {
+        var verifier = new RecordingGoogleIdTokenVerifier
+        {
+            Payload = ValidPayload() with { Nonce = tokenNonce }
+        };
+        var validator = CreateValidator(verifier, CustomerConfiguration());
+
+        var result = await validator.ValidateAsync(
+            "signed-google-credential",
+            "web",
+            GoogleIdentityExchangeType.Customer,
+            "expected-nonce");
+
+        Assert.False(result.Success);
+        Assert.Equal("invalid_google_credential", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_UnexpectedAuthorizedParty_IsRejected()
+    {
+        var verifier = new RecordingGoogleIdTokenVerifier
+        {
+            Payload = ValidPayload() with
+            {
+                Nonce = "one-time-nonce",
+                AuthorizedParty = "attacker-client.apps.googleusercontent.com",
+                Audiences = ["configured-client-id.apps.googleusercontent.com"]
+            }
+        };
+        var validator = CreateValidator(verifier, CustomerConfiguration());
+
+        var result = await validator.ValidateAsync(
+            "signed-google-credential",
+            "web",
+            GoogleIdentityExchangeType.Customer,
+            "one-time-nonce");
+
+        Assert.False(result.Success);
+        Assert.Equal("invalid_google_credential", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_MultipleAudiencesWithoutAuthorizedParty_IsRejected()
+    {
+        var verifier = new RecordingGoogleIdTokenVerifier
+        {
+            Payload = ValidPayload() with
+            {
+                Nonce = "one-time-nonce",
+                AuthorizedParty = null,
+                Audiences =
+                [
+                    "configured-client-id.apps.googleusercontent.com",
+                    "another-client.apps.googleusercontent.com"
+                ]
+            }
+        };
+        var validator = CreateValidator(verifier, CustomerConfiguration());
+
+        var result = await validator.ValidateAsync(
+            "signed-google-credential",
+            "web",
+            GoogleIdentityExchangeType.Customer,
+            "one-time-nonce");
+
+        Assert.False(result.Success);
+        Assert.Equal("invalid_google_credential", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_NewtonsoftMalformedTokenFailure_ReturnsInvalidCredential()
+    {
+        var verifier = new RecordingGoogleIdTokenVerifier
+        {
+            Exception = new JsonReaderException("malformed token payload")
+        };
+        var validator = CreateValidator(verifier, CustomerConfiguration());
+
+        var result = await validator.ValidateAsync(
+            "malformed-google-credential",
+            "web",
+            GoogleIdentityExchangeType.Customer,
+            "one-time-nonce");
+
+        Assert.False(result.Success);
+        Assert.Equal("invalid_google_credential", result.ErrorCode);
+    }
+
+    [Fact]
     public async Task ValidateAsync_UnknownApplication_FailsBeforeTokenValidation()
     {
         var verifier = new RecordingGoogleIdTokenVerifier();
@@ -21,7 +137,8 @@ public sealed class GoogleIdentityTokenValidatorTests
         var result = await validator.ValidateAsync(
             "header.payload.signature",
             "unknown-app",
-            GoogleIdentityExchangeType.Customer);
+            GoogleIdentityExchangeType.Customer,
+            "one-time-nonce");
 
         Assert.False(result.Success);
         Assert.Equal("invalid_audience", result.ErrorCode);
@@ -32,7 +149,14 @@ public sealed class GoogleIdentityTokenValidatorTests
     [Fact]
     public async Task ValidateAsync_ConfiguredApplication_PassesOnlyConfiguredAudiencesToGoogleVerifier()
     {
-        var verifier = new RecordingGoogleIdTokenVerifier();
+        var verifier = new RecordingGoogleIdTokenVerifier
+        {
+            Payload = ValidPayload() with
+            {
+                AuthorizedParty = "web-client.apps.googleusercontent.com",
+                Audiences = ["web-client.apps.googleusercontent.com"]
+            }
+        };
         var validator = CreateValidator(verifier, new Dictionary<string, string?>
         {
             ["GoogleIdentity:Customer:Audiences:web:0"] = "web-client.apps.googleusercontent.com",
@@ -42,7 +166,8 @@ public sealed class GoogleIdentityTokenValidatorTests
         var result = await validator.ValidateAsync(
             "signed-google-credential",
             "WEB",
-            GoogleIdentityExchangeType.Customer);
+            GoogleIdentityExchangeType.Customer,
+            "one-time-nonce");
 
         Assert.True(result.Success);
         Assert.NotNull(result.Identity);
@@ -71,7 +196,8 @@ public sealed class GoogleIdentityTokenValidatorTests
         var result = await validator.ValidateAsync(
             "untrusted-google-credential",
             "web",
-            GoogleIdentityExchangeType.Customer);
+            GoogleIdentityExchangeType.Customer,
+            "one-time-nonce");
 
         Assert.False(result.Success);
         Assert.Equal("invalid_google_credential", result.ErrorCode);
@@ -91,7 +217,8 @@ public sealed class GoogleIdentityTokenValidatorTests
         var result = await validator.ValidateAsync(
             "signed-google-credential",
             "web",
-            GoogleIdentityExchangeType.Customer);
+            GoogleIdentityExchangeType.Customer,
+            "one-time-nonce");
 
         Assert.False(result.Success);
         Assert.Equal("unverified_email", result.ErrorCode);
@@ -115,7 +242,8 @@ public sealed class GoogleIdentityTokenValidatorTests
         var result = await validator.ValidateAsync(
             "signed-google-credential",
             "intranet",
-            GoogleIdentityExchangeType.Employee);
+            GoogleIdentityExchangeType.Employee,
+            "one-time-nonce");
 
         Assert.False(result.Success);
         Assert.Equal("invalid_domain", result.ErrorCode);
@@ -138,7 +266,8 @@ public sealed class GoogleIdentityTokenValidatorTests
         var result = await validator.ValidateAsync(
             "signed-google-credential",
             "intranet",
-            GoogleIdentityExchangeType.Employee);
+            GoogleIdentityExchangeType.Employee,
+            "one-time-nonce");
 
         Assert.True(result.Success);
         Assert.Equal("employee@maliev.com", result.Identity?.Email);
@@ -157,7 +286,8 @@ public sealed class GoogleIdentityTokenValidatorTests
         var result = await validator.ValidateAsync(
             "signed-google-credential",
             "web",
-            GoogleIdentityExchangeType.Customer);
+            GoogleIdentityExchangeType.Customer,
+            "one-time-nonce");
 
         Assert.False(result.Success);
         Assert.Equal("service_unavailable", result.ErrorCode);
@@ -178,6 +308,7 @@ public sealed class GoogleIdentityTokenValidatorTests
             "signed-google-credential",
             "web",
             GoogleIdentityExchangeType.Customer,
+            "one-time-nonce",
             cancellation.Token));
     }
 
@@ -190,7 +321,8 @@ public sealed class GoogleIdentityTokenValidatorTests
         var result = await validator.ValidateAsync(
             " ",
             "intranet",
-            GoogleIdentityExchangeType.Employee);
+            GoogleIdentityExchangeType.Employee,
+            "one-time-nonce");
 
         Assert.False(result.Success);
         Assert.Equal("invalid_google_credential", result.ErrorCode);
@@ -213,6 +345,9 @@ public sealed class GoogleIdentityTokenValidatorTests
         Subject = "verified-google-subject",
         Email = "verified.user@example.com",
         EmailVerified = true,
+        Nonce = "one-time-nonce",
+        AuthorizedParty = "configured-client-id.apps.googleusercontent.com",
+        Audiences = ["configured-client-id.apps.googleusercontent.com"],
         FullName = "Verified User",
         ProfileImageUrl = "https://lh3.googleusercontent.com/a/verified-user"
     };

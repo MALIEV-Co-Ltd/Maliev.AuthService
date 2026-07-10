@@ -38,6 +38,7 @@ public class AuthenticationService : IAuthenticationService
     private readonly IPublishEndpoint _publishEndpoint;
     private readonly IEmployeeServiceClient _employeeServiceClient;
     private readonly IGoogleIdentityTokenValidator _googleIdentityTokenValidator;
+    private readonly IGoogleIdentityNonceService _googleIdentityNonceService;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AuthenticationService"/> class.
@@ -55,7 +56,8 @@ public class AuthenticationService : IAuthenticationService
         IConfiguration configuration,
         IPublishEndpoint publishEndpoint,
         IEmployeeServiceClient employeeServiceClient,
-        IGoogleIdentityTokenValidator googleIdentityTokenValidator)
+        IGoogleIdentityTokenValidator googleIdentityTokenValidator,
+        IGoogleIdentityNonceService googleIdentityNonceService)
     {
         _dbContext = dbContext;
         _tokenGenerator = tokenGenerator;
@@ -70,6 +72,7 @@ public class AuthenticationService : IAuthenticationService
         _publishEndpoint = publishEndpoint;
         _employeeServiceClient = employeeServiceClient ?? throw new ArgumentNullException(nameof(employeeServiceClient));
         _googleIdentityTokenValidator = googleIdentityTokenValidator ?? throw new ArgumentNullException(nameof(googleIdentityTokenValidator));
+        _googleIdentityNonceService = googleIdentityNonceService ?? throw new ArgumentNullException(nameof(googleIdentityNonceService));
     }
 
     /// <inheritdoc/>
@@ -481,12 +484,14 @@ public class AuthenticationService : IAuthenticationService
     public async Task<AuthenticationResult> ExchangeGoogleTokenAsync(
         GoogleExchangeRequest request,
         string? ipAddress,
+        string serviceName,
         CancellationToken cancellationToken = default)
     {
         var googleValidation = await _googleIdentityTokenValidator.ValidateAsync(
             request.Credential,
             request.Application,
             GoogleIdentityExchangeType.Employee,
+            request.Nonce,
             cancellationToken);
         if (!googleValidation.Success || googleValidation.Identity == null)
         {
@@ -534,6 +539,16 @@ public class AuthenticationService : IAuthenticationService
                 ErrorCode = "invalid_domain",
                 ErrorDescription = $"Only @{hostedDomain} Google Workspace accounts are allowed"
             };
+        }
+
+        if (!await _googleIdentityNonceService.ConsumeAsync(
+                request.Nonce,
+                serviceName,
+                request.Application,
+                GoogleIdentityExchangeType.Employee,
+                cancellationToken))
+        {
+            return InvalidOrReplayedGoogleCredential();
         }
 
         bool isFirstTimeProvisioning = false;
@@ -613,7 +628,7 @@ public class AuthenticationService : IAuthenticationService
 
                 for (int attempt = 0; attempt < maxAttempts; attempt++)
                 {
-                    var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId!.Value);
+                    var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId!.Value, cancellationToken);
                     roles = iamResponse.Roles;
 
                     if (roles?.Any() == true || iamResponse.Permissions?.Any() == true)
@@ -645,7 +660,7 @@ public class AuthenticationService : IAuthenticationService
             }
             else
             {
-                var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId!.Value);
+                var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(principalId!.Value, cancellationToken);
                 roles = iamResponse.Roles;
 
                 if (roles != null && roles.Contains(MalievIamRoles.PlatformOwner))
@@ -680,16 +695,18 @@ public class AuthenticationService : IAuthenticationService
             principalId!.Value, "employee", email,
             employeeName ?? fullName ?? email, permissions, roles, profileImageUrl: profileImageUrl);
 
+        cancellationToken.ThrowIfCancellationRequested();
         var (_, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(
             employeeId!.Value, principalId.Value, UserType.Employee,
-            email, employeeName ?? fullName ?? email, ipAddress);
+            email, employeeName ?? fullName ?? email, ipAddress, cancellationToken);
 
         EnqueueAuditLog(employeeId.Value, UserType.Employee, "google_exchange", ipAddress, true, null);
 
         await _publishEndpoint.Publish(new UserLoggedInEvent(
             Guid.NewGuid(), "UserLoggedInEvent", MessageType.Event, "1.0.0",
             "AuthService", ["NotificationService"], Guid.NewGuid(), null, DateTimeOffset.UtcNow, false,
-            new UserLoggedInEventPayload(employeeId.Value.ToString(), principalId.Value.ToString(), "Employee", ipAddress, "GoogleSSO", DateTimeOffset.UtcNow)));
+            new UserLoggedInEventPayload(employeeId.Value.ToString(), principalId.Value.ToString(), "Employee", ipAddress, "GoogleSSO", DateTimeOffset.UtcNow)),
+            cancellationToken);
 
         return new AuthenticationResult
         {
@@ -718,12 +735,14 @@ public class AuthenticationService : IAuthenticationService
     public async Task<AuthenticationResult> ExchangeCustomerGoogleTokenAsync(
         CustomerGoogleExchangeRequest request,
         string? ipAddress,
+        string serviceName,
         CancellationToken cancellationToken = default)
     {
         var googleValidation = await _googleIdentityTokenValidator.ValidateAsync(
             request.Credential,
             request.Application,
             GoogleIdentityExchangeType.Customer,
+            request.Nonce,
             cancellationToken);
         if (!googleValidation.Success || googleValidation.Identity == null)
         {
@@ -748,11 +767,34 @@ public class AuthenticationService : IAuthenticationService
             };
         }
 
-        var session = await LinkOrRegisterGoogleCustomerAsync(
-            identity,
-            request.PreferredLanguage,
-            request.Timezone,
-            cancellationToken);
+        if (!await _googleIdentityNonceService.ConsumeAsync(
+                request.Nonce,
+                serviceName,
+                request.Application,
+                GoogleIdentityExchangeType.Customer,
+                cancellationToken))
+        {
+            return InvalidOrReplayedGoogleCredential();
+        }
+
+        CustomerAccountSessionResult? session;
+        try
+        {
+            session = await LinkOrRegisterGoogleCustomerAsync(
+                identity,
+                request.PreferredLanguage,
+                request.Timezone,
+                cancellationToken);
+        }
+        catch (CustomerGoogleAccountVerificationRequiredException)
+        {
+            return new AuthenticationResult
+            {
+                Success = false,
+                ErrorCode = "account_verification_required",
+                ErrorDescription = "Sign in to your existing MALIEV account before linking this Google identity"
+            };
+        }
         if (session == null)
         {
             EnqueueAuditLog(null, UserType.Customer, "customer_google_exchange", ipAddress, false, "CustomerService unavailable");
@@ -770,7 +812,7 @@ public class AuthenticationService : IAuthenticationService
 
         try
         {
-            var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(session.PrincipalId);
+            var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(session.PrincipalId, cancellationToken);
             roles = iamResponse.Roles;
             permissions = roles != null && roles.Contains(MalievIamRoles.PlatformOwner)
                 ? null
@@ -802,20 +844,23 @@ public class AuthenticationService : IAuthenticationService
             roles,
             session.CustomerId);
 
+        cancellationToken.ThrowIfCancellationRequested();
         var (_, refreshTokenValue) = await _refreshTokenService.CreateRefreshTokenAsync(
             session.CustomerId,
             session.PrincipalId,
             UserType.Customer,
             session.Email,
             session.DisplayName,
-            ipAddress);
+            ipAddress,
+            cancellationToken);
 
         EnqueueAuditLog(session.CustomerId, UserType.Customer, "customer_google_exchange", ipAddress, true, null);
 
         await _publishEndpoint.Publish(new UserLoggedInEvent(
             Guid.NewGuid(), "UserLoggedInEvent", MessageType.Event, "1.0.0",
             "AuthService", ["NotificationService"], Guid.NewGuid(), null, DateTimeOffset.UtcNow, false,
-            new UserLoggedInEventPayload(session.CustomerId.ToString(), session.PrincipalId.ToString(), "Customer", ipAddress, "GoogleSSO", DateTimeOffset.UtcNow)));
+            new UserLoggedInEventPayload(session.CustomerId.ToString(), session.PrincipalId.ToString(), "Customer", ipAddress, "GoogleSSO", DateTimeOffset.UtcNow)),
+            cancellationToken);
 
         return new AuthenticationResult
         {
@@ -928,6 +973,7 @@ public class AuthenticationService : IAuthenticationService
                 lastName,
                 googleSubject = identity.Subject,
                 emailVerified = identity.EmailVerified,
+                emailLinkAllowed = IsAuthoritativeGoogleEmail(identity),
                 profileImageUrl = identity.ProfileImageUrl,
                 preferredLanguage,
                 timezone
@@ -936,6 +982,14 @@ public class AuthenticationService : IAuthenticationService
             if (!response.IsSuccessStatusCode)
             {
                 var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (response.StatusCode == HttpStatusCode.Conflict &&
+                    errorBody.Contains(
+                        "GOOGLE_EMAIL_LINK_REQUIRES_VERIFICATION",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new CustomerGoogleAccountVerificationRequiredException();
+                }
+
                 _logger.LogWarning("Customer Google link/register failed with status {StatusCode}: {Error}", response.StatusCode, errorBody);
                 return null;
             }
@@ -962,6 +1016,10 @@ public class AuthenticationService : IAuthenticationService
                 profileImageUrl);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (CustomerGoogleAccountVerificationRequiredException)
         {
             throw;
         }
@@ -1002,6 +1060,17 @@ public class AuthenticationService : IAuthenticationService
             _ => (parts[0], parts[1])
         };
     }
+
+    private static bool IsAuthoritativeGoogleEmail(VerifiedGoogleIdentity identity) =>
+        !string.IsNullOrWhiteSpace(identity.HostedDomain) ||
+        identity.Email.EndsWith("@gmail.com", StringComparison.OrdinalIgnoreCase);
+
+    private static AuthenticationResult InvalidOrReplayedGoogleCredential() => new()
+    {
+        Success = false,
+        ErrorCode = "invalid_google_credential",
+        ErrorDescription = "Google credential is invalid or expired"
+    };
 
     private static bool GetBoolean(JsonElement root, params string[] propertyNames)
     {
@@ -1059,8 +1128,7 @@ public class AuthenticationService : IAuthenticationService
         try
         {
             var response = await _employeeServiceClient
-                .GetEmployeeByEmailAsync(email)
-                .WaitAsync(cancellationToken);
+                .GetEmployeeByEmailAsync(email, cancellationToken);
 
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
@@ -1111,8 +1179,7 @@ public class AuthenticationService : IAuthenticationService
         {
             var request = new { email, first_name = firstName, last_name = lastName, picture_url = profileImageUrl };
             var response = await _employeeServiceClient
-                .ProvisionEmployeeAsync(request)
-                .WaitAsync(cancellationToken);
+                .ProvisionEmployeeAsync(request, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -1315,6 +1382,8 @@ public class AuthenticationService : IAuthenticationService
         string Email,
         string DisplayName,
         string? ProfileImageUrl);
+
+    private sealed class CustomerGoogleAccountVerificationRequiredException : Exception;
 
     private record EmployeeLookupResult
     {

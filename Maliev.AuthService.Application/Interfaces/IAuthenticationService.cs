@@ -58,11 +58,13 @@ public interface IAuthenticationService
     /// </summary>
     /// <param name="request">The Google exchange request.</param>
     /// <param name="ipAddress">The IP address of the client.</param>
+    /// <param name="serviceName">The authenticated service caller bound to the application.</param>
     /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>The authentication result.</returns>
     Task<AuthenticationResult> ExchangeGoogleTokenAsync(
         GoogleExchangeRequest request,
         string? ipAddress,
+        string serviceName,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -70,11 +72,13 @@ public interface IAuthenticationService
     /// </summary>
     /// <param name="request">The customer Google exchange request.</param>
     /// <param name="ipAddress">The IP address of the client.</param>
+    /// <param name="serviceName">The authenticated service caller bound to the application.</param>
     /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
     /// <returns>The authentication result.</returns>
     Task<AuthenticationResult> ExchangeCustomerGoogleTokenAsync(
         CustomerGoogleExchangeRequest request,
         string? ipAddress,
+        string serviceName,
         CancellationToken cancellationToken = default);
 
     /// <summary>

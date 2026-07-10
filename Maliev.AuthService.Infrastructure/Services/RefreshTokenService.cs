@@ -39,7 +39,14 @@ public class RefreshTokenService : IRefreshTokenService
     }
 
     /// <inheritdoc/>
-    public async Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(Guid userId, Guid principalId, UserType userType, string? email, string? name, string? ipAddress)
+    public async Task<(RefreshToken Entity, string TokenValue)> CreateRefreshTokenAsync(
+        Guid userId,
+        Guid principalId,
+        UserType userType,
+        string? email,
+        string? name,
+        string? ipAddress,
+        CancellationToken cancellationToken = default)
     {
         var familyId = Guid.NewGuid();
         var tokenValue = _tokenGenerator.GenerateRefreshToken();
@@ -72,7 +79,7 @@ public class RefreshTokenService : IRefreshTokenService
 
         _dbContext.TokenFamilies.Add(tokenFamily);
         _dbContext.RefreshTokens.Add(refreshToken);
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         _logger.LogDebug("Created refresh token for user {UserId}, family {FamilyId}", userId, familyId);
 

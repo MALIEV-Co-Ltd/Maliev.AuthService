@@ -77,3 +77,11 @@ public sealed class GoogleIdentityValidationResult
     /// </summary>
     public string? ErrorDescription { get; init; }
 }
+
+/// <summary>
+/// One-time nonce issued for an official Google Identity Services credential request.
+/// </summary>
+/// <param name="Id">The server-side nonce record identifier.</param>
+/// <param name="Nonce">The raw nonce supplied to Google Identity Services.</param>
+/// <param name="ExpiresAtUtc">The UTC expiration timestamp.</param>
+public sealed record GoogleIdentityNonceIssue(Guid Id, string Nonce, DateTime ExpiresAtUtc);

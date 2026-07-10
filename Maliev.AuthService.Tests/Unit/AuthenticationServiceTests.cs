@@ -36,6 +36,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     private readonly Mock<IPublishEndpoint> _publishEndpointMock;
     private readonly Mock<IEmployeeServiceClient> _employeeServiceClientMock;
     private readonly Mock<IGoogleIdentityTokenValidator> _googleIdentityTokenValidatorMock;
+    private readonly Mock<IGoogleIdentityNonceService> _googleIdentityNonceServiceMock;
     private AuthenticationService? _service;
 
     public AuthenticationServiceTests(TestDatabaseFixture fixture)
@@ -56,6 +57,15 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         _publishEndpointMock = new Mock<IPublishEndpoint>();
         _employeeServiceClientMock = new Mock<IEmployeeServiceClient>();
         _googleIdentityTokenValidatorMock = new Mock<IGoogleIdentityTokenValidator>();
+        _googleIdentityNonceServiceMock = new Mock<IGoogleIdentityNonceService>();
+        _googleIdentityNonceServiceMock
+            .Setup(service => service.ConsumeAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<GoogleIdentityExchangeType>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
     }
 
     public async Task InitializeAsync()
@@ -74,7 +84,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             _configurationMock.Object,
             _publishEndpointMock.Object,
             _employeeServiceClientMock.Object,
-            _googleIdentityTokenValidatorMock.Object);
+            _googleIdentityTokenValidatorMock.Object,
+            _googleIdentityNonceServiceMock.Object);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -133,7 +144,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         ArrangeVerifiedEmployeeIdentity("user@gmail.com", "User", hostedDomain: "gmail.com");
 
         // Act
-        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1", "IntranetBff");
 
         // Assert
         Assert.False(result.Success);
@@ -149,6 +160,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 GoogleIdentityExchangeType.Employee,
+                It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new GoogleIdentityValidationResult
             {
@@ -157,12 +169,20 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
                 ErrorDescription = "Google credential is invalid or expired"
             });
 
-        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1", "IntranetBff");
 
         Assert.False(result.Success);
         Assert.Equal("invalid_google_credential", result.ErrorCode);
         _employeeServiceClientMock.Verify(
             client => client.GetEmployeeByEmailAsync(It.IsAny<string>()),
+            Times.Never);
+        _googleIdentityNonceServiceMock.Verify(
+            service => service.ConsumeAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<GoogleIdentityExchangeType>(),
+                It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -181,6 +201,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 GoogleIdentityExchangeType.Employee,
+                It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new GoogleIdentityValidationResult
             {
@@ -229,7 +250,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
                 "127.0.0.1"))
             .ReturnsAsync((new RefreshToken(), "refresh-token"));
 
-        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1", "IntranetBff");
 
         Assert.True(result.Success, $"{result.ErrorCode}: {result.ErrorDescription}");
         Assert.Equal(verifiedEmail, result.Response!.User.Email);
@@ -250,7 +271,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         var request = new CustomerGoogleExchangeRequest
         {
             Credential = "customer-google-id-token",
-            Application = "web"
+            Application = "web",
+            Nonce = "one-time-nonce-for-customer-tests"
         };
 
         _googleIdentityTokenValidatorMock
@@ -258,6 +280,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 GoogleIdentityExchangeType.Customer,
+                It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new GoogleIdentityValidationResult
             {
@@ -314,7 +337,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
                 "127.0.0.1"))
             .ReturnsAsync((new RefreshToken(), "refresh-token"));
 
-        var result = await _service!.ExchangeCustomerGoogleTokenAsync(request, "127.0.0.1");
+        var result = await _service!.ExchangeCustomerGoogleTokenAsync(request, "127.0.0.1", "WebBff");
 
         Assert.True(result.Success, $"{result.ErrorCode}: {result.ErrorDescription}");
         Assert.NotNull(outboundBody);
@@ -322,6 +345,58 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         Assert.Equal(verifiedSubject, document.RootElement.GetProperty("googleSubject").GetString());
         Assert.Equal(verifiedEmail, document.RootElement.GetProperty("email").GetString());
         Assert.Equal(verifiedPicture, document.RootElement.GetProperty("profileImageUrl").GetString());
+        Assert.True(document.RootElement.GetProperty("emailLinkAllowed").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ExchangeCustomerGoogleTokenAsync_NonAuthoritativeExistingEmail_RequiresAccountVerification()
+    {
+        var request = new CustomerGoogleExchangeRequest
+        {
+            Credential = "customer-google-id-token",
+            Application = "web",
+            Nonce = "one-time-nonce-for-customer-tests"
+        };
+        _googleIdentityTokenValidatorMock
+            .Setup(validator => validator.ValidateAsync(
+                request.Credential,
+                request.Application,
+                GoogleIdentityExchangeType.Customer,
+                request.Nonce,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GoogleIdentityValidationResult
+            {
+                Success = true,
+                Identity = new VerifiedGoogleIdentity
+                {
+                    Subject = "verified-google-sub",
+                    Email = "reassignable@third-party.example",
+                    EmailVerified = true,
+                    HostedDomain = null,
+                    FullName = "Different Person"
+                }
+            });
+        _httpClientFactoryMock
+            .Setup(factory => factory.CreateClient("ExternalValidation"))
+            .Returns(new HttpClient(new DelegatingTestHandler((_, _) => Task.FromResult(
+                new HttpResponseMessage(HttpStatusCode.Conflict)
+                {
+                    Content = JsonContent.Create(new
+                    {
+                        code = "GOOGLE_EMAIL_LINK_REQUIRES_VERIFICATION",
+                        message = "Account verification required"
+                    })
+                }))));
+        _configurationMock.Setup(configuration => configuration["CustomerService:BaseUrl"])
+            .Returns("http://CustomerService");
+
+        var result = await _service!.ExchangeCustomerGoogleTokenAsync(request, "127.0.0.1", "WebBff");
+
+        Assert.False(result.Success);
+        Assert.Equal("account_verification_required", result.ErrorCode);
+        _iamClientMock.Verify(
+            client => client.ResolvePermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -361,7 +436,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             .ReturnsAsync((new RefreshToken(), "refresh-token"));
 
         // Act
-        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1", "IntranetBff");
 
         // Assert
         Assert.True(result.Success);
@@ -382,7 +457,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.InternalServerError));
 
         // Act
-        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1", "IntranetBff");
 
         // Assert
         Assert.False(result.Success);
@@ -404,7 +479,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.BadRequest));
 
         // Act
-        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1", "IntranetBff");
 
         // Assert
         Assert.False(result.Success);
@@ -435,7 +510,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             .ReturnsAsync(lookupResponse);
 
         // Act
-        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1", "IntranetBff");
 
         // Assert
         Assert.False(result.Success);
@@ -454,7 +529,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             .ThrowsAsync(new OperationCanceledException());
 
         // Act
-        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1");
+        var result = await _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1", "IntranetBff");
 
         // Assert
         Assert.False(result.Success);
@@ -467,16 +542,17 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         var email = "user@maliev.com";
         var request = ValidEmployeeRequest();
         ArrangeVerifiedEmployeeIdentity(email, "User");
-        var pendingLookup = new TaskCompletionSource<HttpResponseMessage>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
         _employeeServiceClientMock
-            .Setup(service => service.GetEmployeeByEmailAsync(email))
-            .Returns(pendingLookup.Task);
+            .Setup(service => service.GetEmployeeByEmailAsync(
+                email,
+                It.IsAny<CancellationToken>()))
+            .Returns((string _, CancellationToken token) =>
+                Task.FromCanceled<HttpResponseMessage>(token));
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1", cancellation.Token));
+            _service!.ExchangeGoogleTokenAsync(request, "127.0.0.1", "IntranetBff", cancellation.Token));
     }
 
     [Fact]
@@ -485,13 +561,15 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         var request = new CustomerGoogleExchangeRequest
         {
             Credential = "customer-google-id-token",
-            Application = "web"
+            Application = "web",
+            Nonce = "one-time-nonce-for-customer-tests"
         };
         _googleIdentityTokenValidatorMock
             .Setup(validator => validator.ValidateAsync(
                 request.Credential,
                 request.Application,
                 GoogleIdentityExchangeType.Customer,
+                request.Nonce,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new GoogleIdentityValidationResult
             {
@@ -514,7 +592,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            _service!.ExchangeCustomerGoogleTokenAsync(request, "127.0.0.1", cancellation.Token));
+            _service!.ExchangeCustomerGoogleTokenAsync(request, "127.0.0.1", "WebBff", cancellation.Token));
     }
 
     [Fact]
@@ -653,7 +731,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             configuration,
             _publishEndpointMock.Object,
             _employeeServiceClientMock.Object,
-            _googleIdentityTokenValidatorMock.Object);
+            _googleIdentityTokenValidatorMock.Object,
+            _googleIdentityNonceServiceMock.Object);
 
         // Act
         var result = await service.AuthenticateAsync(request, "127.0.0.1");
@@ -911,7 +990,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     private static GoogleExchangeRequest ValidEmployeeRequest() => new()
     {
         Credential = "employee-google-id-token",
-        Application = "intranet"
+        Application = "intranet",
+        Nonce = "one-time-nonce-for-employee-tests"
     };
 
     private void ArrangeVerifiedEmployeeIdentity(
@@ -925,6 +1005,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
                 "employee-google-id-token",
                 "intranet",
                 GoogleIdentityExchangeType.Employee,
+                "one-time-nonce-for-employee-tests",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new GoogleIdentityValidationResult
             {

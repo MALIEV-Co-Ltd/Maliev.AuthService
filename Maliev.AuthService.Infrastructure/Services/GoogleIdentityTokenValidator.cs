@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using Google.Apis.Auth;
 using Maliev.AuthService.Application.Identity;
 using Maliev.AuthService.Application.Interfaces;
@@ -20,9 +22,12 @@ public sealed class GoogleIdentityTokenValidator(
         string credential,
         string application,
         GoogleIdentityExchangeType exchangeType,
+        string expectedNonce,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(credential) || string.IsNullOrWhiteSpace(application))
+        if (string.IsNullOrWhiteSpace(credential) ||
+            string.IsNullOrWhiteSpace(application) ||
+            string.IsNullOrWhiteSpace(expectedNonce))
         {
             return InvalidCredential();
         }
@@ -75,7 +80,7 @@ public sealed class GoogleIdentityTokenValidator(
                 ErrorDescription = "Google sign-in validation is temporarily unavailable"
             };
         }
-        catch (Exception ex) when (ex is InvalidJwtException or FormatException or JsonException)
+        catch (Exception ex) when (ex is InvalidJwtException or FormatException or JsonException or Newtonsoft.Json.JsonException)
         {
             logger.LogWarning("Google identity credential validation failed with {FailureType}", ex.GetType().Name);
             return InvalidCredential();
@@ -93,6 +98,32 @@ public sealed class GoogleIdentityTokenValidator(
 
         if (string.IsNullOrWhiteSpace(payload.Subject) ||
             string.IsNullOrWhiteSpace(payload.Email))
+        {
+            return InvalidCredential();
+        }
+
+        if (!NonceMatches(expectedNonce, payload.Nonce))
+        {
+            logger.LogWarning("Google identity credential rejected because its nonce did not match the issued exchange nonce");
+            return InvalidCredential();
+        }
+
+        var audiences = payload.Audiences
+            .Where(audience => !string.IsNullOrWhiteSpace(audience))
+            .ToArray();
+        if (audiences.Length == 0 ||
+            !audiences.Any(audience => allowedAudiences.Contains(audience, StringComparer.Ordinal)))
+        {
+            return InvalidCredential();
+        }
+
+        if (audiences.Length > 1 && string.IsNullOrWhiteSpace(payload.AuthorizedParty))
+        {
+            return InvalidCredential();
+        }
+
+        if (!string.IsNullOrWhiteSpace(payload.AuthorizedParty) &&
+            !allowedAudiences.Contains(payload.AuthorizedParty, StringComparer.Ordinal))
         {
             return InvalidCredential();
         }
@@ -176,4 +207,16 @@ public sealed class GoogleIdentityTokenValidator(
         ErrorCode = "invalid_google_credential",
         ErrorDescription = "Google credential is invalid or expired"
     };
+
+    private static bool NonceMatches(string expectedNonce, string? tokenNonce)
+    {
+        if (string.IsNullOrWhiteSpace(tokenNonce))
+        {
+            return false;
+        }
+
+        var expectedHash = SHA256.HashData(Encoding.UTF8.GetBytes(expectedNonce));
+        var actualHash = SHA256.HashData(Encoding.UTF8.GetBytes(tokenNonce));
+        return CryptographicOperations.FixedTimeEquals(expectedHash, actualHash);
+    }
 }

@@ -127,6 +127,7 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
             string credential,
             string application,
             GoogleIdentityExchangeType exchangeType,
+            string expectedNonce,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(credential) || string.IsNullOrWhiteSpace(application))
