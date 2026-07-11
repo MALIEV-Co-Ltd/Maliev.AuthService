@@ -1,356 +1,287 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
+using Fido2NetLib;
+using Fido2NetLib.Objects;
 using Maliev.AuthService.Application.DTOs.Request;
 using Maliev.AuthService.Application.DTOs.Response;
 using Maliev.AuthService.Application.Interfaces;
 using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Infrastructure.DbContexts;
-using Maliev.MessagingContracts;
-using Maliev.MessagingContracts.Contracts.Auth;
-using MassTransit;
+using Maliev.AuthService.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Maliev.AuthService.Infrastructure.Services;
 
 /// <summary>
-/// Implements WebAuthn passkey registration, authentication, and credential management.
+/// Orchestrates caller-bound, single-use WebAuthn passkey authentication.
 /// </summary>
-public class PasskeyService : IPasskeyService
+public sealed class PasskeyService(
+    AuthDbContext dbContext,
+    IPasskeyCeremonyStore ceremonyStore,
+    IPasskeyAssertionVerifier assertionVerifier,
+    IFido2 fido2,
+    IOptions<PasskeyWebAuthnOptions> options,
+    TimeProvider timeProvider,
+    ILogger<PasskeyService> logger) : IPasskeyService
 {
-    private const int MaxPasskeysPerPrincipal = 10;
-    private const int ChallengeTtlMinutes = 5;
-    private const string ChallengeKeyPrefix = "passkey:challenge:";
+    private const int VerifiedRegistrationVersion = 1;
+    private readonly PasskeyWebAuthnOptions _options = options.Value;
 
-    private readonly AuthDbContext _dbContext;
-    private readonly IDistributedCache _cache;
-    private readonly IPublishEndpoint _publishEndpoint;
-    private readonly IConfiguration _configuration;
-    private readonly ILogger<PasskeyService> _logger;
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="PasskeyService"/> class.
-    /// </summary>
-    /// <param name="dbContext">The database context.</param>
-    /// <param name="cache">The distributed cache for challenge storage.</param>
-    /// <param name="publishEndpoint">The publish endpoint for events.</param>
-    /// <param name="configuration">The application configuration.</param>
-    /// <param name="logger">The logger instance.</param>
-    public PasskeyService(
-        AuthDbContext dbContext,
-        IDistributedCache cache,
-        IPublishEndpoint publishEndpoint,
-        IConfiguration configuration,
-        ILogger<PasskeyService> logger)
+    /// <inheritdoc />
+    public async Task<PasskeyAuthBeginResponse?> BeginAuthenticationAsync(
+        PasskeyAuthBeginRequest request,
+        string serviceName,
+        CancellationToken ct)
     {
-        _dbContext = dbContext;
-        _cache = cache;
-        _publishEndpoint = publishEndpoint;
-        _configuration = configuration;
-        _logger = logger;
-    }
-
-    /// <inheritdoc/>
-    public async Task<PasskeyRegistrationBeginResponse> BeginRegistrationAsync(Guid principalId, CancellationToken ct)
-    {
-        var principal = await _dbContext.UserPrincipals
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Id == principalId, ct);
-
-        if (principal == null)
+        if (!_options.Enabled ||
+            request.PrincipalId.HasValue ||
+            string.IsNullOrWhiteSpace(request.Application) ||
+            string.IsNullOrWhiteSpace(serviceName) ||
+            !TryResolveBinding(
+                request.Application,
+                serviceName,
+                out var application,
+                out var expectedUserType))
         {
-            throw new InvalidOperationException($"Principal {principalId} not found");
+            return null;
         }
 
-        var challenge = RandomNumberGenerator.GetBytes(32);
-        var challengeB64 = Base64UrlEncode(challenge);
-
-        var cacheKey = $"{ChallengeKeyPrefix}{principalId}";
-        var cacheOptions = new DistributedCacheEntryOptions
+        var assertionOptions = fido2.GetAssertionOptions(new GetAssertionOptionsParams
         {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(ChallengeTtlMinutes)
-        };
-        await _cache.SetStringAsync(cacheKey, challengeB64, cacheOptions, ct);
-
-        _logger.LogInformation("Passkey registration challenge created for principal {PrincipalId}", principalId);
-
-        var rpId = _configuration["Passkey:RpId"] ?? "localhost";
-        var rpName = _configuration["Passkey:RpName"] ?? "MALIEV";
-        var userIdBytes = Encoding.UTF8.GetBytes(principalId.ToString());
-        var userIdB64 = Base64UrlEncode(userIdBytes);
-
-        var pubKeyCredParams = JsonSerializer.SerializeToElement(new[]
-        {
-            new { type = "public-key", alg = -7 },
-            new { type = "public-key", alg = -257 }
+            AllowedCredentials = [],
+            UserVerification = UserVerificationRequirement.Required,
+            Extensions = null
         });
+        var issued = await ceremonyStore.IssueAsync(
+            serviceName,
+            application,
+            expectedUserType,
+            assertionOptions.ToJson(),
+            assertionOptions.Challenge,
+            ct);
 
-        var authenticatorSelection = JsonSerializer.SerializeToElement(new
-        {
-            authenticatorAttachment = "platform",
-            residentKey = "preferred",
-            userVerification = "preferred"
-        });
-
-        var attestation = JsonSerializer.SerializeToElement("none");
-
-        return new PasskeyRegistrationBeginResponse(
-            RpId: rpId,
-            RpName: rpName,
-            UserId: userIdB64,
-            UserName: principal.Email,
-            UserDisplayName: $"{principal.FirstName} {principal.LastName}",
-            Challenge: JsonSerializer.SerializeToElement(challengeB64),
-            PubKeyCredParams: pubKeyCredParams,
-            AuthenticatorSelection: authenticatorSelection,
-            Attestation: attestation,
-            Extensions: null);
-    }
-
-    /// <inheritdoc/>
-    public async Task<PasskeyRegistrationCompleteResponse> CompleteRegistrationAsync(PasskeyRegistrationCompleteRequest request, CancellationToken ct)
-    {
-        var cacheKey = $"{ChallengeKeyPrefix}{request.PrincipalId}";
-        var cachedChallenge = await _cache.GetStringAsync(cacheKey, ct);
-
-        if (string.IsNullOrEmpty(cachedChallenge))
-        {
-            _logger.LogWarning("No active challenge found for principal {PrincipalId}", request.PrincipalId);
-            return new PasskeyRegistrationCompleteResponse(false, "Challenge expired or not found");
-        }
-
-        var credentialExists = await _dbContext.PasskeyCredentials
-            .AnyAsync(c => c.CredentialId == request.CredentialId, ct);
-
-        if (credentialExists)
-        {
-            _logger.LogWarning("Duplicate credential ID {CredentialId}", request.CredentialId);
-            return new PasskeyRegistrationCompleteResponse(false, "Credential already registered");
-        }
-
-        var credentialCount = await _dbContext.PasskeyCredentials
-            .CountAsync(c => c.PrincipalId == request.PrincipalId, ct);
-
-        if (credentialCount >= MaxPasskeysPerPrincipal)
-        {
-            _logger.LogWarning("Max passkeys reached for principal {PrincipalId}", request.PrincipalId);
-            return new PasskeyRegistrationCompleteResponse(false, $"Maximum of {MaxPasskeysPerPrincipal} passkeys reached");
-        }
-
-        var credential = new PasskeyCredential
-        {
-            Id = Guid.NewGuid(),
-            PrincipalId = request.PrincipalId,
-            CredentialId = request.CredentialId,
-            PublicKey = request.PublicKey,
-            DeviceName = request.DeviceName,
-            Aaguid = request.Aaguid,
-            SignCount = 0,
-            CreatedAtUtc = DateTime.UtcNow,
-            LastUsedAtUtc = null
-        };
-
-        _dbContext.PasskeyCredentials.Add(credential);
-        await _dbContext.SaveChangesAsync(ct);
-
-        await _cache.RemoveAsync(cacheKey, ct);
-
-        _logger.LogInformation("Passkey credential {CredentialId} registered for principal {PrincipalId}", request.CredentialId, request.PrincipalId);
-
-        await _publishEndpoint.Publish(new PasskeyRegisteredEvent(
-            MessageId: Guid.NewGuid(),
-            MessageName: "PasskeyRegisteredEvent",
-            MessageType: MessageType.Event,
-            MessageVersion: "1.0.0",
-            PublishedBy: "AuthService",
-            ConsumedBy: new[] { "NotificationService" },
-            CorrelationId: Guid.NewGuid(),
-            CausationId: null,
-            OccurredAtUtc: DateTimeOffset.UtcNow,
-            IsPublic: false,
-            Payload: new PasskeyRegisteredEventPayload(
-                PrincipalId: request.PrincipalId,
-                CredentialId: request.CredentialId,
-                DeviceName: request.DeviceName,
-                RegisteredAt: DateTimeOffset.UtcNow
-            )
-        ), ct);
-
-        return new PasskeyRegistrationCompleteResponse(true, null);
-    }
-
-    /// <inheritdoc/>
-    public async Task<PasskeyAuthBeginResponse> BeginAuthenticationAsync(Guid? principalId, CancellationToken ct)
-    {
-        var challenge = RandomNumberGenerator.GetBytes(32);
-        var challengeB64 = Base64UrlEncode(challenge);
-
-        var cacheKey = principalId.HasValue
-            ? $"{ChallengeKeyPrefix}{principalId.Value}"
-            : $"{ChallengeKeyPrefix}anonymous:{Guid.NewGuid()}";
-        var cacheOptions = new DistributedCacheEntryOptions
-        {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(ChallengeTtlMinutes)
-        };
-        await _cache.SetStringAsync(cacheKey, challengeB64, cacheOptions, ct);
-
-        _logger.LogInformation("Passkey authentication challenge created for principal {PrincipalId}", principalId);
-
-        var rpId = _configuration["Passkey:RpId"] ?? "localhost";
-
-        if (principalId.HasValue)
-        {
-            var credentials = await _dbContext.PasskeyCredentials
-                .AsNoTracking()
-                .Where(c => c.PrincipalId == principalId.Value)
-                .Select(c => new { c.CredentialId })
-                .ToListAsync(ct);
-
-            var allowCredentials = credentials.Select(c => new
-            {
-                type = "public-key",
-                id = c.CredentialId
-            }).ToArray();
-
-            var allowCredentialsElement = JsonSerializer.SerializeToElement(allowCredentials);
-
-            return new PasskeyAuthBeginResponse(
-                RpId: rpId,
-                Challenge: JsonSerializer.SerializeToElement(challengeB64),
-                AllowCredentials: allowCredentialsElement,
-                UserVerification: "preferred");
-        }
-
-        var emptyAllowCredentials = JsonSerializer.SerializeToElement(Array.Empty<object>());
-
+        logger.LogInformation(
+            "Issued passkey assertion ceremony for application {Application}",
+            application);
         return new PasskeyAuthBeginResponse(
-            RpId: rpId,
-            Challenge: JsonSerializer.SerializeToElement(challengeB64),
-            AllowCredentials: emptyAllowCredentials,
-            UserVerification: "required");
+            issued.FlowId,
+            issued.ExpiresAtUtc,
+            assertionOptions.RpId ?? _options.RpId,
+            ToBase64Url(assertionOptions.Challenge),
+            [],
+            "required",
+            assertionOptions.Timeout);
     }
 
-    /// <inheritdoc/>
-    public async Task<PasskeyAuthCompleteResponse> CompleteAuthenticationAsync(PasskeyAuthCompleteRequest request, CancellationToken ct)
+    /// <inheritdoc />
+    public async Task<PasskeyAuthCompleteResponse> CompleteAuthenticationAsync(
+        PasskeyAuthCompleteRequest request,
+        string serviceName,
+        CancellationToken ct)
     {
-        var credential = await _dbContext.PasskeyCredentials
-            .FirstOrDefaultAsync(c => c.CredentialId == request.CredentialId, ct);
-
-        if (credential == null)
+        if (!_options.Enabled)
         {
-            _logger.LogWarning("Credential not found: {CredentialId}", request.CredentialId);
-            return new PasskeyAuthCompleteResponse(false, "Credential not found", null, null);
+            return Failed("passkey_unavailable");
         }
 
-        var verified = VerifySignature(
-            request.AuthenticatorData,
-            request.ClientDataJson,
-            request.Signature,
-            credential.PublicKey);
-
-        if (!verified)
+        if (!TryResolveBinding(
+                request.Application,
+                serviceName,
+                out var application,
+                out _))
         {
-            _logger.LogWarning("Signature verification failed for credential {CredentialId}", request.CredentialId);
-            return new PasskeyAuthCompleteResponse(false, "Invalid signature", null, null);
+            return Failed("passkey_identity_invalid");
         }
 
-        credential.SignCount++;
-        credential.LastUsedAtUtc = DateTime.UtcNow;
-        await _dbContext.SaveChangesAsync(ct);
-
-        var principal = await _dbContext.UserPrincipals
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Id == credential.PrincipalId, ct);
-
-        _logger.LogInformation("Passkey authentication successful for principal {PrincipalId}", credential.PrincipalId);
-
-        return new PasskeyAuthCompleteResponse(true, null, credential.PrincipalId, principal?.Email);
-    }
-
-    /// <inheritdoc/>
-    public async Task<PasskeyListResponse> ListCredentialsAsync(Guid principalId, CancellationToken ct)
-    {
-        var credentials = await _dbContext.PasskeyCredentials
-            .AsNoTracking()
-            .Where(c => c.PrincipalId == principalId)
-            .OrderByDescending(c => c.CreatedAtUtc)
-            .Select(c => new PasskeyCredentialListItem(
-                c.Id,
-                c.DeviceName,
-                c.Aaguid,
-                c.CreatedAtUtc,
-                c.LastUsedAtUtc))
-            .ToListAsync(ct);
-
-        return new PasskeyListResponse(credentials);
-    }
-
-    /// <inheritdoc/>
-    public async Task<bool> DeleteCredentialAsync(Guid credentialId, Guid principalId, CancellationToken ct)
-    {
-        var credential = await _dbContext.PasskeyCredentials
-            .FirstOrDefaultAsync(c => c.Id == credentialId && c.PrincipalId == principalId, ct);
-
-        if (credential == null)
+        var ceremony = await ceremonyStore.ConsumeAsync(
+            request.FlowId,
+            serviceName,
+            application,
+            ct);
+        if (ceremony is null)
         {
-            _logger.LogWarning("Credential {CredentialId} not found for principal {PrincipalId}", credentialId, principalId);
+            logger.LogWarning(
+                "Rejected missing, expired, replayed, or caller-mismatched passkey ceremony for application {Application}",
+                NormalizeForLog(request.Application));
+            return Failed("passkey_identity_invalid");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.CredentialId) || request.CredentialId.Length > 1366)
+        {
+            return Failed("passkey_identity_invalid");
+        }
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var credential = await FindVerifiedCredentialAsync(request.CredentialId, ct);
+            if (credential is null ||
+                !TryDecodeCanonicalBase64Url(credential.CredentialId, out var storedCredentialId))
+            {
+                return Failed("passkey_identity_invalid");
+            }
+
+            var principal = await dbContext.UserPrincipals
+                .AsNoTracking()
+                .Where(candidate =>
+                    candidate.Id == credential.PrincipalId &&
+                    candidate.UserType == ceremony.ExpectedUserType)
+                .Select(candidate => new { candidate.Id, candidate.Email })
+                .SingleOrDefaultAsync(ct);
+            if (principal is null)
+            {
+                return Failed("passkey_identity_invalid");
+            }
+
+            var verification = await assertionVerifier.VerifyAsync(
+                new PasskeyAssertionVerificationInput(
+                    ceremony.AssertionOptionsJson,
+                    request.CredentialId,
+                    request.AuthenticatorData,
+                    request.ClientDataJson,
+                    request.Signature,
+                    request.UserHandle,
+                    storedCredentialId,
+                    credential.PublicKeyCose!,
+                    credential.UserHandle!,
+                    checked((uint)credential.VerifiedSignCount!.Value),
+                    credential.IsBackupEligible!.Value),
+                ct);
+            if (!verification.Success)
+            {
+                logger.LogWarning(
+                    "Passkey assertion failed with category {FailureCategory}",
+                    verification.Failure);
+                return Failed("passkey_identity_invalid");
+            }
+
+            credential.VerifiedSignCount = verification.SignCount;
+            credential.IsBackedUp = verification.IsBackedUp;
+            credential.LastUsedAtUtc = timeProvider.GetUtcNow().UtcDateTime;
+            try
+            {
+                await dbContext.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (attempt == 0)
+                {
+                    dbContext.Entry(credential).State = EntityState.Detached;
+                    continue;
+                }
+
+                logger.LogWarning("Passkey assertion state update failed due to concurrent credential use");
+                return Failed("passkey_temporarily_unavailable");
+            }
+
+            logger.LogInformation("Passkey assertion completed successfully");
+            return new PasskeyAuthCompleteResponse(true, null, principal.Id, principal.Email);
+        }
+
+        logger.LogWarning("Passkey assertion state update failed due to concurrent credential use");
+        return Failed("passkey_temporarily_unavailable");
+    }
+
+    private Task<PasskeyCredential?> FindVerifiedCredentialAsync(
+        string credentialId,
+        CancellationToken cancellationToken) =>
+        dbContext.PasskeyCredentials.SingleOrDefaultAsync(
+            credential =>
+                credential.CredentialId == credentialId &&
+                credential.RegistrationVerificationVersion == VerifiedRegistrationVersion &&
+                credential.PublicKeyCose != null &&
+                credential.UserHandle != null &&
+                credential.VerifiedSignCount != null &&
+                credential.IsBackupEligible != null &&
+                credential.IsBackedUp != null,
+            cancellationToken);
+
+    private static PasskeyAuthCompleteResponse Failed(string code) =>
+        new(false, code, null, null);
+
+    private bool TryResolveBinding(
+        string? requestedApplication,
+        string? serviceName,
+        out string application,
+        out UserType expectedUserType)
+    {
+        application = NormalizeForBoundary(requestedApplication);
+        expectedUserType = default;
+        if (application.Length == 0 || string.IsNullOrWhiteSpace(serviceName))
+        {
             return false;
         }
 
-        _dbContext.PasskeyCredentials.Remove(credential);
-        await _dbContext.SaveChangesAsync(ct);
+        if (!_options.Bindings.TryGetValue(application, out var binding) ||
+            binding is null ||
+            !string.Equals(
+                binding.ServiceName,
+                serviceName.Trim(),
+                StringComparison.OrdinalIgnoreCase) ||
+            binding.PrincipalType is not (UserType.Customer or UserType.Employee))
+        {
+            return false;
+        }
 
-        _logger.LogInformation("Credential {CredentialId} deleted for principal {PrincipalId}", credentialId, principalId);
-
+        expectedUserType = binding.PrincipalType;
         return true;
     }
 
-    private static bool VerifySignature(string authenticatorDataB64, string clientDataJsonB64, string signatureB64, string publicKeyPem)
+    private static string NormalizeForLog(string? application)
     {
+        if (string.IsNullOrWhiteSpace(application))
+        {
+            return "missing";
+        }
+
+        var normalized = application.Trim().ToLowerInvariant();
+        return normalized.Length <= 64 &&
+            normalized.All(character => character is >= 'a' and <= 'z' or >= '0' and <= '9' or '-')
+            ? normalized
+            : "invalid";
+    }
+
+    private static string NormalizeForBoundary(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized.Length <= 64 &&
+            normalized.All(character =>
+                character is >= 'a' and <= 'z' or >= '0' and <= '9' or '-')
+            ? normalized
+            : string.Empty;
+    }
+
+    private static bool TryDecodeCanonicalBase64Url(string value, out byte[] decoded)
+    {
+        decoded = [];
+        if (string.IsNullOrWhiteSpace(value) ||
+            value.Length > 1366 ||
+            value.Contains('=') ||
+            value.Contains('+') ||
+            value.Contains('/'))
+        {
+            return false;
+        }
+
         try
         {
-            var authenticatorData = Base64UrlDecode(authenticatorDataB64);
-            var clientDataJson = Base64UrlDecode(clientDataJsonB64);
-            var clientDataHash = SHA256.HashData(clientDataJson);
-            var signedData = new byte[authenticatorData.Length + clientDataHash.Length];
-            Buffer.BlockCopy(authenticatorData, 0, signedData, 0, authenticatorData.Length);
-            Buffer.BlockCopy(clientDataHash, 0, signedData, authenticatorData.Length, clientDataHash.Length);
-            var signature = Base64UrlDecode(signatureB64);
-
-            using var ecdsa = ECDsa.Create();
-            ecdsa.ImportFromPem(publicKeyPem);
-            return ecdsa.VerifyData(signedData, signature, HashAlgorithmName.SHA256);
+            var padded = value.Replace('-', '+').Replace('_', '/');
+            padded += new string('=', (4 - padded.Length % 4) % 4);
+            decoded = Convert.FromBase64String(padded);
+            return decoded is { Length: >= 1 and <= 1024 } &&
+                string.Equals(ToBase64Url(decoded), value, StringComparison.Ordinal);
         }
-        catch
+        catch (FormatException)
         {
+            decoded = [];
             return false;
         }
     }
 
-    private static string Base64UrlEncode(byte[] data)
-    {
-        return Convert.ToBase64String(data)
-            .Replace('+', '-')
-            .Replace('/', '_')
-            .TrimEnd('=');
-    }
-
-    private static byte[] Base64UrlDecode(string base64Url)
-    {
-        var padded = base64Url.Replace('-', '+').Replace('_', '/');
-        switch (padded.Length % 4)
-        {
-            case 2:
-                padded += "==";
-                break;
-            case 3:
-                padded += "=";
-                break;
-        }
-
-        return Convert.FromBase64String(padded);
-    }
+    private static string ToBase64Url(byte[] value) =>
+        Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 }

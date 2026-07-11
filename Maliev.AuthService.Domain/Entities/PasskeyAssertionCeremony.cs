@@ -23,6 +23,9 @@ public sealed class PasskeyAssertionCeremony
     /// <summary>Gets or sets the normalized MALIEV application audience.</summary>
     public string Application { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets the principal audience permitted to complete the ceremony.</summary>
+    public UserType ExpectedUserType { get; set; }
+
     /// <summary>Gets or sets the UTC creation timestamp.</summary>
     public DateTime CreatedAtUtc { get; set; }
 

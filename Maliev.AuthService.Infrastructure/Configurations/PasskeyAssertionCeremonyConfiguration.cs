@@ -19,10 +19,16 @@ public sealed class PasskeyAssertionCeremonyConfiguration : IEntityTypeConfigura
         builder.Property(ceremony => ceremony.AssertionOptionsJson).HasColumnType("jsonb").IsRequired();
         builder.Property(ceremony => ceremony.ServiceName).HasMaxLength(128).IsRequired();
         builder.Property(ceremony => ceremony.Application).HasMaxLength(64).IsRequired();
+        builder.Property(ceremony => ceremony.ExpectedUserType)
+            .HasColumnName("expected_user_type")
+            .IsRequired();
         builder.Property(ceremony => ceremony.CreatedAtUtc).IsRequired();
         builder.Property(ceremony => ceremony.ExpiresAtUtc).IsRequired();
         builder.HasIndex(ceremony => ceremony.FlowIdHash).IsUnique();
         builder.HasIndex(ceremony => ceremony.ChallengeHash).IsUnique();
         builder.HasIndex(ceremony => ceremony.ExpiresAtUtc);
+        builder.ToTable(table => table.HasCheckConstraint(
+            "ck_passkey_assertion_ceremonies_expected_user_type",
+            "expected_user_type IN (1, 2)"));
     }
 }

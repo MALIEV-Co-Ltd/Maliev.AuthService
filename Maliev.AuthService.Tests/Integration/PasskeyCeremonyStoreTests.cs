@@ -1,3 +1,4 @@
+using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Infrastructure.Security;
 using Maliev.AuthService.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -48,6 +49,7 @@ public sealed class PasskeyCeremonyStoreTests : IClassFixture<TestDatabaseFixtur
         var issued = await store.IssueAsync(
             ServiceName,
             Application,
+            UserType.Customer,
             "{\"challenge\":\"server-owned\"}",
             new byte[32],
             CancellationToken.None);
@@ -64,6 +66,7 @@ public sealed class PasskeyCeremonyStoreTests : IClassFixture<TestDatabaseFixtur
             CancellationToken.None);
 
         Assert.NotNull(first);
+        Assert.Equal(UserType.Customer, first.ExpectedUserType);
         using var options = JsonDocument.Parse(first.AssertionOptionsJson);
         Assert.Equal("server-owned", options.RootElement.GetProperty("challenge").GetString());
         Assert.Null(replay);
@@ -83,6 +86,7 @@ public sealed class PasskeyCeremonyStoreTests : IClassFixture<TestDatabaseFixtur
         var issued = await store.IssueAsync(
             ServiceName,
             Application,
+            UserType.Customer,
             "{\"challenge\":\"bound\"}",
             Enumerable.Repeat((byte)7, 32).ToArray(),
             CancellationToken.None);
@@ -111,6 +115,7 @@ public sealed class PasskeyCeremonyStoreTests : IClassFixture<TestDatabaseFixtur
         var issued = await store.IssueAsync(
             ServiceName,
             Application,
+            UserType.Customer,
             "{\"challenge\":\"expired\"}",
             Enumerable.Repeat((byte)9, 32).ToArray(),
             CancellationToken.None);
@@ -135,6 +140,7 @@ public sealed class PasskeyCeremonyStoreTests : IClassFixture<TestDatabaseFixtur
         var issued = await store.IssueAsync(
             ServiceName,
             Application,
+            UserType.Customer,
             "{\"challenge\":\"hashed\"}",
             challenge,
             CancellationToken.None);
@@ -147,6 +153,7 @@ public sealed class PasskeyCeremonyStoreTests : IClassFixture<TestDatabaseFixtur
         Assert.DoesNotContain(Convert.ToBase64String(challenge), record.ChallengeHash, StringComparison.Ordinal);
         Assert.Equal(ServiceName.ToLowerInvariant(), record.ServiceName);
         Assert.Equal(Application, record.Application);
+        Assert.Equal(UserType.Customer, record.ExpectedUserType);
     }
 
     /// <summary>Verifies two concurrent requests produce exactly one ceremony winner.</summary>
@@ -160,6 +167,7 @@ public sealed class PasskeyCeremonyStoreTests : IClassFixture<TestDatabaseFixtur
             var issued = await issueStore.IssueAsync(
                 ServiceName,
                 Application,
+                UserType.Customer,
                 "{\"challenge\":\"concurrent\"}",
                 Enumerable.Repeat((byte)11, 32).ToArray(),
                 CancellationToken.None);

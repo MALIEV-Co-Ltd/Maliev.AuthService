@@ -26,7 +26,7 @@ public sealed class PasskeyEndpointContainmentTests
     public async Task BeginPasskeyRegistration_WhenRegistrationIsUnavailable_ReturnsServiceUnavailableWithoutInvokingService()
     {
         var passkeyService = CreatePasskeyServiceMock();
-        var controller = CreateController(passkeyService.Object);
+        var controller = CreateController();
 
         var result = await controller.BeginPasskeyRegistration(
             new PasskeyRegistrationBeginRequest { PrincipalId = Guid.NewGuid() },
@@ -43,7 +43,7 @@ public sealed class PasskeyEndpointContainmentTests
     public async Task CompletePasskeyRegistration_WhenRegistrationIsUnavailable_ReturnsServiceUnavailableWithoutInvokingService()
     {
         var passkeyService = CreatePasskeyServiceMock();
-        var controller = CreateController(passkeyService.Object);
+        var controller = CreateController();
 
         var result = await controller.CompletePasskeyRegistration(
             new PasskeyRegistrationCompleteRequest
@@ -66,7 +66,7 @@ public sealed class PasskeyEndpointContainmentTests
     public async Task ListPasskeyCredentials_WhenRegistrationIsUnavailable_ReturnsServiceUnavailableWithoutInvokingService()
     {
         var passkeyService = CreatePasskeyServiceMock();
-        var controller = CreateController(passkeyService.Object);
+        var controller = CreateController();
 
         var result = await controller.ListPasskeyCredentials(Guid.NewGuid(), CancellationToken.None);
 
@@ -81,7 +81,7 @@ public sealed class PasskeyEndpointContainmentTests
     public async Task DeletePasskeyCredential_WhenRegistrationIsUnavailable_ReturnsServiceUnavailableWithoutInvokingService()
     {
         var passkeyService = CreatePasskeyServiceMock();
-        var controller = CreateController(passkeyService.Object);
+        var controller = CreateController();
 
         var result = await controller.DeletePasskeyCredential(
             Guid.NewGuid(),
@@ -92,20 +92,36 @@ public sealed class PasskeyEndpointContainmentTests
         passkeyService.VerifyNoOtherCalls();
     }
 
+    /// <summary>Verifies the legacy v1 authentication routes stay present but fail closed.</summary>
+    [Fact]
+    public void LegacyPasskeyAuthentication_WhenCalled_ReturnsServiceUnavailable()
+    {
+        var controller = CreateController();
+
+        var begin = controller.BeginPasskeyAuthentication(CancellationToken.None);
+        var complete = controller.CompletePasskeyAuthentication(CancellationToken.None);
+
+        AssertAuthenticationUnavailable(begin);
+        AssertAuthenticationUnavailable(complete);
+    }
+
     /// <summary>
     /// Verifies every passkey endpoint is restricted to trusted identity-exchange callers.
     /// </summary>
+    /// <param name="controllerType">The controller that owns the action.</param>
     /// <param name="methodName">The controller action name.</param>
     [Theory]
-    [InlineData(nameof(AuthenticationController.BeginPasskeyRegistration))]
-    [InlineData(nameof(AuthenticationController.CompletePasskeyRegistration))]
-    [InlineData(nameof(AuthenticationController.BeginPasskeyAuthentication))]
-    [InlineData(nameof(AuthenticationController.CompletePasskeyAuthentication))]
-    [InlineData(nameof(AuthenticationController.ListPasskeyCredentials))]
-    [InlineData(nameof(AuthenticationController.DeletePasskeyCredential))]
-    public void PasskeyAction_RequiresIdentityExchangePermission(string methodName)
+    [InlineData(typeof(AuthenticationController), nameof(AuthenticationController.BeginPasskeyRegistration))]
+    [InlineData(typeof(AuthenticationController), nameof(AuthenticationController.CompletePasskeyRegistration))]
+    [InlineData(typeof(AuthenticationController), nameof(AuthenticationController.BeginPasskeyAuthentication))]
+    [InlineData(typeof(AuthenticationController), nameof(AuthenticationController.CompletePasskeyAuthentication))]
+    [InlineData(typeof(AuthenticationController), nameof(AuthenticationController.ListPasskeyCredentials))]
+    [InlineData(typeof(AuthenticationController), nameof(AuthenticationController.DeletePasskeyCredential))]
+    [InlineData(typeof(PasskeyAuthenticationController), nameof(PasskeyAuthenticationController.Begin))]
+    [InlineData(typeof(PasskeyAuthenticationController), nameof(PasskeyAuthenticationController.Complete))]
+    public void PasskeyAction_RequiresIdentityExchangePermission(Type controllerType, string methodName)
     {
-        var method = typeof(AuthenticationController).GetMethod(methodName);
+        var method = controllerType.GetMethod(methodName);
 
         var permission = method?.GetCustomAttribute<RequirePermissionAttribute>();
 
@@ -113,12 +129,11 @@ public sealed class PasskeyEndpointContainmentTests
         Assert.Equal(AuthPermissions.ExchangeIdentities, permission.Permission);
     }
 
-    private static AuthenticationController CreateController(IPasskeyService passkeyService)
+    private static AuthenticationController CreateController()
     {
         return new AuthenticationController(
             Mock.Of<IAuthenticationService>(),
             Mock.Of<IEmailVerificationService>(),
-            passkeyService,
             Mock.Of<IGoogleIdentityNonceService>(),
             new ConfigurationBuilder().Build(),
             NullLogger<AuthenticationController>.Instance);
@@ -126,21 +141,7 @@ public sealed class PasskeyEndpointContainmentTests
 
     private static Mock<IPasskeyService> CreatePasskeyServiceMock()
     {
-        var mock = new Mock<IPasskeyService>();
-        mock.Setup(service => service.BeginRegistrationAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((PasskeyRegistrationBeginResponse)null!);
-        mock.Setup(service => service.CompleteRegistrationAsync(
-                It.IsAny<PasskeyRegistrationCompleteRequest>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PasskeyRegistrationCompleteResponse(true, null));
-        mock.Setup(service => service.ListCredentialsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PasskeyListResponse([]));
-        mock.Setup(service => service.DeleteCredentialAsync(
-                It.IsAny<Guid>(),
-                It.IsAny<Guid>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
-        return mock;
+        return new Mock<IPasskeyService>();
     }
 
     private static void AssertRegistrationUnavailable(IActionResult actionResult)
@@ -149,5 +150,13 @@ public sealed class PasskeyEndpointContainmentTests
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
         var error = Assert.IsType<ErrorResponse>(result.Value);
         Assert.Equal("passkey_registration_unavailable", error.Error);
+    }
+
+    private static void AssertAuthenticationUnavailable(IActionResult actionResult)
+    {
+        var result = Assert.IsType<ObjectResult>(actionResult);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, result.StatusCode);
+        var error = Assert.IsType<ErrorResponse>(result.Value);
+        Assert.Equal("passkey_authentication_unavailable", error.Error);
     }
 }

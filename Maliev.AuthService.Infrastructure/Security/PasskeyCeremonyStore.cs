@@ -24,12 +24,20 @@ public sealed class PasskeyCeremonyStore(
     public async Task<PasskeyCeremonyIssue> IssueAsync(
         string serviceName,
         string application,
+        UserType expectedUserType,
         string assertionOptionsJson,
         byte[] challenge,
         CancellationToken cancellationToken)
     {
         var caller = NormalizeBounded(serviceName, 128, nameof(serviceName));
         var audience = NormalizeBounded(application, 64, nameof(application));
+        if (expectedUserType is not (UserType.Customer or UserType.Employee))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(expectedUserType),
+                "A supported principal audience is required.");
+        }
+
         if (string.IsNullOrWhiteSpace(assertionOptionsJson) || assertionOptionsJson.Length > 16_384)
         {
             throw new ArgumentException("Assertion options are required and must be bounded.", nameof(assertionOptionsJson));
@@ -54,6 +62,7 @@ public sealed class PasskeyCeremonyStore(
             AssertionOptionsJson = assertionOptionsJson,
             ServiceName = caller,
             Application = audience,
+            ExpectedUserType = expectedUserType,
             CreatedAtUtc = now,
             ExpiresAtUtc = now.Add(_lifetime)
         };
@@ -98,7 +107,8 @@ public sealed class PasskeyCeremonyStore(
             .Select(existing => new
             {
                 existing.Id,
-                existing.AssertionOptionsJson
+                existing.AssertionOptionsJson,
+                existing.ExpectedUserType
             })
             .SingleOrDefaultAsync(cancellationToken);
         if (ceremony is null)
@@ -115,7 +125,9 @@ public sealed class PasskeyCeremonyStore(
                 existing.ExpiresAtUtc > now)
             .ExecuteDeleteAsync(cancellationToken);
         return deleted == 1
-            ? new PasskeyCeremonyState(ceremony.AssertionOptionsJson)
+            ? new PasskeyCeremonyState(
+                ceremony.AssertionOptionsJson,
+                ceremony.ExpectedUserType)
             : null;
     }
 

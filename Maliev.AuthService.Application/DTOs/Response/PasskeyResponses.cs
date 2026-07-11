@@ -37,15 +37,28 @@ public record PasskeyRegistrationCompleteResponse(bool Success, string? Error);
 /// <summary>
 /// Response containing WebAuthn credential request options for authentication.
 /// </summary>
+/// <param name="FlowId">Opaque one-time ceremony identifier.</param>
+/// <param name="ExpiresAtUtc">UTC ceremony expiration.</param>
 /// <param name="RpId">Relying Party identifier.</param>
 /// <param name="Challenge">Base64URL-encoded challenge.</param>
 /// <param name="AllowCredentials">Allowed credentials for authentication.</param>
 /// <param name="UserVerification">User verification requirement.</param>
+/// <param name="Timeout">Browser ceremony timeout in milliseconds.</param>
 public record PasskeyAuthBeginResponse(
+    string FlowId,
+    DateTime ExpiresAtUtc,
     string RpId,
-    JsonElement Challenge,
-    JsonElement AllowCredentials,
-    string? UserVerification);
+    string Challenge,
+    IReadOnlyList<PasskeyAllowedCredential> AllowCredentials,
+    string UserVerification,
+    ulong Timeout);
+
+/// <summary>
+/// An allowed public-key credential descriptor returned to the browser.
+/// </summary>
+/// <param name="Type">The WebAuthn credential type.</param>
+/// <param name="Id">The Base64URL credential identifier.</param>
+public sealed record PasskeyAllowedCredential(string Type, string Id);
 
 /// <summary>
 /// Result of passkey authentication completion.

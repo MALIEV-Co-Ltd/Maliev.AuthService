@@ -55,7 +55,14 @@ public class PasskeyRegistrationCompleteRequest
 public class PasskeyAuthBeginRequest
 {
     /// <summary>
-    /// Optional principal ID for discoverable credential lookup.
+    /// Server-owned MALIEV application audience.
+    /// </summary>
+    [Required]
+    [StringLength(64, MinimumLength = 1)]
+    public string Application { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Legacy principal scope. New discoverable flows must leave this value empty.
     /// </summary>
     public Guid? PrincipalId { get; set; }
 }
@@ -66,31 +73,51 @@ public class PasskeyAuthBeginRequest
 public class PasskeyAuthCompleteRequest
 {
     /// <summary>
+    /// Server-owned MALIEV application audience.
+    /// </summary>
+    [Required]
+    [StringLength(64, MinimumLength = 1)]
+    public string Application { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Opaque one-time ceremony flow identifier.
+    /// </summary>
+    [Required]
+    [StringLength(43, MinimumLength = 43)]
+    public string FlowId { get; set; } = string.Empty;
+
+    /// <summary>
     /// WebAuthn credential ID used for authentication.
     /// </summary>
     [Required]
+    [StringLength(1366, MinimumLength = 2)]
     public string CredentialId { get; set; } = string.Empty;
 
     /// <summary>
     /// Signature produced by the authenticator.
     /// </summary>
     [Required]
+    [StringLength(2732, MinimumLength = 2)]
     public string Signature { get; set; } = string.Empty;
 
     /// <summary>
     /// Authenticator data from the assertion response.
     /// </summary>
     [Required]
+    [StringLength(5464, MinimumLength = 50)]
     public string AuthenticatorData { get; set; } = string.Empty;
 
     /// <summary>
     /// Client data JSON from the assertion response.
     /// </summary>
     [Required]
+    [StringLength(10924, MinimumLength = 3)]
     public string ClientDataJson { get; set; } = string.Empty;
 
     /// <summary>
-    /// Optional user handle for credential discovery.
+    /// Required discoverable-credential user handle.
     /// </summary>
+    [Required]
+    [StringLength(88, MinimumLength = 2)]
     public string? UserHandle { get; set; }
 }
