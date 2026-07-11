@@ -112,10 +112,9 @@ public sealed class PasskeyAuthenticationController(
             cancellationToken);
         if (!result.Success)
         {
-            var retryable = string.Equals(
-                result.Error,
-                "passkey_temporarily_unavailable",
-                StringComparison.Ordinal);
+            var retryable = result.Error is
+                "passkey_temporarily_unavailable" or
+                "passkey_unavailable";
             var statusCode = retryable
                 ? StatusCodes.Status503ServiceUnavailable
                 : StatusCodes.Status401Unauthorized;

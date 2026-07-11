@@ -113,6 +113,7 @@ public sealed class PasskeyAuthenticationControllerTests
     /// <summary>Verifies invalid identity and retryable failures have distinct generic HTTP semantics.</summary>
     [Theory]
     [InlineData("passkey_identity_invalid", StatusCodes.Status401Unauthorized)]
+    [InlineData("passkey_unavailable", StatusCodes.Status503ServiceUnavailable)]
     [InlineData("passkey_temporarily_unavailable", StatusCodes.Status503ServiceUnavailable)]
     public async Task CompletePasskeyAuthentication_FailedVerification_DoesNotReturnIdentity(
         string internalError,
