@@ -3,6 +3,7 @@ using System;
 using Maliev.AuthService.Infrastructure.DbContexts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Maliev.AuthService.Infrastructure.Migrations
 {
     [DbContext(typeof(AuthDbContext))]
-    partial class AuthDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260711083008_AddPasskeyAssertionCeremonies")]
+    partial class AddPasskeyAssertionCeremonies
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -300,10 +303,6 @@ namespace Maliev.AuthService.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
-                    b.Property<int>("ExpectedUserType")
-                        .HasColumnType("integer")
-                        .HasColumnName("expected_user_type");
-
                     b.Property<DateTime>("ExpiresAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at_utc");
@@ -334,10 +333,7 @@ namespace Maliev.AuthService.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_passkey_assertion_ceremonies_flow_id_hash");
 
-                    b.ToTable("passkey_assertion_ceremonies", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_passkey_assertion_ceremonies_expected_user_type", "expected_user_type IN (1, 2)");
-                        });
+                    b.ToTable("passkey_assertion_ceremonies", (string)null);
                 });
 
             modelBuilder.Entity("Maliev.AuthService.Domain.Entities.PasskeyCredential", b =>
@@ -370,14 +366,6 @@ namespace Maliev.AuthService.Infrastructure.Migrations
                         .HasColumnType("character varying(256)")
                         .HasColumnName("device_name");
 
-                    b.Property<bool?>("IsBackedUp")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_backed_up");
-
-                    b.Property<bool?>("IsBackupEligible")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_backup_eligible");
-
                     b.Property<DateTime?>("LastUsedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_used_at_utc");
@@ -391,28 +379,9 @@ namespace Maliev.AuthService.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("public_key");
 
-                    b.Property<byte[]>("PublicKeyCose")
-                        .HasColumnType("bytea")
-                        .HasColumnName("public_key_cose");
-
-                    b.Property<int>("RegistrationVerificationVersion")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("registration_verification_version");
-
                     b.Property<int>("SignCount")
                         .HasColumnType("integer")
                         .HasColumnName("sign_count");
-
-                    b.Property<byte[]>("UserHandle")
-                        .HasMaxLength(64)
-                        .HasColumnType("bytea")
-                        .HasColumnName("user_handle");
-
-                    b.Property<long?>("VerifiedSignCount")
-                        .HasColumnType("bigint")
-                        .HasColumnName("verified_sign_count");
 
                     b.Property<uint>("xmin")
                         .IsConcurrencyToken()
@@ -430,12 +399,7 @@ namespace Maliev.AuthService.Infrastructure.Migrations
                     b.HasIndex("PrincipalId")
                         .HasDatabaseName("idx_passkey_credentials_principal_id");
 
-                    b.ToTable("passkey_credentials", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_passkey_credentials_registration_verification_version", "registration_verification_version >= 0");
-
-                            t.HasCheckConstraint("ck_passkey_credentials_verified_sign_count", "verified_sign_count IS NULL OR (verified_sign_count >= 0 AND verified_sign_count <= 4294967295)");
-                        });
+                    b.ToTable("passkey_credentials", (string)null);
                 });
 
             modelBuilder.Entity("Maliev.AuthService.Domain.Entities.RefreshToken", b =>

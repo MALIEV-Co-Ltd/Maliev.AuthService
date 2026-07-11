@@ -20,7 +20,6 @@ public class AuthenticationController : ControllerBase
 {
     private readonly IAuthenticationService _authenticationService;
     private readonly IEmailVerificationService _emailVerificationService;
-    private readonly IPasskeyService _passkeyService;
     private readonly IGoogleIdentityNonceService _googleIdentityNonceService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<AuthenticationController> _logger;
@@ -30,21 +29,18 @@ public class AuthenticationController : ControllerBase
     /// </summary>
     /// <param name="authenticationService">The service responsible for authentication logic.</param>
     /// <param name="emailVerificationService">The service responsible for email verification.</param>
-    /// <param name="passkeyService">The service responsible for WebAuthn passkey operations.</param>
     /// <param name="googleIdentityNonceService">The one-time Google identity nonce service.</param>
     /// <param name="configuration">The application configuration.</param>
     /// <param name="logger">The logger for this controller.</param>
     public AuthenticationController(
         IAuthenticationService authenticationService,
         IEmailVerificationService emailVerificationService,
-        IPasskeyService passkeyService,
         IGoogleIdentityNonceService googleIdentityNonceService,
         IConfiguration configuration,
         ILogger<AuthenticationController> logger)
     {
         _authenticationService = authenticationService;
         _emailVerificationService = emailVerificationService;
-        _passkeyService = passkeyService;
         _googleIdentityNonceService = googleIdentityNonceService;
         _configuration = configuration;
         _logger = logger;
@@ -652,145 +648,131 @@ public class AuthenticationController : ControllerBase
     }
 
     /// <summary>
-    /// Begins WebAuthn passkey registration by generating a challenge and creation options.
+    /// Reports that passkey registration is unavailable until complete WebAuthn verification is enabled.
     /// </summary>
     /// <remarks>
-    /// Returns credential creation options needed by the client to invoke navigator.credentials.create().
-    /// The challenge is stored server-side and expires after 5 minutes.
+    /// Registration is temporarily disabled because the current implementation does not provide the
+    /// complete WebAuthn attestation and ownership verification required for safe credential enrollment.
     /// </remarks>
     /// <param name="request">The registration begin request containing the principal ID.</param>
     /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>WebAuthn credential creation options.</returns>
-    /// <response code="200">Registration challenge created successfully.</response>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Passkey registration is unavailable.</response>
     [HttpPost("passkey/register/begin")]
-    [ProducesResponseType(typeof(PasskeyRegistrationBeginResponse), StatusCodes.Status200OK)]
-    public async Task<IActionResult> BeginPasskeyRegistration([FromBody] PasskeyRegistrationBeginRequest request, CancellationToken cancellationToken)
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public Task<IActionResult> BeginPasskeyRegistration([FromBody] PasskeyRegistrationBeginRequest request, CancellationToken cancellationToken)
     {
-        var result = await _passkeyService.BeginRegistrationAsync(request.PrincipalId, cancellationToken);
-        return Ok(result);
+        return Task.FromResult<IActionResult>(PasskeyRegistrationUnavailable());
     }
 
     /// <summary>
-    /// Completes WebAuthn passkey registration by verifying and storing the credential.
+    /// Reports that passkey registration is unavailable until complete WebAuthn verification is enabled.
     /// </summary>
     /// <remarks>
-    /// Verifies the challenge, enforces max passkeys per principal, and stores the credential.
-    /// Publishes a PasskeyRegisteredEvent upon success.
+    /// Registration is temporarily disabled because the current implementation does not provide the
+    /// complete WebAuthn attestation and ownership verification required for safe credential enrollment.
     /// </remarks>
     /// <param name="request">The registration completion request with authenticator response.</param>
     /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>Registration result.</returns>
-    /// <response code="200">Passkey registered successfully.</response>
-    /// <response code="400">Registration failed (challenge expired, duplicate credential, or max reached).</response>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Passkey registration is unavailable.</response>
     [HttpPost("passkey/register/complete")]
-    [ProducesResponseType(typeof(PasskeyRegistrationCompleteResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> CompletePasskeyRegistration([FromBody] PasskeyRegistrationCompleteRequest request, CancellationToken cancellationToken)
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public Task<IActionResult> CompletePasskeyRegistration([FromBody] PasskeyRegistrationCompleteRequest request, CancellationToken cancellationToken)
     {
-        var result = await _passkeyService.CompleteRegistrationAsync(request, cancellationToken);
-
-        if (!result.Success)
-        {
-            return BadRequest(new ErrorResponse
-            {
-                Error = "registration_failed",
-                ErrorDescription = result.Error ?? "Failed to complete passkey registration"
-            });
-        }
-
-        return Ok(result);
+        return Task.FromResult<IActionResult>(PasskeyRegistrationUnavailable());
     }
 
     /// <summary>
-    /// Begins WebAuthn passkey authentication by generating a challenge and credential request options.
+    /// Reports that the legacy v1 passkey authentication flow is unavailable.
     /// </summary>
     /// <remarks>
-    /// Returns credential request options needed by the client to invoke navigator.credentials.get().
-    /// If a principal ID is provided, the allowed credentials are scoped to that principal.
+    /// The original v1 contract accepted caller-authored identity context and cannot be safely upgraded
+    /// in place. Trusted BFF callers must migrate to the additive v2 ceremony endpoints.
     /// </remarks>
-    /// <param name="request">The authentication begin request.</param>
     /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>WebAuthn credential request options.</returns>
-    /// <response code="200">Authentication challenge created successfully.</response>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Legacy passkey authentication is unavailable.</response>
     [HttpPost("passkey/auth/begin")]
-    [ProducesResponseType(typeof(PasskeyAuthBeginResponse), StatusCodes.Status200OK)]
-    public async Task<IActionResult> BeginPasskeyAuthentication([FromBody] PasskeyAuthBeginRequest request, CancellationToken cancellationToken)
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public IActionResult BeginPasskeyAuthentication(CancellationToken cancellationToken)
     {
-        var result = await _passkeyService.BeginAuthenticationAsync(request.PrincipalId, cancellationToken);
-        return Ok(result);
+        return PasskeyAuthenticationUnavailable();
     }
 
     /// <summary>
-    /// Completes WebAuthn passkey authentication by verifying the assertion signature.
+    /// Reports that the legacy v1 passkey authentication completion flow is unavailable.
     /// </summary>
     /// <remarks>
-    /// Validates the authenticator signature against the stored public key.
-    /// Updates the sign count and last used timestamp on successful verification.
+    /// The additive v2 contract binds the assertion to a service caller, application audience,
+    /// exact relying-party origin, and one-time server-owned ceremony.
     /// </remarks>
-    /// <param name="request">The authentication completion request with assertion response.</param>
     /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>Authentication result with principal information.</returns>
-    /// <response code="200">Authentication successful.</response>
-    /// <response code="401">Invalid credential or signature.</response>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Legacy passkey authentication is unavailable.</response>
     [HttpPost("passkey/auth/complete")]
-    [ProducesResponseType(typeof(PasskeyAuthCompleteResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> CompletePasskeyAuthentication([FromBody] PasskeyAuthCompleteRequest request, CancellationToken cancellationToken)
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public IActionResult CompletePasskeyAuthentication(CancellationToken cancellationToken)
     {
-        var result = await _passkeyService.CompleteAuthenticationAsync(request, cancellationToken);
-
-        if (!result.Success)
-        {
-            return Unauthorized(new ErrorResponse
-            {
-                Error = "authentication_failed",
-                ErrorDescription = result.Error ?? "Invalid credentials"
-            });
-        }
-
-        return Ok(result);
+        return PasskeyAuthenticationUnavailable();
     }
 
     /// <summary>
-    /// Lists all passkey credentials for a principal.
+    /// Reports that passkey credential management is unavailable until complete WebAuthn verification is enabled.
     /// </summary>
     /// <param name="principalId">The principal identifier.</param>
     /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>List of passkey credentials.</returns>
-    /// <response code="200">Returns the list of credentials.</response>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Passkey credential management is unavailable.</response>
     [HttpGet("passkey/credentials")]
-    [ProducesResponseType(typeof(PasskeyListResponse), StatusCodes.Status200OK)]
-    public async Task<IActionResult> ListPasskeyCredentials([FromQuery] Guid principalId, CancellationToken cancellationToken)
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public Task<IActionResult> ListPasskeyCredentials([FromQuery] Guid principalId, CancellationToken cancellationToken)
     {
-        var result = await _passkeyService.ListCredentialsAsync(principalId, cancellationToken);
-        return Ok(result);
+        return Task.FromResult<IActionResult>(PasskeyRegistrationUnavailable());
     }
 
     /// <summary>
-    /// Deletes a passkey credential.
+    /// Reports that passkey credential management is unavailable until complete WebAuthn verification is enabled.
     /// </summary>
     /// <param name="credentialId">The credential identifier.</param>
     /// <param name="principalId">The principal who owns the credential.</param>
     /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
-    /// <returns>Deletion result.</returns>
-    /// <response code="204">Credential deleted successfully.</response>
-    /// <response code="404">Credential not found.</response>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Passkey credential management is unavailable.</response>
     [HttpDelete("passkey/credentials/{credentialId}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeletePasskeyCredential(Guid credentialId, [FromQuery] Guid principalId, CancellationToken cancellationToken)
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public Task<IActionResult> DeletePasskeyCredential(Guid credentialId, [FromQuery] Guid principalId, CancellationToken cancellationToken)
     {
-        var result = await _passkeyService.DeleteCredentialAsync(credentialId, principalId, cancellationToken);
+        return Task.FromResult<IActionResult>(PasskeyRegistrationUnavailable());
+    }
 
-        if (!result)
+    private static ObjectResult PasskeyRegistrationUnavailable()
+    {
+        return new ObjectResult(new ErrorResponse
         {
-            return NotFound(new ErrorResponse
-            {
-                Error = "credential_not_found",
-                ErrorDescription = "Credential not found"
-            });
-        }
+            Error = "passkey_registration_unavailable",
+            ErrorDescription = "Passkey registration and credential management are temporarily unavailable"
+        })
+        {
+            StatusCode = StatusCodes.Status503ServiceUnavailable
+        };
+    }
 
-        return NoContent();
+    private static ObjectResult PasskeyAuthenticationUnavailable()
+    {
+        return new ObjectResult(new ErrorResponse
+        {
+            Error = "passkey_authentication_unavailable",
+            ErrorDescription = "The legacy passkey authentication contract is unavailable; use the v2 ceremony flow"
+        })
+        {
+            StatusCode = StatusCodes.Status503ServiceUnavailable
+        };
     }
 }

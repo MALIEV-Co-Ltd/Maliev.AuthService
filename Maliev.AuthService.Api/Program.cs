@@ -1,9 +1,13 @@
+using Fido2NetLib;
 using Maliev.AuthService.Api.Services;
 using Maliev.AuthService.Application.Interfaces;
+using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Infrastructure.DbContexts;
 using Maliev.AuthService.Infrastructure.HttpClients;
+using Maliev.AuthService.Infrastructure.Security;
 using Maliev.AuthService.Infrastructure.Services;
 using MassTransit;
+using Microsoft.Extensions.Options;
 
 // Initialize bootstrap logging
 using var loggerFactory = LoggerFactory.Create(logBuilder => logBuilder.AddConsole());
@@ -123,6 +127,28 @@ try
     builder.Services.AddScoped<IGoogleIdentityNonceService, GoogleIdentityNonceService>();
     builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
     builder.Services.AddScoped<IEmailVerificationService, EmailVerificationService>();
+    builder.Services.AddOptions<PasskeyWebAuthnOptions>()
+        .Bind(builder.Configuration.GetSection("Passkey"))
+        .Validate(
+            static options => !options.Enabled || IsValidPasskeyConfiguration(options),
+            "Enabled passkey authentication requires a valid RP ID, exact HTTPS origins, and bounded ceremony settings")
+        .ValidateOnStart();
+    builder.Services.AddScoped<IFido2>(services =>
+    {
+        var options = services.GetRequiredService<IOptions<PasskeyWebAuthnOptions>>().Value;
+        return new Fido2(new Fido2Configuration
+        {
+            ServerDomain = options.RpId,
+            ServerName = options.RpName,
+            Origins = options.AllowedOrigins.ToHashSet(StringComparer.Ordinal),
+            Timeout = (uint)options.TimeoutMilliseconds,
+            ChallengeSize = options.ChallengeSize,
+            BackupEligibleCredentialPolicy = Fido2Configuration.CredentialBackupPolicy.Allowed,
+            BackedUpCredentialPolicy = Fido2Configuration.CredentialBackupPolicy.Allowed
+        });
+    });
+    builder.Services.AddScoped<IPasskeyCeremonyStore, PasskeyCeremonyStore>();
+    builder.Services.AddScoped<IPasskeyAssertionVerifier, PasskeyAssertionVerifier>();
     builder.Services.AddScoped<IPasskeyService, PasskeyService>();
 
     // Build the application
@@ -159,6 +185,61 @@ finally
 {
     loggerFactory.Dispose();
 }
+
+static bool IsValidPasskeyConfiguration(PasskeyWebAuthnOptions options)
+{
+    if (string.IsNullOrWhiteSpace(options.RpId) ||
+        string.IsNullOrWhiteSpace(options.RpName) ||
+        options.AllowedOrigins is not { Count: > 0 } ||
+        options.Bindings is not { Count: > 0 } ||
+        options.TimeoutMilliseconds is < 30_000 or > 600_000 ||
+        options.ChallengeSize is < 32 or > 64 ||
+        options.CeremonyLifetimeMinutes is < 1 or > 10 ||
+        options.MaxOutstandingCeremoniesPerApplication is < 1 or > 4_096)
+    {
+        return false;
+    }
+
+    if (Uri.CheckHostName(options.RpId) == UriHostNameType.Unknown ||
+        options.Bindings.Any(binding =>
+            !IsCanonicalPasskeySelector(binding.Key, 64) ||
+            binding.Value is null ||
+            !IsBoundedPasskeyServiceName(binding.Value.ServiceName) ||
+            binding.Value.PrincipalType is not (UserType.Customer or UserType.Employee)))
+    {
+        return false;
+    }
+
+    return options.AllowedOrigins.All(origin =>
+    {
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri) ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment) ||
+            uri.AbsolutePath != "/" ||
+            !(uri.Scheme == Uri.UriSchemeHttps ||
+              uri.Scheme == Uri.UriSchemeHttp && uri.Host == "localhost"))
+        {
+            return false;
+        }
+
+        return string.Equals(uri.Host, options.RpId, StringComparison.OrdinalIgnoreCase) ||
+            uri.Host.EndsWith($".{options.RpId}", StringComparison.OrdinalIgnoreCase);
+    });
+}
+
+static bool IsCanonicalPasskeySelector(string value, int maximumLength) =>
+    value is { Length: > 0 } &&
+    value.Length <= maximumLength &&
+    string.Equals(value, value.Trim().ToLowerInvariant(), StringComparison.Ordinal) &&
+    value.All(character =>
+        character is >= 'a' and <= 'z' or >= '0' and <= '9' or '-');
+
+static bool IsBoundedPasskeyServiceName(string? value) =>
+    value is { Length: > 0 and <= 128 } &&
+    string.Equals(value, value.Trim(), StringComparison.Ordinal) &&
+    value.All(character =>
+        character is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '.');
 
 /// <summary>
 /// Main program class for the application

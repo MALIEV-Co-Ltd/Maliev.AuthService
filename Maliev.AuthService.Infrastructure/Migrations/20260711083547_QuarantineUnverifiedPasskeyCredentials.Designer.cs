@@ -3,6 +3,7 @@ using System;
 using Maliev.AuthService.Infrastructure.DbContexts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Maliev.AuthService.Infrastructure.Migrations
 {
     [DbContext(typeof(AuthDbContext))]
-    partial class AuthDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260711083547_QuarantineUnverifiedPasskeyCredentials")]
+    partial class QuarantineUnverifiedPasskeyCredentials
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -300,10 +303,6 @@ namespace Maliev.AuthService.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
-                    b.Property<int>("ExpectedUserType")
-                        .HasColumnType("integer")
-                        .HasColumnName("expected_user_type");
-
                     b.Property<DateTime>("ExpiresAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at_utc");
@@ -334,10 +333,7 @@ namespace Maliev.AuthService.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_passkey_assertion_ceremonies_flow_id_hash");
 
-                    b.ToTable("passkey_assertion_ceremonies", null, t =>
-                        {
-                            t.HasCheckConstraint("ck_passkey_assertion_ceremonies_expected_user_type", "expected_user_type IN (1, 2)");
-                        });
+                    b.ToTable("passkey_assertion_ceremonies", (string)null);
                 });
 
             modelBuilder.Entity("Maliev.AuthService.Domain.Entities.PasskeyCredential", b =>

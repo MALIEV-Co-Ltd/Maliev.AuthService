@@ -45,6 +45,9 @@ public class AuthDbContext : DbContext
     /// <summary>Gets or sets passkey credentials.</summary>
     public DbSet<PasskeyCredential> PasskeyCredentials => Set<PasskeyCredential>();
 
+    /// <summary>Gets or sets short-lived passkey assertion ceremonies.</summary>
+    public DbSet<PasskeyAssertionCeremony> PasskeyAssertionCeremonies => Set<PasskeyAssertionCeremony>();
+
     /// <summary>Gets or sets verification tokens.</summary>
     public DbSet<VerificationToken> VerificationTokens => Set<VerificationToken>();
 
