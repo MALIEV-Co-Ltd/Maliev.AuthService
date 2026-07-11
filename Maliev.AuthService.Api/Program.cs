@@ -194,7 +194,8 @@ static bool IsValidPasskeyConfiguration(PasskeyWebAuthnOptions options)
         options.Bindings is not { Count: > 0 } ||
         options.TimeoutMilliseconds is < 30_000 or > 600_000 ||
         options.ChallengeSize is < 32 or > 64 ||
-        options.CeremonyLifetimeMinutes is < 1 or > 10)
+        options.CeremonyLifetimeMinutes is < 1 or > 10 ||
+        options.MaxOutstandingCeremoniesPerApplication is < 1 or > 4_096)
     {
         return false;
     }

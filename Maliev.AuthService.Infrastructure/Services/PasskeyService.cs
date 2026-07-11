@@ -52,13 +52,24 @@ public sealed class PasskeyService(
             UserVerification = UserVerificationRequirement.Required,
             Extensions = null
         });
-        var issued = await ceremonyStore.IssueAsync(
-            serviceName,
-            application,
-            expectedUserType,
-            assertionOptions.ToJson(),
-            assertionOptions.Challenge,
-            ct);
+        PasskeyCeremonyIssue issued;
+        try
+        {
+            issued = await ceremonyStore.IssueAsync(
+                serviceName,
+                application,
+                expectedUserType,
+                assertionOptions.ToJson(),
+                assertionOptions.Challenge,
+                ct);
+        }
+        catch (PasskeyCeremonyCapacityExceededException)
+        {
+            logger.LogWarning(
+                "Rejected passkey ceremony because the outstanding quota was reached for application {Application}",
+                application);
+            return null;
+        }
 
         logger.LogInformation(
             "Issued passkey assertion ceremony for application {Application}",

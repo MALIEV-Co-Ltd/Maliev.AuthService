@@ -28,6 +28,9 @@ public sealed class PasskeyWebAuthnOptions
     /// <summary>Gets or sets the server-side ceremony lifetime in minutes.</summary>
     public int CeremonyLifetimeMinutes { get; set; } = 5;
 
+    /// <summary>Gets or sets the maximum outstanding ceremonies for one service/application boundary.</summary>
+    public int MaxOutstandingCeremoniesPerApplication { get; set; } = 512;
+
     /// <summary>Gets or sets trusted application, service, and principal-audience bindings.</summary>
     public Dictionary<string, PasskeyApplicationBinding> Bindings { get; set; } = [];
 }

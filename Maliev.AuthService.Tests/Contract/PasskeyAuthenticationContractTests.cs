@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -55,7 +56,10 @@ public sealed class PasskeyAuthenticationContractTests : IClassFixture<TestWebAp
 
         using var response = await client.PostAsJsonAsync(BeginPath, new { application = "web" });
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var responseBody = await response.Content.ReadAsStringAsync();
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK,
+            $"Expected 200 OK but received {(int)response.StatusCode}: {responseBody}");
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(43, payload.GetProperty("flow_id").GetString()?.Length);
         Assert.True(payload.GetProperty("expires_at_utc").GetDateTime() > DateTime.UtcNow);
@@ -67,6 +71,22 @@ public sealed class PasskeyAuthenticationContractTests : IClassFixture<TestWebAp
         Assert.Equal((ulong)300_000, payload.GetProperty("timeout").GetUInt64());
         Assert.False(payload.TryGetProperty("principal_id", out _));
         Assert.False(payload.TryGetProperty("flowId", out _));
+    }
+
+    /// <summary>Verifies an enabled host rejects an unbounded or disabled outstanding-ceremony quota.</summary>
+    [Fact]
+    public void PasskeyAuthentication_ZeroOutstandingQuota_RejectsHostStartup()
+    {
+        using var invalidFactory = _factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Passkey:MaxOutstandingCeremoniesPerApplication"] = "0"
+                })));
+
+        var exception = Assert.Throws<OptionsValidationException>(() => invalidFactory.CreateClient());
+
+        Assert.Contains("bounded ceremony settings", exception.Message, StringComparison.Ordinal);
     }
 
     /// <summary>Verifies application/caller mismatches fail before a ceremony is issued.</summary>

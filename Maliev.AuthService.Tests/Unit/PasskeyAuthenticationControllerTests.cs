@@ -46,6 +46,29 @@ public sealed class PasskeyAuthenticationControllerTests
         passkeyService.VerifyAll();
     }
 
+    /// <summary>Verifies a saturated or unavailable ceremony store returns one generic retryable response.</summary>
+    [Fact]
+    public async Task BeginPasskeyAuthentication_CeremonyUnavailable_ReturnsGenericServiceUnavailable()
+    {
+        var passkeyService = new Mock<IPasskeyService>();
+        passkeyService.Setup(service => service.BeginAuthenticationAsync(
+                It.IsAny<PasskeyAuthBeginRequest>(),
+                "WebBff",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PasskeyAuthBeginResponse?)null);
+        var controller = CreateController(passkeyService.Object, "WebBff");
+
+        var result = await controller.Begin(
+            new PasskeyAuthBeginRequest { Application = "web" },
+            CancellationToken.None);
+
+        var response = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, response.StatusCode);
+        var error = Assert.IsType<ErrorResponse>(response.Value);
+        Assert.Equal("passkey_temporarily_unavailable", error.Error);
+        passkeyService.VerifyAll();
+    }
+
     /// <summary>Verifies wrong service/application pairs fail before ceremony creation.</summary>
     [Theory]
     [InlineData("QuoteEngineBff", "web")]

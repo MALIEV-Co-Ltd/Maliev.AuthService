@@ -1,8 +1,11 @@
+using System.Buffers.Binary;
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Infrastructure.DbContexts;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 
 namespace Maliev.AuthService.Infrastructure.Security;
@@ -19,6 +22,10 @@ public sealed class PasskeyCeremonyStore(
         options.Value.CeremonyLifetimeMinutes,
         1,
         10));
+    private readonly int _maxOutstandingCeremonies = Math.Clamp(
+        options.Value.MaxOutstandingCeremoniesPerApplication,
+        1,
+        4_096);
 
     /// <inheritdoc />
     public async Task<PasskeyCeremonyIssue> IssueAsync(
@@ -49,10 +56,6 @@ public sealed class PasskeyCeremonyStore(
         }
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
-        await dbContext.PasskeyAssertionCeremonies
-            .Where(existing => existing.ExpiresAtUtc <= now)
-            .ExecuteDeleteAsync(cancellationToken);
-
         var flowId = ToBase64Url(RandomNumberGenerator.GetBytes(32));
         var ceremony = new PasskeyAssertionCeremony
         {
@@ -66,9 +69,41 @@ public sealed class PasskeyCeremonyStore(
             CreatedAtUtc = now,
             ExpiresAtUtc = now.Add(_lifetime)
         };
-        dbContext.PasskeyAssertionCeremonies.Add(ceremony);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return new PasskeyCeremonyIssue(flowId, ceremony.ExpiresAtUtc);
+        var issue = new PasskeyCeremonyIssue(flowId, ceremony.ExpiresAtUtc);
+        var executionStrategy = dbContext.Database.CreateExecutionStrategy();
+        return await executionStrategy.ExecuteInTransactionAsync(
+            async operationCancellationToken =>
+            {
+                await dbContext.PasskeyAssertionCeremonies
+                    .Where(existing => existing.ExpiresAtUtc <= now)
+                    .ExecuteDeleteAsync(operationCancellationToken);
+                var boundaryLockKey = CreateBoundaryLockKey(caller, audience);
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT pg_advisory_xact_lock({boundaryLockKey})",
+                    operationCancellationToken);
+                var outstandingCount = await dbContext.PasskeyAssertionCeremonies
+                    .CountAsync(existing =>
+                        existing.ServiceName == caller &&
+                        existing.Application == audience &&
+                        existing.ExpiresAtUtc > now,
+                        operationCancellationToken);
+                if (outstandingCount >= _maxOutstandingCeremonies)
+                {
+                    throw new PasskeyCeremonyCapacityExceededException();
+                }
+
+                dbContext.PasskeyAssertionCeremonies.Add(ceremony);
+                await dbContext.SaveChangesAsync(operationCancellationToken);
+                return issue;
+            },
+            verifySucceeded: verificationCancellationToken =>
+                dbContext.PasskeyAssertionCeremonies
+                    .AsNoTracking()
+                    .AnyAsync(
+                        existing => existing.FlowIdHash == ceremony.FlowIdHash,
+                        verificationCancellationToken),
+            IsolationLevel.ReadCommitted,
+            cancellationToken);
     }
 
     /// <inheritdoc />
@@ -169,6 +204,12 @@ public sealed class PasskeyCeremonyStore(
     }
 
     private static string Hash(byte[] value) => Convert.ToHexString(SHA256.HashData(value));
+
+    private static long CreateBoundaryLockKey(string serviceName, string application)
+    {
+        var boundary = Encoding.UTF8.GetBytes($"{serviceName}\u001f{application}");
+        return BinaryPrimitives.ReadInt64BigEndian(SHA256.HashData(boundary));
+    }
 
     private static string ToBase64Url(byte[] value) =>
         Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');

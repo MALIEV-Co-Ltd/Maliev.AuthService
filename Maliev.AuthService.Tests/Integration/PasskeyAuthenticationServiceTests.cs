@@ -275,10 +275,36 @@ public sealed class PasskeyAuthenticationServiceTests(
         Assert.False(await dbContext.PasskeyAssertionCeremonies.AnyAsync());
     }
 
+    /// <summary>Verifies a saturated ceremony boundary fails closed without exposing an unhandled store error.</summary>
+    [Fact]
+    public async Task BeginAuthenticationAsync_CeremonyQuotaReached_ReturnsUnavailable()
+    {
+        await using var dbContext = fixture.CreateDbContext();
+        var service = CreateService(
+            dbContext,
+            SuccessfulVerifier(1, false).Object,
+            maxOutstandingCeremonies: 1);
+        var request = new PasskeyAuthBeginRequest { Application = Application };
+        var first = await service.BeginAuthenticationAsync(
+            request,
+            ServiceName,
+            CancellationToken.None);
+
+        var saturated = await service.BeginAuthenticationAsync(
+            request,
+            ServiceName,
+            CancellationToken.None);
+
+        Assert.NotNull(first);
+        Assert.Null(saturated);
+        Assert.Equal(1, await dbContext.PasskeyAssertionCeremonies.CountAsync());
+    }
+
     private PasskeyService CreateService(
         Maliev.AuthService.Infrastructure.DbContexts.AuthDbContext dbContext,
         IPasskeyAssertionVerifier verifier,
-        bool enabled = true)
+        bool enabled = true,
+        int maxOutstandingCeremonies = 512)
     {
         var options = Options.Create(new PasskeyWebAuthnOptions
         {
@@ -289,6 +315,7 @@ public sealed class PasskeyAuthenticationServiceTests(
             TimeoutMilliseconds = 300_000,
             ChallengeSize = 32,
             CeremonyLifetimeMinutes = 5,
+            MaxOutstandingCeremoniesPerApplication = maxOutstandingCeremonies,
             Bindings = new Dictionary<string, PasskeyApplicationBinding>
             {
                 [Application] = new()
@@ -379,16 +406,17 @@ public sealed class PasskeyAuthenticationServiceTests(
     private static PasskeyAuthCompleteRequest CreateCompleteRequest(
         string flowId,
         string credentialId,
-        string userHandle) => new()
-    {
-        Application = Application,
-        FlowId = flowId,
-        CredentialId = credentialId,
-        AuthenticatorData = "AQ",
-        ClientDataJson = "e30",
-        Signature = "AQ",
-        UserHandle = userHandle
-    };
+        string userHandle) =>
+        new()
+        {
+            Application = Application,
+            FlowId = flowId,
+            CredentialId = credentialId,
+            AuthenticatorData = "AQ",
+            ClientDataJson = "e30",
+            Signature = "AQ",
+            UserHandle = userHandle
+        };
 
     private static byte[] FromBase64Url(string value)
     {

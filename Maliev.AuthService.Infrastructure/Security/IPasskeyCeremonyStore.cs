@@ -44,6 +44,11 @@ public interface IPasskeyCeremonyStore
 public sealed record PasskeyCeremonyIssue(string FlowId, DateTime ExpiresAtUtc);
 
 /// <summary>
+/// Indicates that a trusted caller/application boundary has reached its outstanding ceremony quota.
+/// </summary>
+public sealed class PasskeyCeremonyCapacityExceededException : Exception;
+
+/// <summary>
 /// Contains the server-owned state recovered by a successful one-time consume.
 /// </summary>
 /// <param name="AssertionOptionsJson">The original FIDO2 assertion options.</param>

@@ -156,6 +156,135 @@ public sealed class PasskeyCeremonyStoreTests : IClassFixture<TestDatabaseFixtur
         Assert.Equal(UserType.Customer, record.ExpectedUserType);
     }
 
+    /// <summary>Verifies one caller/application boundary cannot exceed its outstanding ceremony quota.</summary>
+    [Fact]
+    public async Task IssueAsync_BoundaryAtOutstandingLimit_RejectsAdditionalCeremony()
+    {
+        await using var dbContext = _fixture.CreateDbContext();
+        var store = CreateStore(dbContext, maxOutstandingCeremonies: 1);
+        await store.IssueAsync(
+            ServiceName,
+            Application,
+            UserType.Customer,
+            "{\"challenge\":\"first\"}",
+            Enumerable.Repeat((byte)12, 32).ToArray(),
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<PasskeyCeremonyCapacityExceededException>(() =>
+            store.IssueAsync(
+                ServiceName,
+                Application,
+                UserType.Customer,
+                "{\"challenge\":\"second\"}",
+                Enumerable.Repeat((byte)13, 32).ToArray(),
+                CancellationToken.None));
+
+        Assert.Equal(1, await dbContext.PasskeyAssertionCeremonies.CountAsync());
+    }
+
+    /// <summary>Verifies expired ceremonies are removed before quota enforcement and release capacity.</summary>
+    [Fact]
+    public async Task IssueAsync_ExpiredCeremony_ReleasesBoundaryCapacity()
+    {
+        await using var dbContext = _fixture.CreateDbContext();
+        var store = CreateStore(dbContext, maxOutstandingCeremonies: 1);
+        var expired = await store.IssueAsync(
+            ServiceName,
+            Application,
+            UserType.Customer,
+            "{\"challenge\":\"expires\"}",
+            Enumerable.Repeat((byte)14, 32).ToArray(),
+            CancellationToken.None);
+        _timeProvider.Advance(TimeSpan.FromMinutes(6));
+
+        var replacement = await store.IssueAsync(
+            ServiceName,
+            Application,
+            UserType.Customer,
+            "{\"challenge\":\"replacement\"}",
+            Enumerable.Repeat((byte)15, 32).ToArray(),
+            CancellationToken.None);
+
+        Assert.NotEqual(expired.FlowId, replacement.FlowId);
+        Assert.Equal(1, await dbContext.PasskeyAssertionCeremonies.CountAsync());
+    }
+
+    /// <summary>Verifies one saturated application does not consume another trusted boundary's capacity.</summary>
+    [Fact]
+    public async Task IssueAsync_DifferentApplication_HasIndependentQuota()
+    {
+        await using var dbContext = _fixture.CreateDbContext();
+        var store = CreateStore(dbContext, maxOutstandingCeremonies: 1);
+        await store.IssueAsync(
+            ServiceName,
+            Application,
+            UserType.Customer,
+            "{\"challenge\":\"web\"}",
+            Enumerable.Repeat((byte)16, 32).ToArray(),
+            CancellationToken.None);
+
+        var quoteEngine = await store.IssueAsync(
+            "QuoteEngineBff",
+            "quote-engine",
+            UserType.Customer,
+            "{\"challenge\":\"quote\"}",
+            Enumerable.Repeat((byte)17, 32).ToArray(),
+            CancellationToken.None);
+
+        Assert.NotEmpty(quoteEngine.FlowId);
+        Assert.Equal(2, await dbContext.PasskeyAssertionCeremonies.CountAsync());
+    }
+
+    /// <summary>Verifies concurrent issuers cannot race past one boundary's configured quota.</summary>
+    [Fact]
+    public async Task IssueAsync_ConcurrentRequestsAtLimit_HasExactlyOneWinner()
+    {
+        const int requestCount = 12;
+        var contexts = Enumerable.Range(0, requestCount)
+            .Select(_ => _fixture.CreateDbContext())
+            .ToArray();
+        try
+        {
+            var stores = contexts
+                .Select(context => CreateStore(context, maxOutstandingCeremonies: 1))
+                .ToArray();
+            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var attempts = stores.Select(async (store, index) =>
+            {
+                await start.Task;
+                try
+                {
+                    await store.IssueAsync(
+                        ServiceName,
+                        Application,
+                        UserType.Customer,
+                        $"{{\"challenge\":\"concurrent-{index}\"}}",
+                        Enumerable.Repeat(checked((byte)(index + 20)), 32).ToArray(),
+                        CancellationToken.None);
+                    return true;
+                }
+                catch (PasskeyCeremonyCapacityExceededException)
+                {
+                    return false;
+                }
+            }).ToArray();
+
+            start.SetResult();
+            var results = await Task.WhenAll(attempts);
+
+            Assert.Single(results, issued => issued);
+            await using var verificationContext = _fixture.CreateDbContext();
+            Assert.Equal(1, await verificationContext.PasskeyAssertionCeremonies.CountAsync());
+        }
+        finally
+        {
+            foreach (var context in contexts)
+            {
+                await context.DisposeAsync();
+            }
+        }
+    }
+
     /// <summary>Verifies two concurrent requests produce exactly one ceremony winner.</summary>
     [Fact]
     public async Task ConsumeAsync_ConcurrentReplay_HasExactlyOneWinner()
@@ -187,10 +316,15 @@ public sealed class PasskeyCeremonyStoreTests : IClassFixture<TestDatabaseFixtur
     }
 
     private PasskeyCeremonyStore CreateStore(
-        Maliev.AuthService.Infrastructure.DbContexts.AuthDbContext dbContext) =>
+        Maliev.AuthService.Infrastructure.DbContexts.AuthDbContext dbContext,
+        int maxOutstandingCeremonies = 512) =>
         new(
             dbContext,
-            Options.Create(new PasskeyWebAuthnOptions { CeremonyLifetimeMinutes = 5 }),
+            Options.Create(new PasskeyWebAuthnOptions
+            {
+                CeremonyLifetimeMinutes = 5,
+                MaxOutstandingCeremoniesPerApplication = maxOutstandingCeremonies
+            }),
             _timeProvider);
 
     private sealed class ManualTimeProvider(DateTimeOffset initialUtcNow) : TimeProvider
