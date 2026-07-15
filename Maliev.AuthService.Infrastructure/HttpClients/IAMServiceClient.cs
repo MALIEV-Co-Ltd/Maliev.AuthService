@@ -56,6 +56,28 @@ public class IAMServiceClient : IIAMServiceClient
         Guid principalId,
         CancellationToken cancellationToken = default)
     {
+        return await ResolvePermissionsCoreAsync(
+            principalId,
+            requireAuthoritativeResponse: false,
+            cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public async Task<PermissionResolutionResponse> ResolvePermissionsRequiredAsync(
+        Guid principalId,
+        CancellationToken cancellationToken = default)
+    {
+        return await ResolvePermissionsCoreAsync(
+            principalId,
+            requireAuthoritativeResponse: true,
+            cancellationToken);
+    }
+
+    private async Task<PermissionResolutionResponse> ResolvePermissionsCoreAsync(
+        Guid principalId,
+        bool requireAuthoritativeResponse,
+        CancellationToken cancellationToken)
+    {
         var stopwatch = Stopwatch.StartNew();
         try
         {
@@ -86,6 +108,16 @@ public class IAMServiceClient : IIAMServiceClient
             errorTags.Add("reason", "http_error");
             errorTags.Add("status_code", (int)response.StatusCode);
             _resolutionErrors.Add(1, errorTags);
+
+            if (requireAuthoritativeResponse)
+            {
+                throw new AuthoritativePermissionResolutionException(
+                    $"IAM permission resolution failed with status {(int)response.StatusCode}");
+            }
+        }
+        catch (AuthoritativePermissionResolutionException)
+        {
+            throw;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -101,6 +133,11 @@ public class IAMServiceClient : IIAMServiceClient
             errorTags.Add("reason", "exception");
             errorTags.Add("exception_type", ex.GetType().Name);
             _resolutionErrors.Add(1, errorTags);
+
+            if (requireAuthoritativeResponse)
+            {
+                throw;
+            }
         }
 
         return new PermissionResolutionResponse
@@ -111,6 +148,9 @@ public class IAMServiceClient : IIAMServiceClient
             ResolvedAt = DateTime.UtcNow
         };
     }
+
+    private sealed class AuthoritativePermissionResolutionException(string message)
+        : HttpRequestException(message);
 
     /// <inheritdoc/>
     public async Task GrantRoleAsync(

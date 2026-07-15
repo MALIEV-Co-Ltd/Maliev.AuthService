@@ -50,8 +50,12 @@ public interface IAuthenticationService
     /// </summary>
     /// <param name="request">The service login request.</param>
     /// <param name="ipAddress">The IP address of the client.</param>
-    /// <returns>The login response, or null if authentication failed.</returns>
-    Task<LoginResponse?> AuthenticateServiceAsync(ServiceLoginRequest request, string? ipAddress);
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>The authentication result, including a stable unavailable state.</returns>
+    Task<AuthenticationResult> AuthenticateServiceAsync(
+        ServiceLoginRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Exchanges a verified Google Workspace identity for a platform JWT.

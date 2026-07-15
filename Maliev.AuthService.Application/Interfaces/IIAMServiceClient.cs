@@ -18,6 +18,16 @@ public interface IIAMServiceClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Resolves permissions and fails when IAM cannot provide an authoritative response.
+    /// </summary>
+    /// <param name="principalId">The principal identifier.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>An authoritative permission and role response.</returns>
+    Task<PermissionResolutionResponse> ResolvePermissionsRequiredAsync(
+        Guid principalId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Grants a role to a specified principal synchronously.
     /// Used by AuthService to grant Platform Owner role to the first @maliev.com employee
     /// during auto-provisioning, before issuing the JWT.

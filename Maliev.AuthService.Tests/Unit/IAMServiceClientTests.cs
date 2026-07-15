@@ -95,4 +95,21 @@ public class IAMServiceClientTests
         Assert.Empty(result.Permissions);
         Assert.Empty(result.Roles);
     }
+
+    [Fact]
+    public async Task ResolvePermissionsRequiredAsync_ErrorResponse_Throws()
+    {
+        var principalId = Guid.NewGuid();
+        _handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
+        var exception = await Assert.ThrowsAnyAsync<HttpRequestException>(() =>
+            _client.ResolvePermissionsRequiredAsync(principalId));
+
+        Assert.Contains("503", exception.Message, StringComparison.Ordinal);
+    }
 }

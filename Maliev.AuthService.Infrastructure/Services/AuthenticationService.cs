@@ -1,3 +1,4 @@
+using Maliev.AuthService.Application.DTOs.IAM;
 using Maliev.AuthService.Application.DTOs.Request;
 using Maliev.AuthService.Application.DTOs.Response;
 using Maliev.AuthService.Application.Identity;
@@ -401,10 +402,16 @@ public class AuthenticationService : IAuthenticationService
     }
 
     /// <inheritdoc/>
-    public async Task<LoginResponse?> AuthenticateServiceAsync(ServiceLoginRequest request, string? ipAddress)
+    public async Task<AuthenticationResult> AuthenticateServiceAsync(
+        ServiceLoginRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken = default)
     {
         var serviceCredential = await _dbContext.ServiceCredentials
-            .FirstOrDefaultAsync(sc => sc.ClientId == request.ClientId && sc.IsActive);
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                sc => sc.ClientId == request.ClientId && sc.IsActive,
+                cancellationToken);
 
         if (serviceCredential == null)
         {
@@ -413,9 +420,10 @@ public class AuthenticationService : IAuthenticationService
             await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(), "LoginFailedEvent", MessageType.Event, "1.0.0",
                 "AuthService", ["NotificationService"], Guid.NewGuid(), null, DateTimeOffset.UtcNow, false,
-                new LoginFailedEventPayload(request.ClientId, null, "Service", ipAddress, "InvalidCredentials", DateTimeOffset.UtcNow)));
+                new LoginFailedEventPayload(request.ClientId, null, "Service", ipAddress, "InvalidCredentials", DateTimeOffset.UtcNow)),
+                cancellationToken);
 
-            return null;
+            return InvalidServiceCredentials();
         }
 
         var secretHash = HashSecret(request.ClientSecret);
@@ -428,57 +436,98 @@ public class AuthenticationService : IAuthenticationService
             await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(), "LoginFailedEvent", MessageType.Event, "1.0.0",
                 "AuthService", ["NotificationService"], Guid.NewGuid(), null, DateTimeOffset.UtcNow, false,
-                new LoginFailedEventPayload(request.ClientId, null, "Service", ipAddress, "InvalidCredentials", DateTimeOffset.UtcNow)));
+                new LoginFailedEventPayload(request.ClientId, null, "Service", ipAddress, "InvalidCredentials", DateTimeOffset.UtcNow)),
+                cancellationToken);
 
-            return null;
+            return InvalidServiceCredentials();
         }
 
-        IEnumerable<string>? permissions = null;
-        IEnumerable<string>? roles = null;
-
-        if (serviceCredential.PrincipalId.HasValue)
+        if (!serviceCredential.PrincipalId.HasValue)
         {
-            try
-            {
-                var iamResponse = await _iamServiceClient.ResolvePermissionsAsync(serviceCredential.PrincipalId.Value);
-                permissions = iamResponse.Permissions;
-                roles = iamResponse.Roles;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to resolve permissions from IAM for service {ClientId}.", request.ClientId);
-            }
+            _logger.LogError(
+                "Cannot issue a service token because client {ClientId} has no IAM principal mapping",
+                request.ClientId);
+            return ServiceAuthenticationUnavailable();
         }
-        else
+
+        PermissionResolutionResponse iamResponse;
+        try
         {
-            _logger.LogWarning("Service {ClientId} has no PrincipalId mapping. Token will be issued without IAM permissions.", request.ClientId);
+            iamResponse = await _iamServiceClient.ResolvePermissionsRequiredAsync(
+                serviceCredential.PrincipalId.Value,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to resolve authoritative IAM permissions for service {ClientId}",
+                request.ClientId);
+            return ServiceAuthenticationUnavailable();
+        }
+
+        if (iamResponse.Permissions.Contains("*", StringComparer.Ordinal) ||
+            iamResponse.Roles.Contains("*", StringComparer.Ordinal))
+        {
+            _logger.LogError(
+                "Refusing to issue a service token because IAM returned wildcard authority for client {ClientId}",
+                request.ClientId);
+            return ServiceAuthenticationUnavailable();
         }
 
         var accessToken = await _tokenGenerator.GenerateServiceAccessTokenAsync(
-            request.ClientId, serviceCredential.ServiceName, permissions, roles, serviceCredential.PrincipalId);
+            request.ClientId,
+            serviceCredential.ServiceName,
+            iamResponse.Permissions,
+            iamResponse.Roles,
+            serviceCredential.PrincipalId);
 
         EnqueueAuditLog(null, null, "service_login", ipAddress, true, null);
 
         await _publishEndpoint.Publish(new UserLoggedInEvent(
             Guid.NewGuid(), "UserLoggedInEvent", MessageType.Event, "1.0.0",
             "AuthService", ["NotificationService"], Guid.NewGuid(), null, DateTimeOffset.UtcNow, false,
-            new UserLoggedInEventPayload(request.ClientId, serviceCredential.PrincipalId?.ToString(), "Service", ipAddress, "ServiceCredential", DateTimeOffset.UtcNow)));
+            new UserLoggedInEventPayload(request.ClientId, serviceCredential.PrincipalId?.ToString(), "Service", ipAddress, "ServiceCredential", DateTimeOffset.UtcNow)),
+            cancellationToken);
 
-        return new LoginResponse
+        return new AuthenticationResult
         {
-            AccessToken = accessToken,
-            RefreshToken = null,
-            TokenType = "Bearer",
-            ExpiresIn = 3600,
-            User = new UserIdentityResponse
+            Success = true,
+            PrincipalId = serviceCredential.PrincipalId,
+            Response = new LoginResponse
             {
-                UserId = request.ClientId,
-                PrincipalId = serviceCredential.PrincipalId?.ToString(),
-                UserType = "service",
-                Name = serviceCredential.ServiceName
+                AccessToken = accessToken,
+                RefreshToken = null,
+                TokenType = "Bearer",
+                ExpiresIn = _tokenGenerator.ServiceTokenExpirationInSeconds,
+                User = new UserIdentityResponse
+                {
+                    UserId = request.ClientId,
+                    PrincipalId = serviceCredential.PrincipalId?.ToString(),
+                    UserType = "service",
+                    Name = serviceCredential.ServiceName
+                }
             }
         };
     }
+
+    private static AuthenticationResult InvalidServiceCredentials() => new()
+    {
+        Success = false,
+        ErrorCode = "invalid_credentials",
+        ErrorDescription = "Invalid client credentials"
+    };
+
+    private static AuthenticationResult ServiceAuthenticationUnavailable() => new()
+    {
+        Success = false,
+        ErrorCode = "service_unavailable",
+        ErrorDescription = "Service authentication is temporarily unavailable"
+    };
 
     /// <inheritdoc/>
     public async Task<AuthenticationResult> ExchangeGoogleTokenAsync(
