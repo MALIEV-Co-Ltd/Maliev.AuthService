@@ -101,11 +101,7 @@ public class TokenGenerator : ITokenGenerator
                 }
             }
 
-            var configuredKeyId = _configuration["Jwt:KeyId"];
-            var keyId = string.IsNullOrWhiteSpace(configuredKeyId)
-                ? DeriveKeyId(rsa)
-                : configuredKeyId.Trim();
-            return new RsaSecurityKey(rsa) { KeyId = keyId };
+            return new RsaSecurityKey(rsa) { KeyId = DeriveKeyId(rsa) };
         }
         catch (Exception ex)
         {
@@ -117,7 +113,7 @@ public class TokenGenerator : ITokenGenerator
     private static string DeriveKeyId(RSA rsa)
     {
         var subjectPublicKeyInfo = rsa.ExportSubjectPublicKeyInfo();
-        return Convert.ToHexString(SHA256.HashData(subjectPublicKeyInfo))[..16].ToLowerInvariant();
+        return Convert.ToHexString(SHA256.HashData(subjectPublicKeyInfo)).ToLowerInvariant();
     }
 
     /// <inheritdoc/>

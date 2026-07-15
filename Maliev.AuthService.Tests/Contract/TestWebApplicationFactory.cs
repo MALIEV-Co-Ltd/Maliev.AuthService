@@ -17,11 +17,18 @@ namespace Maliev.AuthService.Tests.Contract;
 
 public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, AuthDbContext>
 {
+    private int _iamResolutionCalls;
+
+    public static readonly Guid NonexistentIamPrincipalId =
+        Guid.Parse("22222222-2222-2222-2222-222222222222");
+
+    public int IamResolutionCalls => Volatile.Read(ref _iamResolutionCalls);
     /// <summary>
     /// Override CleanDatabaseAsync to seed required test data after cleanup and clear Redis
     /// </summary>
     public new async Task CleanDatabaseAsync()
     {
+        Interlocked.Exchange(ref _iamResolutionCalls, 0);
         await base.CleanDatabaseAsync();
         await ClearRedisAsync();
         await SeedTestDataAsync();
@@ -118,7 +125,9 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         }
 
         // Add mock HTTP client factory that returns successful validation responses
-        services.AddSingleton<IHttpClientFactory>(sp => new MockHttpClientFactory(sp.GetRequiredService<IConfiguration>()));
+        services.AddSingleton<IHttpClientFactory>(sp => new MockHttpClientFactory(
+            sp.GetRequiredService<IConfiguration>(),
+            this));
     }
 
     private sealed class TestGoogleIdentityTokenValidator : IGoogleIdentityTokenValidator
@@ -165,15 +174,19 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
     private class MockHttpClientFactory : IHttpClientFactory
     {
         private readonly IConfiguration _configuration;
+        private readonly TestWebApplicationFactory _owner;
 
-        public MockHttpClientFactory(IConfiguration configuration)
+        public MockHttpClientFactory(
+            IConfiguration configuration,
+            TestWebApplicationFactory owner)
         {
             _configuration = configuration;
+            _owner = owner;
         }
 
         public HttpClient CreateClient(string name)
         {
-            var handler = new MockHttpMessageHandler();
+            var handler = new MockHttpMessageHandler(_owner);
             var client = new HttpClient(handler);
 
             // Try to get BaseAddress from configuration, default to localhost if not found
@@ -193,6 +206,13 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
 
     private class MockHttpMessageHandler : HttpMessageHandler
     {
+        private readonly TestWebApplicationFactory _owner;
+
+        public MockHttpMessageHandler(TestWebApplicationFactory owner)
+        {
+            _owner = owner;
+        }
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             // Mock external service validation responses
@@ -273,6 +293,7 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
             // Mock IAM resolution response
             if (request.RequestUri?.PathAndQuery.Contains("/iam/v1/auth/resolve-permissions") == true)
             {
+                Interlocked.Increment(ref _owner._iamResolutionCalls);
                 if (request.RequestUri.Port == 5101)
                 {
                     return new HttpResponseMessage(HttpStatusCode.InternalServerError);
@@ -283,8 +304,17 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                 {
                     var requestBody = await request.Content.ReadAsStringAsync(cancellationToken);
                     var jsonDoc = JsonDocument.Parse(requestBody);
-                    if (jsonDoc.RootElement.TryGetProperty("principalId", out var principalIdElement))
+                    if (jsonDoc.RootElement.TryGetProperty("PrincipalId", out var principalIdElement) ||
+                        jsonDoc.RootElement.TryGetProperty("principalId", out principalIdElement))
                         principalId = principalIdElement.GetString();
+                }
+
+                if (string.Equals(
+                    principalId,
+                    NonexistentIamPrincipalId.ToString(),
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
                 }
 
                 var response = new

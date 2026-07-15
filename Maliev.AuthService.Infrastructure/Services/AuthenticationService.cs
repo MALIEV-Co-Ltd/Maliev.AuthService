@@ -26,6 +26,8 @@ namespace Maliev.AuthService.Infrastructure.Services;
 /// </summary>
 public class AuthenticationService : IAuthenticationService
 {
+    private static readonly byte[] DummyServiceSecretHash = SHA256.HashData(
+        Encoding.UTF8.GetBytes("MALIEV AuthService dummy service credential comparison"));
     private readonly AuthDbContext _dbContext;
     private readonly ITokenGenerator _tokenGenerator;
     private readonly ITokenValidator _tokenValidator;
@@ -410,28 +412,23 @@ public class AuthenticationService : IAuthenticationService
         var serviceCredential = await _dbContext.ServiceCredentials
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                sc => sc.ClientId == request.ClientId && sc.IsActive,
+                sc => sc.ClientId == request.ClientId,
                 cancellationToken);
 
-        if (serviceCredential == null)
+        var suppliedSecretHash = SHA256.HashData(Encoding.UTF8.GetBytes(request.ClientSecret));
+        var expectedSecretHash = DummyServiceSecretHash;
+        if (serviceCredential is { IsActive: true } &&
+            TryDecodeSha256(serviceCredential.ClientSecretHash, out var decodedSecretHash))
         {
-            EnqueueAuditLog(null, null, "service_login", ipAddress, false, "Invalid client ID");
-
-            await _publishEndpoint.Publish(new LoginFailedEvent(
-                Guid.NewGuid(), "LoginFailedEvent", MessageType.Event, "1.0.0",
-                "AuthService", ["NotificationService"], Guid.NewGuid(), null, DateTimeOffset.UtcNow, false,
-                new LoginFailedEventPayload(request.ClientId, null, "Service", ipAddress, "InvalidCredentials", DateTimeOffset.UtcNow)),
-                cancellationToken);
-
-            return InvalidServiceCredentials();
+            expectedSecretHash = decodedSecretHash;
         }
 
-        var secretHash = HashSecret(request.ClientSecret);
-        if (!CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(secretHash),
-            Encoding.UTF8.GetBytes(serviceCredential.ClientSecretHash)))
+        var credentialMatches = CryptographicOperations.FixedTimeEquals(
+            suppliedSecretHash,
+            expectedSecretHash);
+        if (serviceCredential is not { IsActive: true } || !credentialMatches)
         {
-            EnqueueAuditLog(null, null, "service_login", ipAddress, false, "Invalid client secret");
+            EnqueueAuditLog(null, null, "service_login", ipAddress, false, "Invalid client credentials");
 
             await _publishEndpoint.Publish(new LoginFailedEvent(
                 Guid.NewGuid(), "LoginFailedEvent", MessageType.Event, "1.0.0",
@@ -513,6 +510,31 @@ public class AuthenticationService : IAuthenticationService
                 }
             }
         };
+    }
+
+    private static bool TryDecodeSha256(string value, out byte[] hash)
+    {
+        hash = DummyServiceSecretHash;
+        if (value.Length != 64)
+        {
+            return false;
+        }
+
+        try
+        {
+            var decoded = Convert.FromHexString(value);
+            if (decoded.Length != 32)
+            {
+                return false;
+            }
+
+            hash = decoded;
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 
     private static AuthenticationResult InvalidServiceCredentials() => new()

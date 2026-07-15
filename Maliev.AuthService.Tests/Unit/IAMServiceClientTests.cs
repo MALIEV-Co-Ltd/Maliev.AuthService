@@ -112,4 +112,43 @@ public class IAMServiceClientTests
 
         Assert.Contains("503", exception.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ResolvePermissionsRequiredAsync_EmptyPrincipalId_RejectsBeforeCallingIam()
+    {
+        await Assert.ThrowsAnyAsync<ArgumentException>(() =>
+            _client.ResolvePermissionsRequiredAsync(Guid.Empty));
+
+        _handlerMock.Protected().Verify(
+            "SendAsync",
+            Times.Never(),
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ResolvePermissionsRequiredAsync_MismatchedPrincipalId_Throws()
+    {
+        var requestedPrincipalId = Guid.NewGuid();
+        _handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = JsonContent.Create(new PermissionResolutionResponse
+                {
+                    PrincipalId = Guid.NewGuid(),
+                    Permissions = ["project.projects.read"],
+                    Roles = ["service"]
+                })
+            });
+
+        var exception = await Assert.ThrowsAnyAsync<HttpRequestException>(() =>
+            _client.ResolvePermissionsRequiredAsync(requestedPrincipalId));
+
+        Assert.Contains("principal", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }

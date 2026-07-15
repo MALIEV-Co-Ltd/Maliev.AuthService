@@ -67,6 +67,8 @@ public class IAMServiceClient : IIAMServiceClient
         Guid principalId,
         CancellationToken cancellationToken = default)
     {
+        ArgumentOutOfRangeException.ThrowIfEqual(principalId, Guid.Empty);
+
         return await ResolvePermissionsCoreAsync(
             principalId,
             requireAuthoritativeResponse: true,
@@ -95,6 +97,12 @@ public class IAMServiceClient : IIAMServiceClient
                 var result = await response.Content.ReadFromJsonAsync<PermissionResolutionResponse>(cancellationToken: cancellationToken);
                 if (result != null)
                 {
+                    if (requireAuthoritativeResponse && result.PrincipalId != principalId)
+                    {
+                        throw new AuthoritativePermissionResolutionException(
+                            "IAM permission resolution returned a different principal than requested");
+                    }
+
                     _logger.LogInformation("Successfully resolved {PermCount} permissions and {RoleCount} roles for principal {PrincipalId} in {ElapsedMs}ms",
                         result.Permissions.Count, result.Roles.Count, principalId, stopwatch.ElapsedMilliseconds);
                     return result;

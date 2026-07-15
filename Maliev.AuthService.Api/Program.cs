@@ -9,6 +9,7 @@ using Maliev.AuthService.Infrastructure.Security;
 using Maliev.AuthService.Infrastructure.Services;
 using MassTransit;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Http.Features;
 using System.Threading.RateLimiting;
 
 // Initialize bootstrap logging
@@ -152,6 +153,10 @@ try
     builder.Services.AddScoped<IGoogleIdentityNonceService, GoogleIdentityNonceService>();
     builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
     builder.Services.AddScoped<IEmailVerificationService, EmailVerificationService>();
+    builder.Services.AddOptions<ServiceTokenOptions>()
+        .Bind(builder.Configuration.GetSection("Jwt"))
+        .ValidateDataAnnotations()
+        .ValidateOnStart();
     builder.Services.AddOptions<PasskeyWebAuthnOptions>()
         .Bind(builder.Configuration.GetSection("Passkey"))
         .Validate(
@@ -190,6 +195,27 @@ try
         app.UseHttpsRedirection();
     }
     app.UseRouting();
+    app.Use(async (context, next) =>
+    {
+        if (HttpMethods.IsPost(context.Request.Method) &&
+            context.Request.Path.Equals("/auth/v1/service/login", StringComparison.OrdinalIgnoreCase))
+        {
+            const long maximumBodyBytes = 4096;
+            var bodySizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+            if (bodySizeFeature is { IsReadOnly: false })
+            {
+                bodySizeFeature.MaxRequestBodySize = maximumBodyBytes;
+            }
+
+            if (context.Request.ContentLength > maximumBodyBytes)
+            {
+                context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                return;
+            }
+        }
+
+        await next(context);
+    });
     app.UseRateLimiter();
     app.UseCors();
     app.UseAuthorization();
