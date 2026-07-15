@@ -4,6 +4,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Net.Http.Headers;
 using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Tests.Infrastructure;
 using Xunit;
@@ -107,6 +108,25 @@ public class ServiceLoginContractTests : IntegrationTestBase
     }
 
     [Fact]
+    public async Task POST_V1_Auth_Service_Login_OversizedBody_Returns413BeforeAuthentication()
+    {
+        await CleanDatabaseAsync();
+        var oversizedJson = JsonSerializer.Serialize(new
+        {
+            client_id = "service-dev-customer-api",
+            client_secret = TestConstants.DummyValidServiceSecret,
+            padding = new string('x', 5000)
+        });
+        using var content = new StringContent(oversizedJson, Encoding.UTF8);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+
+        var response = await Client.PostAsync("/auth/v1/service/login", content);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Equal(0, Factory.IamResolutionCalls);
+    }
+
+    [Fact]
     public async Task POST_V1_Auth_Service_Login_CrossServiceSwappedSecrets_ReturnsIndistinguishable401()
     {
         await CleanDatabaseAsync();
@@ -163,6 +183,41 @@ public class ServiceLoginContractTests : IntegrationTestBase
                 ClientSecretHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(secret)))
                     .ToLowerInvariant(),
                 ServiceName = "Unmapped API Service",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await context.SaveChangesAsync();
+        }
+
+        var response = await Client.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = clientId,
+            client_secret = secret
+        });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("service_unavailable", json.RootElement.GetProperty("error").GetString());
+        Assert.False(json.RootElement.TryGetProperty("access_token", out _));
+    }
+
+    [Fact]
+    public async Task POST_V1_Auth_Service_Login_NonexistentIamPrincipal_Returns503WithoutToken()
+    {
+        await CleanDatabaseAsync();
+        const string clientId = "service-dev-orphaned-api";
+        const string secret = "dummy_orphaned_service_secret_012";
+        await using (var context = Factory.GetDbContext())
+        {
+            context.ServiceCredentials.Add(new ServiceCredential
+            {
+                Id = Guid.NewGuid(),
+                ClientId = clientId,
+                PrincipalId = TestWebApplicationFactory.NonexistentIamPrincipalId,
+                ClientSecretHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(secret)))
+                    .ToLowerInvariant(),
+                ServiceName = "Orphaned API Service",
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow

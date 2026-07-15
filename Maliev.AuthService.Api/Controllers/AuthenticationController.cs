@@ -231,6 +231,7 @@ public class AuthenticationController : ControllerBase
     /// <response code="200">Successful authentication.</response>
     /// <response code="401">Invalid client credentials.</response>
     [HttpPost("service/login")]
+    [RequestSizeLimit(4096)]
     [EnableRateLimiting(AuthRateLimitPolicies.ServiceLogin)]
     public async Task<IActionResult> ServiceLogin([FromBody] ServiceLoginRequest request, CancellationToken cancellationToken)
     {

@@ -36,7 +36,7 @@ public class TokenGeneratorTests
         _configMock.Setup(c => c["Jwt:Issuer"]).Returns("https://test.com");
         _configMock.Setup(c => c["Jwt:Audience"]).Returns("https://test.com");
         _configMock.Setup(c => c["Jwt:ServiceTokenExpirationInSeconds"]).Returns("900");
-        _configMock.Setup(c => c["Jwt:KeyId"]).Returns("auth-test-key-v1");
+        _configMock.Setup(c => c["Jwt:KeyId"]).Returns("attacker-controlled-key-id");
 
         _tokenGenerator = new TokenGenerator(_configMock.Object, _loggerMock.Object, _environmentMock.Object);
     }
@@ -136,7 +136,8 @@ public class TokenGeneratorTests
         Assert.Equal("service", jwt.Claims.First(c => c.Type == "user_type").Value);
         Assert.Equal(clientId, jwt.Claims.First(c => c.Type == "client_id").Value);
         Assert.Equal(serviceName, jwt.Claims.First(c => c.Type == "service_name").Value);
-        Assert.Equal("auth-test-key-v1", jwt.Header.Kid);
+        Assert.Equal(64, jwt.Header.Kid?.Length);
+        Assert.NotEqual("attacker-controlled-key-id", jwt.Header.Kid);
         Assert.Equal(900, long.Parse(jwt.Claims.First(c => c.Type == "exp").Value) -
             long.Parse(jwt.Claims.First(c => c.Type == "iat").Value));
         Assert.Equal(900, _tokenGenerator.ServiceTokenExpirationInSeconds);
@@ -179,7 +180,7 @@ public class TokenGeneratorTests
             _environmentMock.Object);
         using var rsa = RSA.Create();
         rsa.ImportFromPem(Encoding.UTF8.GetString(Convert.FromBase64String(_privateKeyBase64)));
-        var expectedKeyId = Convert.ToHexString(SHA256.HashData(rsa.ExportSubjectPublicKeyInfo()))[..16]
+        var expectedKeyId = Convert.ToHexString(SHA256.HashData(rsa.ExportSubjectPublicKeyInfo()))
             .ToLowerInvariant();
 
         var token = await generator.GenerateServiceAccessTokenAsync(
