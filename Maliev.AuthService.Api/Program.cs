@@ -1,6 +1,5 @@
 using Fido2NetLib;
 using Maliev.AuthService.Api.Services;
-using Maliev.AuthService.Api.Authorization;
 using Maliev.AuthService.Application.Interfaces;
 using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Infrastructure.DbContexts;
@@ -10,7 +9,6 @@ using Maliev.AuthService.Infrastructure.Services;
 using MassTransit;
 using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Http.Features;
-using System.Threading.RateLimiting;
 
 // Initialize bootstrap logging
 using var loggerFactory = LoggerFactory.Create(logBuilder => logBuilder.AddConsole());
@@ -50,29 +48,6 @@ try
 
     // JWT Authentication
     builder.AddJwtAuthentication();
-
-    builder.Services.AddRateLimiter(options =>
-    {
-        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-        options.AddPolicy(AuthRateLimitPolicies.ServiceLogin, httpContext =>
-        {
-            var partitionKey = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-            return RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey,
-                _ => new FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = builder.Configuration.GetValue(
-                        "RateLimiting:ServiceLogin:PermitLimit",
-                        100),
-                    Window = TimeSpan.FromSeconds(builder.Configuration.GetValue(
-                        "RateLimiting:ServiceLogin:WindowSeconds",
-                        60)),
-                    QueueLimit = 0,
-                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                    AutoReplenishment = true
-                });
-        });
-    });
 
     // --- API Configuration ---
     builder.AddStandardCors(); // CORS with fail-fast validation
@@ -153,6 +128,15 @@ try
     builder.Services.AddScoped<IGoogleIdentityNonceService, GoogleIdentityNonceService>();
     builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
     builder.Services.AddScoped<IEmailVerificationService, EmailVerificationService>();
+    builder.Services.AddOptions<ServiceLoginRateLimitOptions>()
+        .Bind(builder.Configuration.GetSection("RateLimiting:ServiceLogin"))
+        .ValidateDataAnnotations()
+        .ValidateOnStart();
+    builder.Services.AddScoped<IServiceLoginRateLimiter>(services =>
+        new RedisServiceLoginRateLimiter(
+            services.GetService<StackExchange.Redis.IConnectionMultiplexer>(),
+            services.GetRequiredService<IOptions<ServiceLoginRateLimitOptions>>(),
+            services.GetRequiredService<ILogger<RedisServiceLoginRateLimiter>>()));
     builder.Services.AddOptions<ServiceTokenOptions>()
         .Bind(builder.Configuration.GetSection("Jwt"))
         .ValidateDataAnnotations()
@@ -216,7 +200,6 @@ try
 
         await next(context);
     });
-    app.UseRateLimiter();
     app.UseCors();
     app.UseAuthorization();
 

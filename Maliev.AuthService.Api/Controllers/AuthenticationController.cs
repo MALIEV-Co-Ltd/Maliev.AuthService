@@ -6,7 +6,6 @@ using Maliev.AuthService.Application.DTOs.Response;
 using Maliev.AuthService.Application.Identity;
 using Maliev.AuthService.Application.Interfaces;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.RateLimiting;
 
 namespace Maliev.AuthService.Api.Controllers;
 
@@ -24,6 +23,7 @@ public class AuthenticationController : ControllerBase
     private readonly IGoogleIdentityNonceService _googleIdentityNonceService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<AuthenticationController> _logger;
+    private readonly IServiceLoginRateLimiter _serviceLoginRateLimiter;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AuthenticationController"/> class.
@@ -33,18 +33,21 @@ public class AuthenticationController : ControllerBase
     /// <param name="googleIdentityNonceService">The one-time Google identity nonce service.</param>
     /// <param name="configuration">The application configuration.</param>
     /// <param name="logger">The logger for this controller.</param>
+    /// <param name="serviceLoginRateLimiter">The distributed service credential exchange limiter.</param>
     public AuthenticationController(
         IAuthenticationService authenticationService,
         IEmailVerificationService emailVerificationService,
         IGoogleIdentityNonceService googleIdentityNonceService,
         IConfiguration configuration,
-        ILogger<AuthenticationController> logger)
+        ILogger<AuthenticationController> logger,
+        IServiceLoginRateLimiter serviceLoginRateLimiter)
     {
         _authenticationService = authenticationService;
         _emailVerificationService = emailVerificationService;
         _googleIdentityNonceService = googleIdentityNonceService;
         _configuration = configuration;
         _logger = logger;
+        _serviceLoginRateLimiter = serviceLoginRateLimiter;
     }
 
     /// <summary>
@@ -232,11 +235,34 @@ public class AuthenticationController : ControllerBase
     /// <response code="401">Invalid client credentials.</response>
     [HttpPost("service/login")]
     [RequestSizeLimit(4096)]
-    [EnableRateLimiting(AuthRateLimitPolicies.ServiceLogin)]
     public async Task<IActionResult> ServiceLogin([FromBody] ServiceLoginRequest request, CancellationToken cancellationToken)
     {
+        var remoteIpAddress = HttpContext.Connection.RemoteIpAddress;
+        var rateLimit = await _serviceLoginRateLimiter.TryAcquireAsync(
+            request.ClientId,
+            remoteIpAddress,
+            cancellationToken);
+        if (!rateLimit.IsAvailable)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ErrorResponse
+            {
+                Error = "service_unavailable",
+                ErrorDescription = "Service authentication is temporarily unavailable"
+            });
+        }
 
-        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        if (!rateLimit.IsAllowed)
+        {
+            Response.Headers.RetryAfter = rateLimit.RetryAfterSeconds.ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+            return StatusCode(StatusCodes.Status429TooManyRequests, new ErrorResponse
+            {
+                Error = "rate_limit_exceeded",
+                ErrorDescription = "Too many service authentication attempts"
+            });
+        }
+
+        var ipAddress = remoteIpAddress?.ToString();
         var result = await _authenticationService.AuthenticateServiceAsync(
             request,
             ipAddress,
