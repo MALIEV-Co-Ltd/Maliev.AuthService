@@ -6,6 +6,11 @@ namespace Maliev.AuthService.Application.Interfaces;
 public interface ITokenGenerator
 {
     /// <summary>
+    /// Gets the exact configured service access-token lifetime in seconds.
+    /// </summary>
+    int ServiceTokenExpirationInSeconds { get; }
+
+    /// <summary>
     /// Generates a JWT access token for a user.
     /// </summary>
     /// <param name="userId">The user identifier.</param>

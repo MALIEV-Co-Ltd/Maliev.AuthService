@@ -43,6 +43,9 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     {
         _fixture = fixture;
         _tokenGeneratorMock = new Mock<ITokenGenerator>();
+        _tokenGeneratorMock
+            .SetupGet(generator => generator.ServiceTokenExpirationInSeconds)
+            .Returns(900);
         _tokenValidatorMock = new Mock<ITokenValidator>();
         _refreshTokenServiceMock = new Mock<IRefreshTokenService>();
         _accountLockoutServiceMock = new Mock<IAccountLockoutService>();
@@ -927,7 +930,37 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     [Fact]
     public async Task AuthenticateServiceAsync_ValidCredentials_ReturnsToken()
     {
-        // This test requires specific database setup for service credentials
+        _iamClientMock
+            .Setup(client => client.ResolvePermissionsRequiredAsync(
+                Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PermissionResolutionResponse
+            {
+                PrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                Permissions = ["customer.customers.read"],
+                Roles = ["service.customer"]
+            });
+        _tokenGeneratorMock
+            .Setup(generator => generator.GenerateServiceAccessTokenAsync(
+                "service-dev-customer-api",
+                "Customer API",
+                It.Is<IEnumerable<string>>(permissions => permissions.SequenceEqual(new[] { "customer.customers.read" })),
+                It.Is<IEnumerable<string>>(roles => roles.SequenceEqual(new[] { "service.customer" })),
+                Guid.Parse("11111111-1111-1111-1111-111111111111")))
+            .ReturnsAsync("server-issued-token");
+
+        var result = await _service!.AuthenticateServiceAsync(
+            new ServiceLoginRequest
+            {
+                ClientId = "service-dev-customer-api",
+                ClientSecret = TestConstants.DummyValidServiceSecret
+            },
+            "127.0.0.1",
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal("server-issued-token", result.Response?.AccessToken);
+        Assert.Equal(900, result.Response?.ExpiresIn);
     }
 
     [Fact]
@@ -937,10 +970,14 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         var request = new ServiceLoginRequest { ClientId = "invalid", ClientSecret = "secret" };
 
         // Act
-        var result = await _service!.AuthenticateServiceAsync(request, "127.0.0.1");
+        var result = await _service!.AuthenticateServiceAsync(
+            request,
+            "127.0.0.1",
+            CancellationToken.None);
 
         // Assert
-        Assert.Null(result);
+        Assert.False(result.Success);
+        Assert.Equal("invalid_credentials", result.ErrorCode);
     }
 
     [Fact]
@@ -950,10 +987,109 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         var request = new ServiceLoginRequest { ClientId = "service-dev-customer-api", ClientSecret = "wrong-secret" };
 
         // Act
-        var result = await _service!.AuthenticateServiceAsync(request, "127.0.0.1");
+        var result = await _service!.AuthenticateServiceAsync(
+            request,
+            "127.0.0.1",
+            CancellationToken.None);
 
         // Assert
-        Assert.Null(result);
+        Assert.False(result.Success);
+        Assert.Equal("invalid_credentials", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task AuthenticateServiceAsync_IamUnavailable_ReturnsServiceUnavailableWithoutToken()
+    {
+        _iamClientMock
+            .Setup(client => client.ResolvePermissionsRequiredAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("IAM unavailable"));
+
+        var result = await _service!.AuthenticateServiceAsync(
+            new ServiceLoginRequest
+            {
+                ClientId = "service-dev-customer-api",
+                ClientSecret = TestConstants.DummyValidServiceSecret
+            },
+            "127.0.0.1",
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("service_unavailable", result.ErrorCode);
+        Assert.Null(result.Response);
+        _tokenGeneratorMock.Verify(generator => generator.GenerateServiceAccessTokenAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<IEnumerable<string>>(),
+            It.IsAny<IEnumerable<string>>(),
+            It.IsAny<Guid?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AuthenticateServiceAsync_CallerCancellationDuringIamResolution_Propagates()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        _iamClientMock
+            .Setup(client => client.ResolvePermissionsRequiredAsync(
+                It.IsAny<Guid>(),
+                cancellation.Token))
+            .ThrowsAsync(new OperationCanceledException(cancellation.Token));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _service!.AuthenticateServiceAsync(
+                new ServiceLoginRequest
+                {
+                    ClientId = "service-dev-customer-api",
+                    ClientSecret = TestConstants.DummyValidServiceSecret
+                },
+                "127.0.0.1",
+                cancellation.Token));
+
+        _tokenGeneratorMock.Verify(generator => generator.GenerateServiceAccessTokenAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<IEnumerable<string>>(),
+            It.IsAny<IEnumerable<string>>(),
+            It.IsAny<Guid?>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AuthenticateServiceAsync_IamReturnsWildcardAuthority_ReturnsServiceUnavailableWithoutToken(
+        bool wildcardIsPermission)
+    {
+        _iamClientMock
+            .Setup(client => client.ResolvePermissionsRequiredAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PermissionResolutionResponse
+            {
+                PrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                Permissions = wildcardIsPermission ? ["*"] : ["customer.customers.read"],
+                Roles = wildcardIsPermission ? ["service.customer"] : ["*"]
+            });
+
+        var result = await _service!.AuthenticateServiceAsync(
+            new ServiceLoginRequest
+            {
+                ClientId = "service-dev-customer-api",
+                ClientSecret = TestConstants.DummyValidServiceSecret
+            },
+            "127.0.0.1",
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("service_unavailable", result.ErrorCode);
+        Assert.Null(result.Response);
+        _tokenGeneratorMock.Verify(generator => generator.GenerateServiceAccessTokenAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<IEnumerable<string>>(),
+            It.IsAny<IEnumerable<string>>(),
+            It.IsAny<Guid?>()), Times.Never);
     }
 
     [Fact]

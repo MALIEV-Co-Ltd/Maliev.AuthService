@@ -25,7 +25,7 @@ public class TestDatabaseFixture : IDisposable
     {
         if (_initialized) return;
 
-        _postgresContainer = 
+        _postgresContainer =
 #pragma warning disable CS0618
         new PostgreSqlBuilder().WithImage("postgres:18-alpine")
             .WithDatabase("auth_test_db")
@@ -73,7 +73,9 @@ public class TestDatabaseFixture : IDisposable
             Id = Guid.NewGuid(),
             ClientId = "service-dev-customer-api",
             PrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111"), // Test principal ID for IAM integration
-            ClientSecretHash = "536cd80fe9c61705de47dacb3fc7c4d3c4c331841afe942a9966abc5e4ad70ef",
+            ClientSecretHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(TestConstants.DummyValidServiceSecret)))
+                .ToLowerInvariant(),
             ServiceName = "Customer API",
             IsActive = true,
             CreatedAt = DateTime.UtcNow,

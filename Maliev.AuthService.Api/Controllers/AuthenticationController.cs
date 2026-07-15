@@ -6,6 +6,7 @@ using Maliev.AuthService.Application.DTOs.Response;
 using Maliev.AuthService.Application.Identity;
 using Maliev.AuthService.Application.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Maliev.AuthService.Api.Controllers;
 
@@ -230,14 +231,27 @@ public class AuthenticationController : ControllerBase
     /// <response code="200">Successful authentication.</response>
     /// <response code="401">Invalid client credentials.</response>
     [HttpPost("service/login")]
+    [EnableRateLimiting(AuthRateLimitPolicies.ServiceLogin)]
     public async Task<IActionResult> ServiceLogin([FromBody] ServiceLoginRequest request, CancellationToken cancellationToken)
     {
 
         var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
-        var result = await _authenticationService.AuthenticateServiceAsync(request, ipAddress);
+        var result = await _authenticationService.AuthenticateServiceAsync(
+            request,
+            ipAddress,
+            cancellationToken);
 
-        if (result == null)
+        if (!result.Success)
         {
+            if (result.ErrorCode == "service_unavailable")
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
             return Unauthorized(new ErrorResponse
             {
                 Error = "invalid_credentials",
@@ -245,7 +259,7 @@ public class AuthenticationController : ControllerBase
             });
         }
 
-        return Ok(result);
+        return Ok(result.Response);
     }
 
     /// <summary>

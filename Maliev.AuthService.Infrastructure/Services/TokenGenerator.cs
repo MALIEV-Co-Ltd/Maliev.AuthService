@@ -23,6 +23,9 @@ public class TokenGenerator : ITokenGenerator
     private readonly int _serviceTokenExpirationInSeconds;
     private RsaSecurityKey? _cachedRsaKey;
 
+    /// <inheritdoc/>
+    public int ServiceTokenExpirationInSeconds => _serviceTokenExpirationInSeconds;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="TokenGenerator"/> class.
     /// </summary>
@@ -98,13 +101,23 @@ public class TokenGenerator : ITokenGenerator
                 }
             }
 
-            return new RsaSecurityKey(rsa);
+            var configuredKeyId = _configuration["Jwt:KeyId"];
+            var keyId = string.IsNullOrWhiteSpace(configuredKeyId)
+                ? DeriveKeyId(rsa)
+                : configuredKeyId.Trim();
+            return new RsaSecurityKey(rsa) { KeyId = keyId };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to import RSA private key. Ensure key is in valid PEM or PKCS#8 format.");
             throw new InvalidOperationException("Failed to import RSA private key", ex);
         }
+    }
+
+    private static string DeriveKeyId(RSA rsa)
+    {
+        var subjectPublicKeyInfo = rsa.ExportSubjectPublicKeyInfo();
+        return Convert.ToHexString(SHA256.HashData(subjectPublicKeyInfo))[..16].ToLowerInvariant();
     }
 
     /// <inheritdoc/>
@@ -204,6 +217,7 @@ public class TokenGenerator : ITokenGenerator
     /// <inheritdoc/>
     public Task<string> GenerateServiceAccessTokenAsync(string clientId, string serviceName, IEnumerable<string>? permissions = null, IEnumerable<string>? roles = null, Guid? principalId = null)
     {
+        var issuedAt = DateTime.UtcNow;
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, principalId?.ToString() ?? clientId),
@@ -211,7 +225,7 @@ public class TokenGenerator : ITokenGenerator
             new("service_name", serviceName),
             new("client_id", clientId),
             new("user_type", "service"),
-            new(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
+            new(JwtRegisteredClaimNames.Iat, new DateTimeOffset(issuedAt).ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
         };
 
         if (permissions != null)
@@ -239,7 +253,9 @@ public class TokenGenerator : ITokenGenerator
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddSeconds(_serviceTokenExpirationInSeconds),
+            IssuedAt = issuedAt,
+            NotBefore = issuedAt,
+            Expires = issuedAt.AddSeconds(_serviceTokenExpirationInSeconds),
             Issuer = issuer,
             Audience = audience,
             SigningCredentials = credentials

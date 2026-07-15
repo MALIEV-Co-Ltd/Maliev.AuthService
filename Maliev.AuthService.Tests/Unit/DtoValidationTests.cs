@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Maliev.AuthService.Application.DTOs.Request;
 using Maliev.AuthService.Application.DTOs.Response;
 using Xunit;
@@ -78,6 +79,28 @@ public class DtoValidationTests
 
         Assert.Equal("client-id", request.ClientId);
         Assert.Equal("client-secret", request.ClientSecret);
+    }
+
+    [Theory]
+    [InlineData(101, 64)]
+    [InlineData(64, 513)]
+    public void ServiceLoginRequest_WithOversizedCredential_IsRejected(int clientIdLength, int secretLength)
+    {
+        var request = new ServiceLoginRequest
+        {
+            ClientId = new string('c', clientIdLength),
+            ClientSecret = new string('s', secretLength)
+        };
+        var validationResults = new List<ValidationResult>();
+
+        var valid = Validator.TryValidateObject(
+            request,
+            new ValidationContext(request),
+            validationResults,
+            validateAllProperties: true);
+
+        Assert.False(valid);
+        Assert.NotEmpty(validationResults);
     }
 
     [Fact]

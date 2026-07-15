@@ -1,5 +1,6 @@
 using Fido2NetLib;
 using Maliev.AuthService.Api.Services;
+using Maliev.AuthService.Api.Authorization;
 using Maliev.AuthService.Application.Interfaces;
 using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Infrastructure.DbContexts;
@@ -8,6 +9,7 @@ using Maliev.AuthService.Infrastructure.Security;
 using Maliev.AuthService.Infrastructure.Services;
 using MassTransit;
 using Microsoft.Extensions.Options;
+using System.Threading.RateLimiting;
 
 // Initialize bootstrap logging
 using var loggerFactory = LoggerFactory.Create(logBuilder => logBuilder.AddConsole());
@@ -47,6 +49,29 @@ try
 
     // JWT Authentication
     builder.AddJwtAuthentication();
+
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        options.AddPolicy(AuthRateLimitPolicies.ServiceLogin, httpContext =>
+        {
+            var partitionKey = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            return RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey,
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = builder.Configuration.GetValue(
+                        "RateLimiting:ServiceLogin:PermitLimit",
+                        100),
+                    Window = TimeSpan.FromSeconds(builder.Configuration.GetValue(
+                        "RateLimiting:ServiceLogin:WindowSeconds",
+                        60)),
+                    QueueLimit = 0,
+                    QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                    AutoReplenishment = true
+                });
+        });
+    });
 
     // --- API Configuration ---
     builder.AddStandardCors(); // CORS with fail-fast validation
@@ -165,6 +190,7 @@ try
         app.UseHttpsRedirection();
     }
     app.UseRouting();
+    app.UseRateLimiter();
     app.UseCors();
     app.UseAuthorization();
 

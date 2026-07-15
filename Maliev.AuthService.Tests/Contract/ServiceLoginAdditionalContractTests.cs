@@ -80,7 +80,7 @@ public class ServiceLoginAdditionalContractTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task POST_V1_Auth_Service_Login_ValidCredentials_ReturnsLongerExpiry()
+    public async Task POST_V1_Auth_Service_Login_ValidCredentials_ReturnsConfiguredServiceExpiry()
     {
         await CleanDatabaseAsync();
         var request = new
@@ -94,7 +94,7 @@ public class ServiceLoginAdditionalContractTests : IntegrationTestBase
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
-        Assert.Equal(3600, json.RootElement.GetProperty("expires_in").GetInt32());
+        Assert.Equal(900, json.RootElement.GetProperty("expires_in").GetInt32());
     }
 
     [Fact]
