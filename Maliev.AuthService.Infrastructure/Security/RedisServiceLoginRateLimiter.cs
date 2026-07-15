@@ -9,7 +9,9 @@ using StackExchange.Redis;
 namespace Maliev.AuthService.Infrastructure.Security;
 
 /// <summary>
-/// Uses Redis to atomically share service-login limits across replicas.
+/// Uses Redis to atomically share service-login limits across replicas. The peer bucket uses the
+/// socket peer address supplied by ASP.NET Core and never trusts forwarded headers implicitly.
+/// A trusted ingress should provide the outer request-rate ceiling before traffic reaches this service.
 /// </summary>
 public sealed class RedisServiceLoginRateLimiter(
     IConnectionMultiplexer? redis,
@@ -17,11 +19,20 @@ public sealed class RedisServiceLoginRateLimiter(
     ILogger<RedisServiceLoginRateLimiter> logger) : IServiceLoginRateLimiter
 {
     private const string AcquireScript = """
-        local count = redis.call('INCR', KEYS[1])
-        if count == 1 then
+        local peerCount = redis.call('INCR', KEYS[1])
+        if peerCount == 1 then
             redis.call('PEXPIRE', KEYS[1], ARGV[1])
         end
-        return { count, redis.call('PTTL', KEYS[1]) }
+        local clientCount = redis.call('INCR', KEYS[2])
+        if clientCount == 1 then
+            redis.call('PEXPIRE', KEYS[2], ARGV[1])
+        end
+        return {
+            peerCount,
+            redis.call('PTTL', KEYS[1]),
+            clientCount,
+            redis.call('PTTL', KEYS[2])
+        }
         """;
     private readonly ServiceLoginRateLimitOptions _options = options.Value;
 
@@ -37,23 +48,32 @@ public sealed class RedisServiceLoginRateLimiter(
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        var key = CreatePartitionKey(clientId, remoteIpAddress);
+        var keys = CreatePartitionKeys(clientId, remoteIpAddress);
         try
         {
             var result = (RedisResult[]?)await redis.GetDatabase().ScriptEvaluateAsync(
                 AcquireScript,
-                [key],
+                keys,
                 [_options.WindowSeconds * 1000]);
-            if (result is not { Length: 2 })
+            if (result is not { Length: 4 })
             {
                 return new ServiceLoginRateLimitResult(false, false, 0);
             }
 
-            var count = (long)result[0];
-            var remainingMilliseconds = Math.Max(1, (long)result[1]);
+            var peerCount = (long)result[0];
+            var peerRemainingMilliseconds = Math.Max(1, (long)result[1]);
+            var clientCount = (long)result[2];
+            var clientRemainingMilliseconds = Math.Max(1, (long)result[3]);
+            var peerDenied = peerCount > _options.PeerPermitLimit;
+            var clientDenied = clientCount > _options.ClientPermitLimit;
+            var remainingMilliseconds = peerDenied && clientDenied
+                ? Math.Max(peerRemainingMilliseconds, clientRemainingMilliseconds)
+                : peerDenied
+                    ? peerRemainingMilliseconds
+                    : clientRemainingMilliseconds;
             return new ServiceLoginRateLimitResult(
                 true,
-                count <= _options.PermitLimit,
+                !peerDenied && !clientDenied,
                 (int)Math.Ceiling(remainingMilliseconds / 1000d));
         }
         catch (RedisException exception)
@@ -68,12 +88,21 @@ public sealed class RedisServiceLoginRateLimiter(
         }
     }
 
-    private static RedisKey CreatePartitionKey(string clientId, IPAddress? remoteIpAddress)
+    private static RedisKey[] CreatePartitionKeys(string clientId, IPAddress? remoteIpAddress)
     {
         var normalizedClientId = clientId.Trim().ToLowerInvariant();
         var normalizedAddress = remoteIpAddress?.MapToIPv6().ToString() ?? "unknown";
-        var partition = Encoding.UTF8.GetBytes($"{normalizedClientId}\n{normalizedAddress}");
-        var digest = Convert.ToHexString(SHA256.HashData(partition)).ToLowerInvariant();
-        return $"auth:service-login-rate:{digest}";
+        return
+        [
+            CreateHashedKey("peer", normalizedAddress),
+            CreateHashedKey("client", normalizedClientId)
+        ];
+    }
+
+    private static RedisKey CreateHashedKey(string bucket, string value)
+    {
+        var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
+            .ToLowerInvariant();
+        return $"auth:{{service-login-rate}}:{bucket}:{digest}";
     }
 }

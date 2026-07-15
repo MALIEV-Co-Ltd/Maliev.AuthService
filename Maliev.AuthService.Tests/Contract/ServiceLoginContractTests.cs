@@ -7,8 +7,11 @@ using System.Text.Json;
 using System.Net.Http.Headers;
 using Maliev.AuthService.Domain.Entities;
 using Maliev.AuthService.Application.Interfaces;
+using Maliev.AuthService.Infrastructure.Security;
 using Maliev.AuthService.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
@@ -132,10 +135,27 @@ public class ServiceLoginContractTests : IntegrationTestBase
     public async Task ServiceLoginRateLimiter_RealRedis_IsolatesClientsBehindSamePeerAndEnforcesThreshold()
     {
         await CleanDatabaseAsync();
-        using var firstScope = Factory.Services.CreateScope();
-        using var secondScope = Factory.Services.CreateScope();
-        var firstLimiter = firstScope.ServiceProvider.GetRequiredService<IServiceLoginRateLimiter>();
-        var secondLimiter = secondScope.ServiceProvider.GetRequiredService<IServiceLoginRateLimiter>();
+        var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__redis")
+            ?? throw new InvalidOperationException("The Redis Testcontainer connection is unavailable");
+        await using var firstRedis = await StackExchange.Redis.ConnectionMultiplexer
+            .ConnectAsync(connectionString);
+        await using var secondRedis = await StackExchange.Redis.ConnectionMultiplexer
+            .ConnectAsync(connectionString);
+        Assert.NotSame(firstRedis, secondRedis);
+        var limiterOptions = Options.Create(new ServiceLoginRateLimitOptions
+        {
+            PeerPermitLimit = 5,
+            ClientPermitLimit = 3,
+            WindowSeconds = 60
+        });
+        var firstLimiter = new RedisServiceLoginRateLimiter(
+            firstRedis,
+            limiterOptions,
+            NullLogger<RedisServiceLoginRateLimiter>.Instance);
+        var secondLimiter = new RedisServiceLoginRateLimiter(
+            secondRedis,
+            limiterOptions,
+            NullLogger<RedisServiceLoginRateLimiter>.Instance);
 
         var first = await firstLimiter.TryAcquireAsync("service-a", IPAddress.Loopback);
         var second = await secondLimiter.TryAcquireAsync("service-a", IPAddress.Loopback);
@@ -154,17 +174,59 @@ public class ServiceLoginContractTests : IntegrationTestBase
         Assert.InRange(denied.RetryAfterSeconds, 1, 60);
         Assert.True(independentClient.IsAllowed);
 
-        var redis = firstScope.ServiceProvider
-            .GetRequiredService<StackExchange.Redis.IConnectionMultiplexer>();
-        var server = redis.GetServer(redis.GetEndPoints().First());
-        var keys = server.Keys(pattern: "auth:service-login-rate:*").Select(key => key.ToString()).ToList();
+        var server = firstRedis.GetServer(firstRedis.GetEndPoints().First());
+        var keys = server.Keys(pattern: "auth:{service-login-rate}:*").Select(key => key.ToString()).ToList();
         Assert.NotEmpty(keys);
         Assert.All(keys, key =>
         {
             Assert.DoesNotContain("service-a", key, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("service-b", key, StringComparison.OrdinalIgnoreCase);
-            Assert.Matches("^auth:service-login-rate:[0-9a-f]{64}$", key);
+            Assert.Matches("^auth:\\{service-login-rate\\}:(peer|client):[0-9a-f]{64}$", key);
         });
+    }
+
+    [Fact]
+    public async Task ServiceLoginRateLimiter_RotatingClientIds_CannotBypassPeerCeiling()
+    {
+        await CleanDatabaseAsync();
+        using var scope = Factory.Services.CreateScope();
+        var limiter = scope.ServiceProvider.GetRequiredService<IServiceLoginRateLimiter>();
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var allowed = await limiter.TryAcquireAsync($"service-rotated-{attempt}", IPAddress.Loopback);
+            Assert.True(allowed.IsAllowed);
+        }
+
+        var denied = await limiter.TryAcquireAsync("service-rotated-3", IPAddress.Loopback);
+
+        Assert.True(denied.IsAvailable);
+        Assert.False(denied.IsAllowed);
+        Assert.InRange(denied.RetryAfterSeconds, 1, 60);
+    }
+
+    [Fact]
+    public async Task ServiceLoginRateLimiter_RotatingPeers_CannotBypassClientCeiling()
+    {
+        await CleanDatabaseAsync();
+        using var scope = Factory.Services.CreateScope();
+        var limiter = scope.ServiceProvider.GetRequiredService<IServiceLoginRateLimiter>();
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            var allowed = await limiter.TryAcquireAsync(
+                "service-fixed-client",
+                IPAddress.Parse($"192.0.2.{attempt}"));
+            Assert.True(allowed.IsAllowed);
+        }
+
+        var denied = await limiter.TryAcquireAsync(
+            "service-fixed-client",
+            IPAddress.Parse("192.0.2.4"));
+
+        Assert.True(denied.IsAvailable);
+        Assert.False(denied.IsAllowed);
+        Assert.InRange(denied.RetryAfterSeconds, 1, 60);
     }
 
     [Fact]

@@ -7,9 +7,13 @@ namespace Maliev.AuthService.Infrastructure.Security;
 /// </summary>
 public sealed class ServiceLoginRateLimitOptions
 {
-    /// <summary>Gets or sets permits per window and partition.</summary>
+    /// <summary>Gets or sets permits per window for one socket peer.</summary>
     [Range(1, 1000)]
-    public int PermitLimit { get; set; } = 100;
+    public int PeerPermitLimit { get; set; } = 100;
+
+    /// <summary>Gets or sets permits per window for one normalized client identifier.</summary>
+    [Range(1, 1000)]
+    public int ClientPermitLimit { get; set; } = 100;
 
     /// <summary>Gets or sets the fixed window duration in seconds.</summary>
     [Range(1, 3600)]

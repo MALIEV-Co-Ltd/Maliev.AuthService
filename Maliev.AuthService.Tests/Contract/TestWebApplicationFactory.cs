@@ -94,7 +94,8 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         Environment.SetEnvironmentVariable("CustomerService__BaseUrl", "http://localhost:5001");
         Environment.SetEnvironmentVariable("EmployeeService__BaseUrl", "http://localhost:5002");
         Environment.SetEnvironmentVariable("IAMService__BaseUrl", "http://localhost:5100");
-        Environment.SetEnvironmentVariable("RateLimiting__ServiceLogin__PermitLimit", "3");
+        Environment.SetEnvironmentVariable("RateLimiting__ServiceLogin__PeerPermitLimit", "3");
+        Environment.SetEnvironmentVariable("RateLimiting__ServiceLogin__ClientPermitLimit", "3");
         Environment.SetEnvironmentVariable("RateLimiting__ServiceLogin__WindowSeconds", "60");
 
         // Export RSA private and public keys for JWT token generation and validation
