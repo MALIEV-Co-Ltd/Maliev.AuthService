@@ -6,7 +6,9 @@ using System.Text;
 using System.Text.Json;
 using System.Net.Http.Headers;
 using Maliev.AuthService.Domain.Entities;
+using Maliev.AuthService.Application.Interfaces;
 using Maliev.AuthService.Tests.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
@@ -124,6 +126,70 @@ public class ServiceLoginContractTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
         Assert.Equal(0, Factory.IamResolutionCalls);
+    }
+
+    [Fact]
+    public async Task ServiceLoginRateLimiter_RealRedis_IsolatesClientsBehindSamePeerAndEnforcesThreshold()
+    {
+        await CleanDatabaseAsync();
+        using var firstScope = Factory.Services.CreateScope();
+        using var secondScope = Factory.Services.CreateScope();
+        var firstLimiter = firstScope.ServiceProvider.GetRequiredService<IServiceLoginRateLimiter>();
+        var secondLimiter = secondScope.ServiceProvider.GetRequiredService<IServiceLoginRateLimiter>();
+
+        var first = await firstLimiter.TryAcquireAsync("service-a", IPAddress.Loopback);
+        var second = await secondLimiter.TryAcquireAsync("service-a", IPAddress.Loopback);
+        var third = await firstLimiter.TryAcquireAsync("service-a", IPAddress.Loopback);
+
+        var denied = await secondLimiter.TryAcquireAsync("service-a", IPAddress.Loopback);
+        var independentClient = await firstLimiter.TryAcquireAsync("service-b", IPAddress.Loopback);
+
+        Assert.All([first, second, third], result =>
+        {
+            Assert.True(result.IsAvailable);
+            Assert.True(result.IsAllowed);
+        });
+        Assert.True(denied.IsAvailable);
+        Assert.False(denied.IsAllowed);
+        Assert.InRange(denied.RetryAfterSeconds, 1, 60);
+        Assert.True(independentClient.IsAllowed);
+
+        var redis = firstScope.ServiceProvider
+            .GetRequiredService<StackExchange.Redis.IConnectionMultiplexer>();
+        var server = redis.GetServer(redis.GetEndPoints().First());
+        var keys = server.Keys(pattern: "auth:service-login-rate:*").Select(key => key.ToString()).ToList();
+        Assert.NotEmpty(keys);
+        Assert.All(keys, key =>
+        {
+            Assert.DoesNotContain("service-a", key, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("service-b", key, StringComparison.OrdinalIgnoreCase);
+            Assert.Matches("^auth:service-login-rate:[0-9a-f]{64}$", key);
+        });
+    }
+
+    [Fact]
+    public async Task POST_V1_Auth_Service_Login_WhenRedisThresholdExceeded_Returns429WithRetryAfter()
+    {
+        await CleanDatabaseAsync();
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var response = await Client.PostAsJsonAsync("/auth/v1/service/login", new
+            {
+                client_id = "service-dev-customer-api",
+                client_secret = TestConstants.DummyWrongSecret
+            });
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        var denied = await Client.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = "service-dev-customer-api",
+            client_secret = TestConstants.DummyWrongSecret
+        });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, denied.StatusCode);
+        Assert.True(denied.Headers.TryGetValues("Retry-After", out var retryAfter));
+        Assert.True(int.Parse(Assert.Single(retryAfter)) > 0);
     }
 
     [Fact]

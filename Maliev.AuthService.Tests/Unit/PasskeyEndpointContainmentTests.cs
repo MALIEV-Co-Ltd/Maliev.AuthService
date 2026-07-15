@@ -136,7 +136,8 @@ public sealed class PasskeyEndpointContainmentTests
             Mock.Of<IEmailVerificationService>(),
             Mock.Of<IGoogleIdentityNonceService>(),
             new ConfigurationBuilder().Build(),
-            NullLogger<AuthenticationController>.Instance);
+            NullLogger<AuthenticationController>.Instance,
+            Mock.Of<IServiceLoginRateLimiter>());
     }
 
     private static Mock<IPasskeyService> CreatePasskeyServiceMock()

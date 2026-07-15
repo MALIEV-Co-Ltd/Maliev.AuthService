@@ -94,6 +94,8 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         Environment.SetEnvironmentVariable("CustomerService__BaseUrl", "http://localhost:5001");
         Environment.SetEnvironmentVariable("EmployeeService__BaseUrl", "http://localhost:5002");
         Environment.SetEnvironmentVariable("IAMService__BaseUrl", "http://localhost:5100");
+        Environment.SetEnvironmentVariable("RateLimiting__ServiceLogin__PermitLimit", "3");
+        Environment.SetEnvironmentVariable("RateLimiting__ServiceLogin__WindowSeconds", "60");
 
         // Export RSA private and public keys for JWT token generation and validation
         // The base factory provides _testRsa through SigningCredentials property
@@ -114,6 +116,14 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
 
     protected override void ConfigureAdditionalServices(IServiceCollection services)
     {
+        services.RemoveAll<StackExchange.Redis.IConnectionMultiplexer>();
+        services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(_ =>
+        {
+            var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__redis")
+                ?? throw new InvalidOperationException("The Redis Testcontainer connection is unavailable");
+            return StackExchange.Redis.ConnectionMultiplexer.Connect(connectionString);
+        });
+
         services.RemoveAll<IGoogleIdentityTokenValidator>();
         services.AddSingleton<IGoogleIdentityTokenValidator, TestGoogleIdentityTokenValidator>();
 
