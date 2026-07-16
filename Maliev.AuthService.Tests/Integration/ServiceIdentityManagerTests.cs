@@ -15,6 +15,8 @@ namespace Maliev.AuthService.Tests.Integration;
 public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factory) : IAsyncLifetime
 {
     private static readonly Guid ActorId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    private const string WorkloadId = "auth-service";
+    private const string ExpectedRoleId = "roles.workloads.auth-service.v1";
 
     public Task InitializeAsync() => factory.CleanDatabaseAsync();
 
@@ -28,9 +30,9 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
         var manager = new ServiceIdentityManager(context, iam, TimeProvider.System);
         var request = NewProvisionRequest();
 
-        var created = await manager.ProvisionAsync("auth", request, ActorId, "employee-token");
+        var created = await manager.ProvisionAsync(WorkloadId, request, ActorId, "employee-token");
         context.ChangeTracker.Clear();
-        var replay = await manager.ProvisionAsync("auth", request, ActorId, "employee-token");
+        var replay = await manager.ProvisionAsync(WorkloadId, request, ActorId, "employee-token");
 
         Assert.True(created.SecretRetrievable);
         Assert.NotNull(created.ClientSecret);
@@ -52,11 +54,11 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
         await using var context = factory.CreateDbContext();
         var manager = new ServiceIdentityManager(context, new RecordingIamClient(), TimeProvider.System);
         var request = NewProvisionRequest();
-        _ = await manager.ProvisionAsync("auth", request, ActorId, "employee-token");
+        _ = await manager.ProvisionAsync(WorkloadId, request, ActorId, "employee-token");
         context.ChangeTracker.Clear();
 
         await Assert.ThrowsAsync<ServiceIdentityConflictException>(() => manager.ProvisionAsync(
-            "auth",
+            WorkloadId,
             request,
             Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
             "employee-token"));
@@ -70,15 +72,15 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
         var operation = new ServiceIdentityOperation
         {
             Id = request.OperationId,
-            WorkloadId = "auth",
+            WorkloadId = WorkloadId,
             Kind = ServiceIdentityOperationKind.Provision,
             RequestHash = HashCanonicalRequest(
-                $"provision|auth|{request.ProfileVersion}|{request.ServiceName}|{request.HardExpiryDays}"),
+                $"provision|{WorkloadId}|{request.ProfileVersion}|{request.ServiceName}|{request.HardExpiryDays}"),
             ActorId = ActorId,
             State = ServiceIdentityOperationState.IamReady,
             IamPrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
             IamProfileVersion = 1,
-            IamRoleId = "roles.workload.auth",
+            IamRoleId = ExpectedRoleId,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
@@ -87,11 +89,11 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
         var iam = new RecordingIamClient { ThrowOnCall = true };
         var manager = new ServiceIdentityManager(context, iam, TimeProvider.System);
 
-        var result = await manager.ProvisionAsync("auth", request, ActorId, "employee-token");
+        var result = await manager.ProvisionAsync(WorkloadId, request, ActorId, "employee-token");
 
         Assert.True(result.SecretRetrievable);
         Assert.Equal(0, iam.CallCount);
-        Assert.True(await context.ServiceCredentials.AnyAsync(item => item.WorkloadId == "auth"));
+        Assert.True(await context.ServiceCredentials.AnyAsync(item => item.WorkloadId == WorkloadId));
     }
 
     [Fact]
@@ -105,8 +107,8 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
         var secondManager = new ServiceIdentityManager(secondContext, iam, TimeProvider.System);
 
         var results = await Task.WhenAll(
-            firstManager.ProvisionAsync("auth", request, ActorId, "employee-token"),
-            secondManager.ProvisionAsync("auth", request, ActorId, "employee-token"));
+            firstManager.ProvisionAsync(WorkloadId, request, ActorId, "employee-token"),
+            secondManager.ProvisionAsync(WorkloadId, request, ActorId, "employee-token"));
 
         Assert.Single(results, result => result.SecretRetrievable);
         Assert.Single(results, result => !result.SecretRetrievable);
@@ -120,11 +122,11 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
     {
         await using var context = factory.CreateDbContext();
         var manager = new ServiceIdentityManager(context, new RecordingIamClient(), TimeProvider.System);
-        _ = await manager.ProvisionAsync("auth", NewProvisionRequest(), ActorId, "employee-token");
+        _ = await manager.ProvisionAsync(WorkloadId, NewProvisionRequest(), ActorId, "employee-token");
         context.ChangeTracker.Clear();
 
         await Assert.ThrowsAsync<ServiceIdentityConflictException>(() => manager.ProvisionAsync(
-            "auth",
+            WorkloadId,
             new ProvisionServiceIdentityRequest
             {
                 OperationId = Guid.NewGuid(),
@@ -137,9 +139,11 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
     }
 
     [Theory]
-    [InlineData("other", "roles.workload.auth")]
-    [InlineData("auth", "*")]
-    [InlineData("auth", "roles.platform.owner")]
+    [InlineData("other", ExpectedRoleId)]
+    [InlineData(WorkloadId, "*")]
+    [InlineData(WorkloadId, "roles.iam.admin")]
+    [InlineData(WorkloadId, "roles.workloads.other.v1")]
+    [InlineData(WorkloadId, "roles.workloads.auth-service.v2")]
     public async Task ProvisionAsync_UnsafeIamResponse_DoesNotCreateCredential(
         string returnedWorkload,
         string returnedRole)
@@ -158,12 +162,12 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
         var manager = new ServiceIdentityManager(context, iam, TimeProvider.System);
 
         await Assert.ThrowsAsync<ServiceIdentityConflictException>(() => manager.ProvisionAsync(
-            "auth",
+            WorkloadId,
             NewProvisionRequest(),
             ActorId,
             "employee-token"));
 
-        Assert.False(await context.ServiceCredentials.AnyAsync(item => item.WorkloadId == "auth"));
+        Assert.False(await context.ServiceCredentials.AnyAsync(item => item.WorkloadId == WorkloadId));
         Assert.False(await context.ServiceCredentialVersions.AnyAsync());
     }
 
@@ -172,11 +176,11 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
     {
         await using var context = factory.CreateDbContext();
         var manager = new ServiceIdentityManager(context, new RecordingIamClient(), TimeProvider.System);
-        var created = await manager.ProvisionAsync("auth", NewProvisionRequest(), ActorId, "employee-token");
+        var created = await manager.ProvisionAsync(WorkloadId, NewProvisionRequest(), ActorId, "employee-token");
         context.ChangeTracker.Clear();
 
         var rotated = await manager.RotateAsync(
-            "auth",
+            WorkloadId,
             new RotateServiceIdentityRequest
             {
                 OperationId = Guid.NewGuid(),
@@ -193,17 +197,17 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
         Assert.Equal(ServiceCredentialVersionStatus.Grace, versions[0].Status);
         Assert.Equal(ServiceCredentialVersionStatus.Active, versions[1].Status);
         var logicalHash = await context.ServiceCredentials.AsNoTracking()
-            .Where(item => item.WorkloadId == "auth")
+            .Where(item => item.WorkloadId == WorkloadId)
             .Select(item => item.ClientSecretHash)
             .SingleAsync();
         Assert.Equal(Hash(rotated.ClientSecret!), logicalHash);
 
         context.ChangeTracker.Clear();
         await manager.RevokeAsync(
-            "auth",
+            WorkloadId,
             new RevokeServiceIdentityRequest { OperationId = Guid.NewGuid() },
             ActorId);
-        Assert.False(await context.ServiceCredentials.AsNoTracking().Where(item => item.WorkloadId == "auth")
+        Assert.False(await context.ServiceCredentials.AsNoTracking().Where(item => item.WorkloadId == WorkloadId)
             .Select(item => item.IsActive).SingleAsync());
         Assert.All(
             await context.ServiceCredentialVersions.AsNoTracking().ToListAsync(),
@@ -215,16 +219,16 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
     {
         await using var context = factory.CreateDbContext();
         var manager = new ServiceIdentityManager(context, new RecordingIamClient(), TimeProvider.System);
-        _ = await manager.ProvisionAsync("auth", NewProvisionRequest(), ActorId, "employee-token");
+        _ = await manager.ProvisionAsync(WorkloadId, NewProvisionRequest(), ActorId, "employee-token");
         context.ChangeTracker.Clear();
         _ = await manager.RotateAsync(
-            "auth",
+            WorkloadId,
             new RotateServiceIdentityRequest { OperationId = Guid.NewGuid(), GracePeriodSeconds = 60 },
             ActorId);
         context.ChangeTracker.Clear();
 
         _ = await manager.RotateAsync(
-            "auth",
+            WorkloadId,
             new RotateServiceIdentityRequest { OperationId = Guid.NewGuid(), GracePeriodSeconds = 60 },
             ActorId);
 
@@ -246,14 +250,14 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
     {
         await using var context = factory.CreateDbContext();
         var manager = new ServiceIdentityManager(context, new RecordingIamClient(), TimeProvider.System);
-        _ = await manager.ProvisionAsync("auth", NewProvisionRequest(), ActorId, "employee-token");
+        _ = await manager.ProvisionAsync(WorkloadId, NewProvisionRequest(), ActorId, "employee-token");
         var operationId = Guid.NewGuid();
         context.ServiceIdentityOperations.Add(new ServiceIdentityOperation
         {
             Id = operationId,
-            WorkloadId = "auth",
+            WorkloadId = WorkloadId,
             Kind = ServiceIdentityOperationKind.Revoke,
-            RequestHash = HashCanonicalRequest("revoke|auth"),
+            RequestHash = HashCanonicalRequest($"revoke|{WorkloadId}"),
             ActorId = ActorId,
             State = ServiceIdentityOperationState.CredentialCommitted,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -264,7 +268,7 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
         context.ChangeTracker.Clear();
 
         await manager.RevokeAsync(
-            "auth",
+            WorkloadId,
             new RevokeServiceIdentityRequest { OperationId = operationId },
             ActorId);
 
@@ -293,7 +297,7 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
 
     private static async Task<string> DumpStringColumnsAsync(Maliev.AuthService.Infrastructure.DbContexts.AuthDbContext context)
     {
-        var credential = await context.ServiceCredentials.AsNoTracking().SingleAsync(item => item.WorkloadId == "auth");
+        var credential = await context.ServiceCredentials.AsNoTracking().SingleAsync(item => item.WorkloadId == WorkloadId);
         var operation = await context.ServiceIdentityOperations.AsNoTracking().SingleAsync();
         return string.Join('|',
             credential.ClientId,
@@ -313,10 +317,10 @@ public sealed class ServiceIdentityManagerTests(TestWebApplicationFactory factor
 
         public WorkloadPrincipalResponse Response { get; init; } = new()
         {
-            WorkloadId = "auth",
+            WorkloadId = WorkloadId,
             PrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
             ProfileVersion = 1,
-            RoleId = "roles.workload.auth"
+            RoleId = ExpectedRoleId
         };
 
         public bool ThrowOnCall { get; init; }
