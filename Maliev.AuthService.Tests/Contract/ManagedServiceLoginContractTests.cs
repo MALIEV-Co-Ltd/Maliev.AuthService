@@ -17,6 +17,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
     private const string ContactSecret = "contact-service-secret-with-at-least-32-random-looking-bytes";
     private const string SearchSecret = "search-service-secret-with-at-least-32-random-looking-bytes";
     private const string RegistrySecret = "registry-service-secret-with-at-least-32-random-looking-bytes";
+    private const string CountrySecret = "country-service-secret-with-at-least-32-random-looking-bytes";
 
     public Task InitializeAsync() => factory.CleanDatabaseAsync();
 
@@ -83,11 +84,13 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         var contact = await LoginAsync(client, "service-contact-service", ContactSecret, "127.0.13.2");
         var search = await LoginAsync(client, "service-search-service", SearchSecret, "127.0.13.3");
         var registry = await LoginAsync(client, "service-registry-service", RegistrySecret, "127.0.13.4");
+        var country = await LoginAsync(client, "service-country-service", CountrySecret, "127.0.13.5");
 
         Assert.Equal(HttpStatusCode.OK, auth.StatusCode);
         Assert.Equal(HttpStatusCode.OK, contact.StatusCode);
         Assert.Equal(HttpStatusCode.OK, search.StatusCode);
         Assert.Equal(HttpStatusCode.OK, registry.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, country.StatusCode);
 
         await AssertCanonicalServiceTokenAsync(
             search,
@@ -101,29 +104,38 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             "service-registry-service",
             "RegistryService",
             "roles.workloads.registry-service.v1");
+        await AssertCanonicalServiceTokenAsync(
+            country,
+            TestWebApplicationFactory.CountryServiceIamPrincipalId,
+            "service-country-service",
+            "CountryService",
+            "roles.workloads.country-service.v1");
     }
 
     [Theory]
-    [InlineData("service-auth-service", ContactSecret, SearchSecret, RegistrySecret)]
-    [InlineData("service-contact-service", AuthSecret, SearchSecret, RegistrySecret)]
-    [InlineData("service-search-service", AuthSecret, ContactSecret, RegistrySecret)]
-    [InlineData("service-registry-service", AuthSecret, ContactSecret, SearchSecret)]
+    [InlineData("service-auth-service", ContactSecret, SearchSecret)]
+    [InlineData("service-auth-service", RegistrySecret, CountrySecret)]
+    [InlineData("service-contact-service", AuthSecret, SearchSecret)]
+    [InlineData("service-contact-service", RegistrySecret, CountrySecret)]
+    [InlineData("service-search-service", AuthSecret, ContactSecret)]
+    [InlineData("service-search-service", RegistrySecret, CountrySecret)]
+    [InlineData("service-registry-service", AuthSecret, ContactSecret)]
+    [InlineData("service-registry-service", SearchSecret, CountrySecret)]
+    [InlineData("service-country-service", AuthSecret, ContactSecret)]
+    [InlineData("service-country-service", SearchSecret, RegistrySecret)]
     public async Task ServiceLogin_CrossedManagedServiceCredentials_AreUnauthorized(
         string clientId,
         string firstWrongSecret,
-        string secondWrongSecret,
-        string thirdWrongSecret)
+        string secondWrongSecret)
     {
         await SeedCanonicalManagedCredentialsAsync();
         using var client = factory.CreateClient();
 
         var first = await LoginAsync(client, clientId, firstWrongSecret, "127.0.14.1");
         var second = await LoginAsync(client, clientId, secondWrongSecret, "127.0.14.2");
-        var third = await LoginAsync(client, clientId, thirdWrongSecret, "127.0.14.3");
 
         Assert.Equal(HttpStatusCode.Unauthorized, first.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, second.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, third.StatusCode);
     }
 
     private async Task SeedCanonicalManagedCredentialsAsync()
@@ -160,6 +172,14 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             "RegistryService",
             true,
             (RegistrySecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-country-service",
+            "country-service",
+            "roles.workloads.country-service.v1",
+            TestWebApplicationFactory.CountryServiceIamPrincipalId,
+            "CountryService",
+            true,
+            (CountrySecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
     }
 
     private static async Task AssertCanonicalServiceTokenAsync(
