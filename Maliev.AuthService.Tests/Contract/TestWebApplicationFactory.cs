@@ -57,6 +57,8 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         Guid.Parse("15151515-1515-1515-1515-151515151515");
     public static readonly Guid CurrencyServiceIamPrincipalId =
         Guid.Parse("16161616-1616-1616-1616-161616161616");
+    public static readonly Guid AccountingServiceIamPrincipalId =
+        Guid.Parse("17171717-1717-1717-1717-171717171717");
 
     public int IamResolutionCalls => Volatile.Read(ref _iamResolutionCalls);
     public int LegacyIamResolutionCalls => Volatile.Read(ref _legacyIamResolutionCalls);
@@ -495,6 +497,27 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                               "principalId": "{{principalId}}",
                               "permissions": ["iam.auth.check-permission"],
                               "roles": ["roles.workloads.currency-service.v1"],
+                              "resourcePath": null,
+                              "cacheUntil": null,
+                              "fromCache": false
+                            }
+                            """)
+                    };
+                }
+
+                if (string.Equals(
+                    principalId,
+                    AccountingServiceIamPrincipalId.ToString(),
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            $$"""
+                            {
+                              "principalId": "{{principalId}}",
+                              "permissions": ["iam.auth.check-permission"],
+                              "roles": ["roles.workloads.accounting-service.v1"],
                               "resourcePath": null,
                               "cacheUntil": null,
                               "fromCache": false
