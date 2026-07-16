@@ -27,7 +27,22 @@ public sealed class TokenIssuanceCapabilitySignerTests
 
         var encoded = signer.CreateCapability(target);
 
-        var token = new JwtSecurityTokenHandler().ReadJwtToken(encoded);
+        using var publicRsa = RSA.Create();
+        publicRsa.ImportSubjectPublicKeyInfo(rsa.ExportSubjectPublicKeyInfo(), out _);
+        var handler = new JwtSecurityTokenHandler();
+        var principal = handler.ValidateToken(encoded, new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = TokenIssuanceCapabilityOptions.Issuer,
+            ValidateAudience = true,
+            ValidAudience = TokenIssuanceCapabilityOptions.Audience,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new RsaSecurityKey(publicRsa),
+            ValidateLifetime = false
+        }, out var validatedToken);
+        var token = Assert.IsType<JwtSecurityToken>(validatedToken);
+        Assert.NotNull(principal.Identity);
+        Assert.True(principal.Identity.IsAuthenticated);
         Assert.Equal(SecurityAlgorithms.RsaSha256, token.Header.Alg);
         Assert.Equal(options.ActiveKeyId, token.Header.Kid);
         Assert.Equal(TokenIssuanceCapabilityOptions.Issuer, token.Issuer);
@@ -49,6 +64,34 @@ public sealed class TokenIssuanceCapabilitySignerTests
         Assert.Equal(Now.ToUnixTimeSeconds(), iat);
         Assert.Equal(iat, nbf);
         Assert.Equal(30, exp - iat);
+    }
+
+    [Fact]
+    public void CreateCapability_UnrelatedPublicKey_RejectsSignature()
+    {
+        using var signingRsa = RSA.Create(2048);
+        using var unrelatedRsa = RSA.Create(2048);
+        var signer = new TokenIssuanceCapabilitySigner(
+            Options.Create(new TokenIssuanceCapabilityOptions
+            {
+                ActiveKeyId = "active-key",
+                PrivateKey = signingRsa.ExportPkcs8PrivateKeyPem()
+            }),
+            new FixedTimeProvider(Now));
+        var encoded = signer.CreateCapability(Guid.NewGuid());
+        var unrelatedKey = new RsaSecurityKey(unrelatedRsa) { KeyId = "active-key" };
+
+        var exception = Assert.Throws<SecurityTokenInvalidSignatureException>(() =>
+            new JwtSecurityTokenHandler().ValidateToken(encoded, new TokenValidationParameters
+            {
+                ValidateIssuer = false,
+                ValidateAudience = false,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = unrelatedKey,
+                ValidateLifetime = false
+            }, out _));
+
+        Assert.Contains("signature", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
