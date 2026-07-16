@@ -19,6 +19,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
     private const string RegistrySecret = "registry-service-secret-with-at-least-32-random-looking-bytes";
     private const string CountrySecret = "country-service-secret-with-at-least-32-random-looking-bytes";
     private const string CurrencySecret = "currency-service-secret-with-at-least-32-random-looking-bytes";
+    private const string AccountingSecret = "accounting-service-secret-with-at-least-32-random-looking-bytes";
 
     public Task InitializeAsync() => factory.CleanDatabaseAsync();
 
@@ -87,6 +88,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         var registry = await LoginAsync(client, "service-registry-service", RegistrySecret, "127.0.13.4");
         var country = await LoginAsync(client, "service-country-service", CountrySecret, "127.0.13.5");
         var currency = await LoginAsync(client, "service-currency-service", CurrencySecret, "127.0.13.6");
+        var accounting = await LoginAsync(client, "service-accounting-service", AccountingSecret, "127.0.13.7");
 
         Assert.Equal(HttpStatusCode.OK, auth.StatusCode);
         Assert.Equal(HttpStatusCode.OK, contact.StatusCode);
@@ -94,6 +96,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         Assert.Equal(HttpStatusCode.OK, registry.StatusCode);
         Assert.Equal(HttpStatusCode.OK, country.StatusCode);
         Assert.Equal(HttpStatusCode.OK, currency.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, accounting.StatusCode);
 
         await AssertCanonicalServiceTokenAsync(
             search,
@@ -119,42 +122,45 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             "service-currency-service",
             "CurrencyService",
             "roles.workloads.currency-service.v1");
+        await AssertCanonicalServiceTokenAsync(
+            accounting,
+            TestWebApplicationFactory.AccountingServiceIamPrincipalId,
+            "service-accounting-service",
+            "AccountingService",
+            "roles.workloads.accounting-service.v1");
     }
 
     [Theory]
     [InlineData("service-auth-service", ContactSecret, SearchSecret, RegistrySecret)]
-    [InlineData("service-auth-service", CountrySecret, CurrencySecret, null)]
+    [InlineData("service-auth-service", CountrySecret, CurrencySecret, AccountingSecret)]
     [InlineData("service-contact-service", AuthSecret, SearchSecret, RegistrySecret)]
-    [InlineData("service-contact-service", CountrySecret, CurrencySecret, null)]
+    [InlineData("service-contact-service", CountrySecret, CurrencySecret, AccountingSecret)]
     [InlineData("service-search-service", AuthSecret, ContactSecret, RegistrySecret)]
-    [InlineData("service-search-service", CountrySecret, CurrencySecret, null)]
+    [InlineData("service-search-service", CountrySecret, CurrencySecret, AccountingSecret)]
     [InlineData("service-registry-service", AuthSecret, ContactSecret, SearchSecret)]
-    [InlineData("service-registry-service", CountrySecret, CurrencySecret, null)]
+    [InlineData("service-registry-service", CountrySecret, CurrencySecret, AccountingSecret)]
     [InlineData("service-country-service", AuthSecret, ContactSecret, SearchSecret)]
-    [InlineData("service-country-service", RegistrySecret, CurrencySecret, null)]
+    [InlineData("service-country-service", RegistrySecret, CurrencySecret, AccountingSecret)]
     [InlineData("service-currency-service", AuthSecret, ContactSecret, SearchSecret)]
-    [InlineData("service-currency-service", RegistrySecret, CountrySecret, null)]
+    [InlineData("service-currency-service", RegistrySecret, CountrySecret, AccountingSecret)]
+    [InlineData("service-accounting-service", AuthSecret, ContactSecret, SearchSecret)]
+    [InlineData("service-accounting-service", RegistrySecret, CountrySecret, CurrencySecret)]
     public async Task ServiceLogin_CrossedManagedServiceCredentials_AreUnauthorized(
         string clientId,
         string firstWrongSecret,
         string secondWrongSecret,
-        string? thirdWrongSecret)
+        string thirdWrongSecret)
     {
         await SeedCanonicalManagedCredentialsAsync();
         using var client = factory.CreateClient();
 
         var first = await LoginAsync(client, clientId, firstWrongSecret, "127.0.14.1");
         var second = await LoginAsync(client, clientId, secondWrongSecret, "127.0.14.2");
-        var third = thirdWrongSecret is null
-            ? null
-            : await LoginAsync(client, clientId, thirdWrongSecret, "127.0.14.3");
+        var third = await LoginAsync(client, clientId, thirdWrongSecret, "127.0.14.3");
 
         Assert.Equal(HttpStatusCode.Unauthorized, first.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, second.StatusCode);
-        if (third is not null)
-        {
-            Assert.Equal(HttpStatusCode.Unauthorized, third.StatusCode);
-        }
+        Assert.Equal(HttpStatusCode.Unauthorized, third.StatusCode);
     }
 
     private async Task SeedCanonicalManagedCredentialsAsync()
@@ -207,6 +213,14 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             "CurrencyService",
             true,
             (CurrencySecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-accounting-service",
+            "accounting-service",
+            "roles.workloads.accounting-service.v1",
+            TestWebApplicationFactory.AccountingServiceIamPrincipalId,
+            "AccountingService",
+            true,
+            (AccountingSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
     }
 
     private static async Task AssertCanonicalServiceTokenAsync(
