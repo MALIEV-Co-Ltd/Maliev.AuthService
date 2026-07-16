@@ -5,6 +5,9 @@ on:
     branches:
       - develop
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     uses: ./.github/workflows/_build-and-test.yml
@@ -51,16 +54,16 @@ jobs:
             -f Maliev.AuthService.Api/Dockerfile .
           docker push asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-dev/maliev-auth-service:${{ github.sha }}
 
+      - name: Install Kustomize
+        uses: imranismail/setup-kustomize@v2
+
       - name: Checkout maliev-gitops repository
         uses: actions/checkout@v5
         with:
           repository: MALIEV-Co-Ltd/maliev-gitops
           token: ${{ secrets.GITOPS_PAT }}
+          ref: main
           path: maliev-gitops
-
-      - name: Install Kustomize
-        uses: imranismail/setup-kustomize@v2
-
 
       - name: Update image tag in maliev-gitops using Kustomize
         run: |
