@@ -18,17 +18,29 @@ namespace Maliev.AuthService.Tests.Contract;
 public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, AuthDbContext>
 {
     private int _iamResolutionCalls;
+    private int _legacyIamResolutionCalls;
+    private int _tokenIssuanceResolutionCalls;
+    private string? _lastTokenIssuanceAuthorization;
+    private string? _lastTokenIssuanceRequestBody;
 
     public static readonly Guid NonexistentIamPrincipalId =
         Guid.Parse("22222222-2222-2222-2222-222222222222");
 
     public int IamResolutionCalls => Volatile.Read(ref _iamResolutionCalls);
+    public int LegacyIamResolutionCalls => Volatile.Read(ref _legacyIamResolutionCalls);
+    public int TokenIssuanceResolutionCalls => Volatile.Read(ref _tokenIssuanceResolutionCalls);
+    public string? LastTokenIssuanceAuthorization => Volatile.Read(ref _lastTokenIssuanceAuthorization);
+    public string? LastTokenIssuanceRequestBody => Volatile.Read(ref _lastTokenIssuanceRequestBody);
     /// <summary>
     /// Override CleanDatabaseAsync to seed required test data after cleanup and clear Redis
     /// </summary>
     public new async Task CleanDatabaseAsync()
     {
         Interlocked.Exchange(ref _iamResolutionCalls, 0);
+        Interlocked.Exchange(ref _legacyIamResolutionCalls, 0);
+        Interlocked.Exchange(ref _tokenIssuanceResolutionCalls, 0);
+        Interlocked.Exchange(ref _lastTokenIssuanceAuthorization, null);
+        Interlocked.Exchange(ref _lastTokenIssuanceRequestBody, null);
         await base.CleanDatabaseAsync();
         await ClearRedisAsync();
         await SeedTestDataAsync();
@@ -107,6 +119,12 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
             var privateKeyPem = rsa.ExportPkcs8PrivateKeyPem();
             var privateKeyBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(privateKeyPem));
             Environment.SetEnvironmentVariable("Jwt__PrivateKey", privateKeyBase64);
+            Environment.SetEnvironmentVariable(
+                "Auth__TokenIssuanceCapability__ActiveKeyId",
+                "auth-capability-test-key");
+            Environment.SetEnvironmentVariable(
+                "Auth__TokenIssuanceCapability__PrivateKey",
+                privateKeyPem);
 
             // Export public key for token validation
             var publicKeyPem = rsa.ExportSubjectPublicKeyInfoPem();  // Use SubjectPublicKeyInfo format
@@ -302,9 +320,55 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
             }
 
             // Mock IAM resolution response
+            if (request.RequestUri?.PathAndQuery.Contains("/iam/v1/auth/token-issuance/resolve-permissions") == true)
+            {
+                Interlocked.Increment(ref _owner._iamResolutionCalls);
+                Interlocked.Increment(ref _owner._tokenIssuanceResolutionCalls);
+                Interlocked.Exchange(
+                    ref _owner._lastTokenIssuanceAuthorization,
+                    request.Headers.Authorization?.Parameter);
+                if (request.RequestUri.Port == 5101)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                }
+
+                string? principalId = null;
+                if (request.Content != null)
+                {
+                    var requestBody = await request.Content.ReadAsStringAsync(cancellationToken);
+                    Interlocked.Exchange(ref _owner._lastTokenIssuanceRequestBody, requestBody);
+                    var jsonDoc = JsonDocument.Parse(requestBody);
+                    if (jsonDoc.RootElement.TryGetProperty("PrincipalId", out var principalIdElement) ||
+                        jsonDoc.RootElement.TryGetProperty("principalId", out principalIdElement))
+                        principalId = principalIdElement.GetString();
+                }
+
+                if (string.Equals(
+                    principalId,
+                    NonexistentIamPrincipalId.ToString(),
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+                }
+
+                var response = new
+                {
+                    principalId = principalId ?? Guid.NewGuid().ToString(),
+                    permissions = new[] { "auth.api_keys.manage", "auth.users.read" },
+                    roles = new[] { "security_admin" },
+                    resolvedAt = DateTime.UtcNow
+                };
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = JsonContent.Create(response)
+                };
+            }
+
             if (request.RequestUri?.PathAndQuery.Contains("/iam/v1/auth/resolve-permissions") == true)
             {
                 Interlocked.Increment(ref _owner._iamResolutionCalls);
+                Interlocked.Increment(ref _owner._legacyIamResolutionCalls);
                 if (request.RequestUri.Port == 5101)
                 {
                     return new HttpResponseMessage(HttpStatusCode.InternalServerError);

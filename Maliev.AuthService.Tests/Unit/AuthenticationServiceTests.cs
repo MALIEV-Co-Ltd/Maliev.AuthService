@@ -30,6 +30,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     private readonly Mock<IAccountLockoutService> _accountLockoutServiceMock;
     private readonly Mock<IRateLimitService> _rateLimitServiceMock;
     private readonly Mock<IIAMServiceClient> _iamClientMock;
+    private readonly Mock<ITokenIssuancePermissionClient> _tokenIssuancePermissionClientMock;
     private readonly Mock<ILogger<AuthenticationService>> _loggerMock;
     private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
     private readonly Mock<IConfiguration> _configurationMock;
@@ -51,6 +52,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         _accountLockoutServiceMock = new Mock<IAccountLockoutService>();
         _rateLimitServiceMock = new Mock<IRateLimitService>();
         _iamClientMock = new Mock<IIAMServiceClient>();
+        _tokenIssuancePermissionClientMock = new Mock<ITokenIssuancePermissionClient>();
         _loggerMock = new Mock<ILogger<AuthenticationService>>();
         _httpClientFactoryMock = new Mock<IHttpClientFactory>();
         _configurationMock = new Mock<IConfiguration>();
@@ -82,6 +84,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             _accountLockoutServiceMock.Object,
             _rateLimitServiceMock.Object,
             _iamClientMock.Object,
+            _tokenIssuancePermissionClientMock.Object,
             _loggerMock.Object,
             _httpClientFactoryMock.Object,
             _configurationMock.Object,
@@ -729,6 +732,7 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
             _accountLockoutServiceMock.Object,
             _rateLimitServiceMock.Object,
             _iamClientMock.Object,
+            _tokenIssuancePermissionClientMock.Object,
             _loggerMock.Object,
             _httpClientFactoryMock.Object,
             configuration,
@@ -930,8 +934,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     [Fact]
     public async Task AuthenticateServiceAsync_ValidCredentials_ReturnsToken()
     {
-        _iamClientMock
-            .Setup(client => client.ResolvePermissionsRequiredAsync(
+        _tokenIssuancePermissionClientMock
+            .Setup(client => client.ResolvePermissionsAsync(
                 Guid.Parse("11111111-1111-1111-1111-111111111111"),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PermissionResolutionResponse
@@ -961,6 +965,9 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
         Assert.True(result.Success);
         Assert.Equal("server-issued-token", result.Response?.AccessToken);
         Assert.Equal(900, result.Response?.ExpiresIn);
+        _iamClientMock.Verify(client => client.ResolvePermissionsRequiredAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -1000,11 +1007,40 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     [Fact]
     public async Task AuthenticateServiceAsync_IamUnavailable_ReturnsServiceUnavailableWithoutToken()
     {
-        _iamClientMock
-            .Setup(client => client.ResolvePermissionsRequiredAsync(
+        _tokenIssuancePermissionClientMock
+            .Setup(client => client.ResolvePermissionsAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("IAM unavailable"));
+
+        var result = await _service!.AuthenticateServiceAsync(
+            new ServiceLoginRequest
+            {
+                ClientId = "service-dev-customer-api",
+                ClientSecret = TestConstants.DummyValidServiceSecret
+            },
+            "127.0.0.1",
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("service_unavailable", result.ErrorCode);
+        Assert.Null(result.Response);
+        _tokenGeneratorMock.Verify(generator => generator.GenerateServiceAccessTokenAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<IEnumerable<string>>(),
+            It.IsAny<IEnumerable<string>>(),
+            It.IsAny<Guid?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AuthenticateServiceAsync_IamTimeout_ReturnsServiceUnavailableWithoutToken()
+    {
+        _tokenIssuancePermissionClientMock
+            .Setup(client => client.ResolvePermissionsAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("IAM request timed out"));
 
         var result = await _service!.AuthenticateServiceAsync(
             new ServiceLoginRequest
@@ -1031,8 +1067,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     {
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        _iamClientMock
-            .Setup(client => client.ResolvePermissionsRequiredAsync(
+        _tokenIssuancePermissionClientMock
+            .Setup(client => client.ResolvePermissionsAsync(
                 It.IsAny<Guid>(),
                 cancellation.Token))
             .ThrowsAsync(new OperationCanceledException(cancellation.Token));
@@ -1061,8 +1097,8 @@ public class AuthenticationServiceTests : IClassFixture<TestDatabaseFixture>, IA
     public async Task AuthenticateServiceAsync_IamReturnsWildcardAuthority_ReturnsServiceUnavailableWithoutToken(
         bool wildcardIsPermission)
     {
-        _iamClientMock
-            .Setup(client => client.ResolvePermissionsRequiredAsync(
+        _tokenIssuancePermissionClientMock
+            .Setup(client => client.ResolvePermissionsAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PermissionResolutionResponse
