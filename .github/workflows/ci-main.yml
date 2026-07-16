@@ -48,6 +48,7 @@ jobs:
         with:
           repository: MALIEV-Co-Ltd/maliev-gitops
           token: ${{ secrets.GITOPS_PAT }}
+          ref: main
           path: maliev-gitops
 
       - name: Install Kustomize
