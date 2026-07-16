@@ -18,10 +18,18 @@ public sealed class GitOpsWorkflowCheckoutTests
     public void GitOpsCheckout_PinsMainBranch(string workflowFile)
     {
         var source = ReadRepositoryFile(".github", "workflows", workflowFile);
+        const string leastPrivilegePermissions = "permissions:\n  contents: read";
+        const string kustomizeAction = "uses: imranismail/setup-kustomize@v2";
         const string repositoryLine = "repository: MALIEV-Co-Ltd/maliev-gitops";
         var repositoryIndex = source.IndexOf(repositoryLine, StringComparison.Ordinal);
+        var kustomizeIndex = source.IndexOf(kustomizeAction, StringComparison.Ordinal);
 
+        Assert.Contains(leastPrivilegePermissions, source, StringComparison.Ordinal);
+        Assert.True(kustomizeIndex >= 0, $"{workflowFile} must install the pinned Kustomize action.");
         Assert.True(repositoryIndex >= 0, $"{workflowFile} must check out the GitOps repository.");
+        Assert.True(
+            kustomizeIndex < repositoryIndex,
+            $"{workflowFile} must execute third-party setup before introducing GitOps credentials.");
 
         var checkoutBlockEnd = source.IndexOf("\n      - name:", repositoryIndex, StringComparison.Ordinal);
         var checkoutBlock = checkoutBlockEnd >= 0
