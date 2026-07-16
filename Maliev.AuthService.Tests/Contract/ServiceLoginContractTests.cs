@@ -470,6 +470,7 @@ public class ServiceLoginContractTests : IntegrationTestBase
     [InlineData("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "scoped-authority")]
     [InlineData("cccccccc-cccc-cccc-cccc-cccccccccccc", "expiring-authority")]
     [InlineData("dddddddd-dddd-dddd-dddd-dddddddddddd", "malformed-json")]
+    [InlineData("ffffffff-ffff-ffff-ffff-ffffffffffff", "empty-resource-path")]
     public async Task POST_V1_Auth_Service_Login_MalformedIamAuthority_ReturnsSanitized503WithoutToken(
         string principalId,
         string clientSuffix)

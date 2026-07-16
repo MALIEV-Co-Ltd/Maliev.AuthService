@@ -95,7 +95,7 @@ public sealed class TokenIssuancePermissionClient : ITokenIssuancePermissionClie
             result.Permissions.Any(value => string.IsNullOrWhiteSpace(value)) ||
             result.Roles.Any(value => string.IsNullOrWhiteSpace(value)) ||
             result.FromCache ||
-            !string.IsNullOrEmpty(result.ResourcePath) ||
+            result.ResourcePath is not null ||
             result.CacheUntil is not null)
         {
             throw new HttpRequestException(InvalidResponseMessage);
