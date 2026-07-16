@@ -47,6 +47,8 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
     public static readonly Guid MalformedJsonIamPrincipalId =
         Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+    public static readonly Guid EmptyResourcePathIamPrincipalId =
+        Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
 
     public int IamResolutionCalls => Volatile.Read(ref _iamResolutionCalls);
     public int LegacyIamResolutionCalls => Volatile.Read(ref _legacyIamResolutionCalls);
@@ -397,6 +399,8 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                         $$"""{"principalId":"{{principalId}}","permissions":[],"roles":[],"resourcePath":null,"cacheUntil":"2026-07-16T04:05:00Z","fromCache":false}""",
                     var value when string.Equals(value, MalformedJsonIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
                         "{not-json",
+                    var value when string.Equals(value, EmptyResourcePathIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
+                        $$"""{"principalId":"{{principalId}}","permissions":[],"roles":[],"resourcePath":"","cacheUntil":null,"fromCache":false}""",
                     _ => null
                 };
                 if (malformedAuthorityJson is not null)

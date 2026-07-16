@@ -151,6 +151,7 @@ public sealed class TokenIssuancePermissionClientTests
     [Theory]
     [InlineData("true", "null", "null")]
     [InlineData("false", "\"projects/project-1\"", "null")]
+    [InlineData("false", "\"\"", "null")]
     [InlineData("false", "null", "\"2026-07-16T04:05:00Z\"")]
     public async Task ResolvePermissionsAsync_NonAuthoritativeTokenIssuanceMetadata_ThrowsControlledClientFailure(
         string fromCache,
