@@ -67,8 +67,55 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Fact]
+    public async Task ServiceLogin_AuthAndContactCredentials_CannotBeCrossed()
+    {
+        const string authSecret = "auth-service-secret-with-at-least-32-random-looking-bytes";
+        const string contactSecret = "contact-service-secret-with-at-least-32-random-looking-bytes";
+        await SeedManagedCredentialAsync(
+            "service-auth-service",
+            "auth-service",
+            "roles.workloads.auth-service.v1",
+            Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            true,
+            (authSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-contact-service",
+            "contact-service",
+            "roles.workloads.contact-service.v1",
+            Guid.Parse("12121212-1212-1212-1212-121212121212"),
+            true,
+            (contactSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        using var client = factory.CreateClient();
+
+        var auth = await LoginAsync(client, "service-auth-service", authSecret, "127.0.13.1");
+        var contact = await LoginAsync(client, "service-contact-service", contactSecret, "127.0.13.2");
+        var authClientWithContactSecret = await LoginAsync(
+            client,
+            "service-auth-service",
+            contactSecret,
+            "127.0.13.3");
+        var contactClientWithAuthSecret = await LoginAsync(
+            client,
+            "service-contact-service",
+            authSecret,
+            "127.0.13.4");
+
+        Assert.Equal(HttpStatusCode.OK, auth.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, contact.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, authClientWithContactSecret.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, contactClientWithAuthSecret.StatusCode);
+    }
+
     private static async Task<HttpResponseMessage> LoginAsync(
         HttpClient client,
+        string secret,
+        string ipAddress) =>
+        await LoginAsync(client, "service-auth-service", secret, ipAddress);
+
+    private static async Task<HttpResponseMessage> LoginAsync(
+        HttpClient client,
+        string clientId,
         string secret,
         string ipAddress)
     {
@@ -77,7 +124,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             Content = JsonContent.Create(
                 new ServiceLoginRequest
                 {
-                    ClientId = "service-auth-service",
+                    ClientId = clientId,
                     ClientSecret = secret
                 },
                 options: new JsonSerializerOptions
@@ -91,6 +138,21 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
 
     private async Task SeedManagedCredentialAsync(
         bool logicalActive,
+        params (string Secret, ServiceCredentialVersionStatus Status, DateTimeOffset HardExpiry, DateTimeOffset? GraceExpiry)[] versions) =>
+        await SeedManagedCredentialAsync(
+            "service-auth-service",
+            "auth-service",
+            "roles.workloads.auth-service.v1",
+            Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            logicalActive,
+            versions);
+
+    private async Task SeedManagedCredentialAsync(
+        string clientId,
+        string workloadId,
+        string roleId,
+        Guid principalId,
+        bool logicalActive,
         params (string Secret, ServiceCredentialVersionStatus Status, DateTimeOffset HardExpiry, DateTimeOffset? GraceExpiry)[] versions)
     {
         await using var context = factory.CreateDbContext();
@@ -98,13 +160,13 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         var credential = new ServiceCredential
         {
             Id = Guid.NewGuid(),
-            ClientId = "service-auth-service",
-            PrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-            WorkloadId = "auth-service",
+            ClientId = clientId,
+            PrincipalId = principalId,
+            WorkloadId = workloadId,
             ProfileVersion = 1,
-            RoleId = "roles.workloads.auth-service.v1",
+            RoleId = roleId,
             ClientSecretHash = Hash(versions[0].Secret),
-            ServiceName = "Auth Service",
+            ServiceName = workloadId,
             IsActive = logicalActive,
             RevokedAt = logicalActive ? null : DateTimeOffset.UtcNow,
             CreatedAt = now.UtcDateTime,
