@@ -74,8 +74,11 @@ public sealed class TokenIssuancePermissionClientTests
             Content = new StringContent("{not-json")
         }));
 
-        await Assert.ThrowsAnyAsync<Exception>(() =>
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
             client.ResolvePermissionsAsync(PrincipalId, CancellationToken.None));
+
+        Assert.Equal("IAM token-issuance permission resolution returned an invalid response.", exception.Message);
+        Assert.IsType<JsonException>(exception.InnerException);
     }
 
     [Fact]
@@ -94,6 +97,78 @@ public sealed class TokenIssuancePermissionClientTests
 
         await Assert.ThrowsAsync<HttpRequestException>(() =>
             client.ResolvePermissionsAsync(PrincipalId, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("permissions", "null")]
+    [InlineData("roles", "null")]
+    [InlineData("permissions", "[null]")]
+    [InlineData("roles", "[null]")]
+    [InlineData("permissions", "[\"\"]")]
+    [InlineData("roles", "[\"   \"]")]
+    public async Task ResolvePermissionsAsync_InvalidAuthorityCollections_ThrowsControlledClientFailure(
+        string propertyName,
+        string propertyValue)
+    {
+        var permissions = propertyName == "permissions" ? propertyValue : "[]";
+        var roles = propertyName == "roles" ? propertyValue : "[]";
+        var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                $$"""
+                {
+                  "principalId": "{{PrincipalId:D}}",
+                  "permissions": {{permissions}},
+                  "roles": {{roles}},
+                  "resolvedAt": "2026-07-16T04:00:00Z"
+                }
+                """)
+        }));
+
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            client.ResolvePermissionsAsync(PrincipalId, CancellationToken.None));
+
+        Assert.Equal("IAM token-issuance permission resolution returned an invalid response.", exception.Message);
+    }
+
+    [Fact]
+    public async Task ResolvePermissionsAsync_MissingResolvedTimestamp_ThrowsControlledClientFailure()
+    {
+        var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new
+            {
+                principalId = PrincipalId,
+                permissions = Array.Empty<string>(),
+                roles = Array.Empty<string>()
+            })
+        }));
+
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            client.ResolvePermissionsAsync(PrincipalId, CancellationToken.None));
+
+        Assert.Equal("IAM token-issuance permission resolution returned an invalid response.", exception.Message);
+    }
+
+    [Fact]
+    public async Task ResolvePermissionsAsync_CacheExpiryBeforeResolution_ThrowsControlledClientFailure()
+    {
+        var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new
+            {
+                principalId = PrincipalId,
+                permissions = Array.Empty<string>(),
+                roles = Array.Empty<string>(),
+                resolvedAt = new DateTime(2026, 7, 16, 4, 0, 0, DateTimeKind.Utc),
+                cacheUntil = new DateTime(2026, 7, 16, 3, 59, 59, DateTimeKind.Utc)
+            })
+        }));
+
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            client.ResolvePermissionsAsync(PrincipalId, CancellationToken.None));
+
+        Assert.Equal("IAM token-issuance permission resolution returned an invalid response.", exception.Message);
     }
 
     [Fact]

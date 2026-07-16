@@ -12,6 +12,7 @@ using Maliev.AuthService.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using Xunit;
 
 namespace Maliev.AuthService.Tests.Contract;
@@ -70,8 +71,38 @@ public class ServiceLoginContractTests : IntegrationTestBase
         Assert.Equal(JsonValueKind.Null, user.GetProperty("email").ValueKind);
         Assert.Equal(JsonValueKind.Null, user.GetProperty("profile_image_url").ValueKind);
 
-        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(
-            json.RootElement.GetProperty("access_token").GetString());
+        var accessToken = json.RootElement.GetProperty("access_token").GetString();
+        var signingRsa = Assert.IsType<RsaSecurityKey>(Factory.SigningCredentials.Key).Rsa;
+        using var publicRsa = RSA.Create();
+        var publicKeyBytes = signingRsa.ExportSubjectPublicKeyInfo();
+        publicRsa.ImportSubjectPublicKeyInfo(publicKeyBytes, out _);
+        var keyId = Convert.ToHexString(SHA256.HashData(publicKeyBytes)).ToLowerInvariant();
+        var handler = new JwtSecurityTokenHandler();
+        var principal = handler.ValidateToken(accessToken, new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = "test-issuer",
+            ValidateAudience = true,
+            ValidAudience = "test-audience",
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new RsaSecurityKey(publicRsa) { KeyId = keyId },
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero
+        }, out var validatedToken);
+        var jwt = Assert.IsType<JwtSecurityToken>(validatedToken);
+        Assert.NotNull(principal.Identity);
+        Assert.True(principal.Identity.IsAuthenticated);
+
+        using var unrelatedRsa = RSA.Create(2048);
+        Assert.Throws<SecurityTokenInvalidSignatureException>(() =>
+            handler.ValidateToken(accessToken, new TokenValidationParameters
+            {
+                ValidateIssuer = false,
+                ValidateAudience = false,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new RsaSecurityKey(unrelatedRsa) { KeyId = keyId },
+                ValidateLifetime = false
+            }, out _));
         Assert.False(string.IsNullOrWhiteSpace(jwt.Header.Kid));
         Assert.Equal("test-issuer", jwt.Issuer);
         Assert.Contains("test-audience", jwt.Audiences);
@@ -397,6 +428,58 @@ public class ServiceLoginContractTests : IntegrationTestBase
                 ClientSecretHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(secret)))
                     .ToLowerInvariant(),
                 ServiceName = "Orphaned API Service",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await context.SaveChangesAsync();
+        }
+
+        var response = await Client.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = clientId,
+            client_secret = secret
+        });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(
+            ["details", "error", "error_description", "errors", "locked_until"],
+            json.RootElement.EnumerateObject().Select(property => property.Name).Order());
+        Assert.Equal("service_unavailable", json.RootElement.GetProperty("error").GetString());
+        Assert.Equal(
+            "Service authentication is temporarily unavailable",
+            json.RootElement.GetProperty("error_description").GetString());
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("details").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("errors").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("locked_until").ValueKind);
+        Assert.False(json.RootElement.TryGetProperty("access_token", out _));
+        Assert.Equal(1, Factory.TokenIssuanceResolutionCalls);
+        Assert.Equal(0, Factory.LegacyIamResolutionCalls);
+    }
+
+    [Theory]
+    [InlineData("33333333-3333-3333-3333-333333333333", "null-permissions")]
+    [InlineData("44444444-4444-4444-4444-444444444444", "null-roles")]
+    [InlineData("55555555-5555-5555-5555-555555555555", "null-permission-element")]
+    [InlineData("66666666-6666-6666-6666-666666666666", "null-role-element")]
+    public async Task POST_V1_Auth_Service_Login_MalformedIamAuthority_ReturnsSanitized503WithoutToken(
+        string principalId,
+        string clientSuffix)
+    {
+        await CleanDatabaseAsync();
+        var clientId = $"service-dev-{clientSuffix}-api";
+        var secret = $"dummy_{clientSuffix}_secret_345";
+        await using (var context = Factory.GetDbContext())
+        {
+            context.ServiceCredentials.Add(new ServiceCredential
+            {
+                Id = Guid.NewGuid(),
+                ClientId = clientId,
+                PrincipalId = Guid.Parse(principalId),
+                ClientSecretHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(secret)))
+                    .ToLowerInvariant(),
+                ServiceName = "Malformed IAM Response Service",
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow

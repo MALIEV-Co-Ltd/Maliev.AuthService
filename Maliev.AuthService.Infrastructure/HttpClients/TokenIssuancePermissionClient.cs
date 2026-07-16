@@ -13,6 +13,8 @@ namespace Maliev.AuthService.Infrastructure.HttpClients;
 public sealed class TokenIssuancePermissionClient : ITokenIssuancePermissionClient
 {
     private const string Route = "/iam/v1/auth/token-issuance/resolve-permissions";
+    private const string InvalidResponseMessage =
+        "IAM token-issuance permission resolution returned an invalid response.";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -62,9 +64,18 @@ public sealed class TokenIssuancePermissionClient : ITokenIssuancePermissionClie
             response.EnsureSuccessStatusCode();
         }
 
-        var result = await response.Content.ReadFromJsonAsync<PermissionResolutionResponse>(
-            JsonOptions,
-            cancellationToken);
+        PermissionResolutionResponse? result;
+        try
+        {
+            result = await response.Content.ReadFromJsonAsync<PermissionResolutionResponse>(
+                JsonOptions,
+                cancellationToken);
+        }
+        catch (JsonException ex)
+        {
+            throw new HttpRequestException(InvalidResponseMessage, ex);
+        }
+
         if (result is null)
         {
             throw new HttpRequestException("IAM token-issuance permission resolution returned an empty response.");
@@ -73,6 +84,16 @@ public sealed class TokenIssuancePermissionClient : ITokenIssuancePermissionClie
         if (result.PrincipalId != principalId)
         {
             throw new HttpRequestException("IAM token-issuance permission resolution returned a different principal.");
+        }
+
+        if (result.Permissions is null ||
+            result.Roles is null ||
+            result.Permissions.Any(value => string.IsNullOrWhiteSpace(value)) ||
+            result.Roles.Any(value => string.IsNullOrWhiteSpace(value)) ||
+            result.ResolvedAt == default ||
+            result.CacheUntil < result.ResolvedAt)
+        {
+            throw new HttpRequestException(InvalidResponseMessage);
         }
 
         return result;
