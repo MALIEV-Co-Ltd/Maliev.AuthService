@@ -39,6 +39,12 @@ public class AuthDbContext : DbContext
     /// <summary>Gets or sets service credentials.</summary>
     public DbSet<ServiceCredential> ServiceCredentials => Set<ServiceCredential>();
 
+    /// <summary>Gets hashed service credential versions.</summary>
+    public DbSet<ServiceCredentialVersion> ServiceCredentialVersions => Set<ServiceCredentialVersion>();
+
+    /// <summary>Gets durable service identity lifecycle operations.</summary>
+    public DbSet<ServiceIdentityOperation> ServiceIdentityOperations => Set<ServiceIdentityOperation>();
+
     /// <summary>Gets or sets user principals.</summary>
     public DbSet<UserPrincipal> UserPrincipals => Set<UserPrincipal>();
 

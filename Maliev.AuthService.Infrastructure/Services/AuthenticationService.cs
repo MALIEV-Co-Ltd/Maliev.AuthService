@@ -411,21 +411,16 @@ public class AuthenticationService : IAuthenticationService
     {
         var serviceCredential = await _dbContext.ServiceCredentials
             .AsNoTracking()
+            .Include(sc => sc.Versions)
             .FirstOrDefaultAsync(
                 sc => sc.ClientId == request.ClientId,
                 cancellationToken);
 
         var suppliedSecretHash = SHA256.HashData(Encoding.UTF8.GetBytes(request.ClientSecret));
-        var expectedSecretHash = DummyServiceSecretHash;
-        if (serviceCredential is { IsActive: true } &&
-            TryDecodeSha256(serviceCredential.ClientSecretHash, out var decodedSecretHash))
-        {
-            expectedSecretHash = decodedSecretHash;
-        }
-
-        var credentialMatches = CryptographicOperations.FixedTimeEquals(
+        var credentialMatches = MatchesServiceCredential(
+            serviceCredential,
             suppliedSecretHash,
-            expectedSecretHash);
+            DateTimeOffset.UtcNow);
         if (serviceCredential is not { IsActive: true } || !credentialMatches)
         {
             EnqueueAuditLog(null, null, "service_login", ipAddress, false, "Invalid client credentials");
@@ -510,6 +505,38 @@ public class AuthenticationService : IAuthenticationService
                 }
             }
         };
+    }
+
+    private static bool MatchesServiceCredential(
+        ServiceCredential? credential,
+        ReadOnlySpan<byte> suppliedSecretHash,
+        DateTimeOffset now)
+    {
+        if (credential is not { IsActive: true } || credential.RevokedAt.HasValue)
+        {
+            _ = CryptographicOperations.FixedTimeEquals(suppliedSecretHash, DummyServiceSecretHash);
+            return false;
+        }
+
+        if (credential.Versions.Count == 0)
+        {
+            var expected = TryDecodeSha256(credential.ClientSecretHash, out var legacyHash)
+                ? legacyHash
+                : DummyServiceSecretHash;
+            return CryptographicOperations.FixedTimeEquals(suppliedSecretHash, expected);
+        }
+
+        var matched = false;
+        foreach (var version in credential.Versions)
+        {
+            var expected = TryDecodeSha256(version.SecretHash, out var versionHash)
+                ? versionHash
+                : DummyServiceSecretHash;
+            var hashMatches = CryptographicOperations.FixedTimeEquals(suppliedSecretHash, expected);
+            matched |= hashMatches && version.CanAuthenticate(now);
+        }
+
+        return matched;
     }
 
     private static bool TryDecodeSha256(string value, out byte[] hash)

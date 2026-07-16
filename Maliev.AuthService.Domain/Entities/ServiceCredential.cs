@@ -23,6 +23,21 @@ public class ServiceCredential
     public Guid? PrincipalId { get; set; }
 
     /// <summary>
+    /// Canonical workload identifier managed by IAM. Null only for legacy credentials.
+    /// </summary>
+    public string? WorkloadId { get; set; }
+
+    /// <summary>
+    /// Server-owned IAM access profile version. Null only for legacy credentials.
+    /// </summary>
+    public int? ProfileVersion { get; set; }
+
+    /// <summary>
+    /// Exact least-privilege IAM role bound to the workload. Null only for legacy credentials.
+    /// </summary>
+    public string? RoleId { get; set; }
+
+    /// <summary>
     /// SHA-256 hash of client secret (64 characters hex)
     /// </summary>
     public string ClientSecretHash { get; set; } = string.Empty;
@@ -46,4 +61,14 @@ public class ServiceCredential
     /// Last update timestamp
     /// </summary>
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets the logical revocation time.
+    /// </summary>
+    public DateTimeOffset? RevokedAt { get; set; }
+
+    /// <summary>
+    /// Gets credential secret versions. Secret plaintext is never persisted.
+    /// </summary>
+    public ICollection<ServiceCredentialVersion> Versions { get; set; } = [];
 }
