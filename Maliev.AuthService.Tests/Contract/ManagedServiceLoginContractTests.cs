@@ -13,6 +13,11 @@ namespace Maliev.AuthService.Tests.Contract;
 [Collection("AuthService Collection")]
 public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory factory) : IAsyncLifetime
 {
+    private const string AuthSecret = "auth-service-secret-with-at-least-32-random-looking-bytes";
+    private const string ContactSecret = "contact-service-secret-with-at-least-32-random-looking-bytes";
+    private const string SearchSecret = "search-service-secret-with-at-least-32-random-looking-bytes";
+    private const string RegistrySecret = "registry-service-secret-with-at-least-32-random-looking-bytes";
+
     public Task InitializeAsync() => factory.CleanDatabaseAsync();
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -69,11 +74,60 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
     }
 
     [Fact]
-    public async Task ServiceLogin_AuthContactAndSearchCredentials_AreIsolatedAndSearchClaimsAreCanonical()
+    public async Task ServiceLogin_ManagedServiceCredentials_AuthenticateWithCanonicalClaims()
     {
-        const string authSecret = "auth-service-secret-with-at-least-32-random-looking-bytes";
-        const string contactSecret = "contact-service-secret-with-at-least-32-random-looking-bytes";
-        const string searchSecret = "search-service-secret-with-at-least-32-random-looking-bytes";
+        await SeedCanonicalManagedCredentialsAsync();
+        using var client = factory.CreateClient();
+
+        var auth = await LoginAsync(client, "service-auth-service", AuthSecret, "127.0.13.1");
+        var contact = await LoginAsync(client, "service-contact-service", ContactSecret, "127.0.13.2");
+        var search = await LoginAsync(client, "service-search-service", SearchSecret, "127.0.13.3");
+        var registry = await LoginAsync(client, "service-registry-service", RegistrySecret, "127.0.13.4");
+
+        Assert.Equal(HttpStatusCode.OK, auth.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, contact.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, registry.StatusCode);
+
+        await AssertCanonicalServiceTokenAsync(
+            search,
+            TestWebApplicationFactory.SearchServiceIamPrincipalId,
+            "service-search-service",
+            "SearchService",
+            "roles.workloads.search-service.v1");
+        await AssertCanonicalServiceTokenAsync(
+            registry,
+            TestWebApplicationFactory.RegistryServiceIamPrincipalId,
+            "service-registry-service",
+            "RegistryService",
+            "roles.workloads.registry-service.v1");
+    }
+
+    [Theory]
+    [InlineData("service-auth-service", ContactSecret, SearchSecret, RegistrySecret)]
+    [InlineData("service-contact-service", AuthSecret, SearchSecret, RegistrySecret)]
+    [InlineData("service-search-service", AuthSecret, ContactSecret, RegistrySecret)]
+    [InlineData("service-registry-service", AuthSecret, ContactSecret, SearchSecret)]
+    public async Task ServiceLogin_CrossedManagedServiceCredentials_AreUnauthorized(
+        string clientId,
+        string firstWrongSecret,
+        string secondWrongSecret,
+        string thirdWrongSecret)
+    {
+        await SeedCanonicalManagedCredentialsAsync();
+        using var client = factory.CreateClient();
+
+        var first = await LoginAsync(client, clientId, firstWrongSecret, "127.0.14.1");
+        var second = await LoginAsync(client, clientId, secondWrongSecret, "127.0.14.2");
+        var third = await LoginAsync(client, clientId, thirdWrongSecret, "127.0.14.3");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, first.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, second.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, third.StatusCode);
+    }
+
+    private async Task SeedCanonicalManagedCredentialsAsync()
+    {
         await SeedManagedCredentialAsync(
             "service-auth-service",
             "auth-service",
@@ -81,7 +135,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             Guid.Parse("11111111-1111-1111-1111-111111111111"),
             "AuthService",
             true,
-            (authSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+            (AuthSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
         await SeedManagedCredentialAsync(
             "service-contact-service",
             "contact-service",
@@ -89,7 +143,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             Guid.Parse("12121212-1212-1212-1212-121212121212"),
             "ContactService",
             true,
-            (contactSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+            (ContactSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
         await SeedManagedCredentialAsync(
             "service-search-service",
             "search-service",
@@ -97,69 +151,36 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             TestWebApplicationFactory.SearchServiceIamPrincipalId,
             "SearchService",
             true,
-            (searchSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
-        using var client = factory.CreateClient();
+            (SearchSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-registry-service",
+            "registry-service",
+            "roles.workloads.registry-service.v1",
+            TestWebApplicationFactory.RegistryServiceIamPrincipalId,
+            "RegistryService",
+            true,
+            (RegistrySecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+    }
 
-        var auth = await LoginAsync(client, "service-auth-service", authSecret, "127.0.13.1");
-        var contact = await LoginAsync(client, "service-contact-service", contactSecret, "127.0.13.2");
-        var search = await LoginAsync(client, "service-search-service", searchSecret, "127.0.13.3");
-        var authClientWithContactSecret = await LoginAsync(
-            client,
-            "service-auth-service",
-            contactSecret,
-            "127.0.13.4");
-        var authClientWithSearchSecret = await LoginAsync(
-            client,
-            "service-auth-service",
-            searchSecret,
-            "127.0.13.5");
-        var contactClientWithAuthSecret = await LoginAsync(
-            client,
-            "service-contact-service",
-            authSecret,
-            "127.0.13.6");
-        var contactClientWithSearchSecret = await LoginAsync(
-            client,
-            "service-contact-service",
-            searchSecret,
-            "127.0.13.7");
-        var searchClientWithAuthSecret = await LoginAsync(
-            client,
-            "service-search-service",
-            authSecret,
-            "127.0.13.8");
-        var searchClientWithContactSecret = await LoginAsync(
-            client,
-            "service-search-service",
-            contactSecret,
-            "127.0.13.9");
-
-        Assert.Equal(HttpStatusCode.OK, auth.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, contact.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, search.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, authClientWithContactSecret.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, authClientWithSearchSecret.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, contactClientWithAuthSecret.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, contactClientWithSearchSecret.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, searchClientWithAuthSecret.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, searchClientWithContactSecret.StatusCode);
-
-        var searchResponse = JsonDocument.Parse(await search.Content.ReadAsStringAsync());
-        var searchToken = new JwtSecurityTokenHandler().ReadJwtToken(
-            searchResponse.RootElement.GetProperty("access_token").GetString());
-        Assert.Equal(TestWebApplicationFactory.SearchServiceIamPrincipalId.ToString(), searchToken.Subject);
-        Assert.Equal(
-            "service-search-service",
-            searchToken.Claims.Single(claim => claim.Type == "client_id").Value);
-        Assert.Equal(
-            "SearchService",
-            searchToken.Claims.Single(claim => claim.Type == "service_name").Value);
+    private static async Task AssertCanonicalServiceTokenAsync(
+        HttpResponseMessage response,
+        Guid principalId,
+        string clientId,
+        string serviceName,
+        string roleId)
+    {
+        var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(
+            payload.RootElement.GetProperty("access_token").GetString());
+        Assert.Equal(principalId.ToString(), token.Subject);
+        Assert.Equal(clientId, token.Claims.Single(claim => claim.Type == "client_id").Value);
+        Assert.Equal(serviceName, token.Claims.Single(claim => claim.Type == "service_name").Value);
         Assert.Equal(
             ["iam.auth.check-permission"],
-            searchToken.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+            token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
         Assert.Equal(
-            ["roles.workloads.search-service.v1"],
-            searchToken.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));
+            [roleId],
+            token.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));
     }
 
     private static async Task<HttpResponseMessage> LoginAsync(
