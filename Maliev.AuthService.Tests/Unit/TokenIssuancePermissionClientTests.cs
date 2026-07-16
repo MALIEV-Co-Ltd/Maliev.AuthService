@@ -11,6 +11,8 @@ namespace Maliev.AuthService.Tests.Unit;
 public sealed class TokenIssuancePermissionClientTests
 {
     private static readonly Guid PrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly DateTimeOffset ObservedAt =
+        new(2026, 7, 16, 4, 0, 0, TimeSpan.Zero);
 
     [Fact]
     public async Task ResolvePermissionsAsync_ValidResponse_UsesOnlyAdditiveRouteAndTargetCoupledToken()
@@ -26,21 +28,28 @@ public sealed class TokenIssuancePermissionClientTests
             Assert.Equal(PrincipalId.ToString("D"), json.RootElement.GetProperty("principalId").GetString());
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = JsonContent.Create(new
-                {
-                    principalId = PrincipalId,
-                    permissions = new[] { "customer.customers.read" },
-                    roles = new[] { "service.customer" },
-                    resolvedAt = DateTime.UtcNow,
-                    cacheUntil = (DateTime?)null
-                })
+                Content = new StringContent(
+                    $$"""
+                    {
+                      "principalId": "{{PrincipalId:D}}",
+                      "permissions": ["customer.customers.read"],
+                      "roles": ["service.customer"],
+                      "resourcePath": null,
+                      "cacheUntil": null,
+                      "fromCache": false
+                    }
+                    """)
             };
         }))
         {
             BaseAddress = new Uri("https://iam.test"),
             Timeout = TimeSpan.FromSeconds(10)
         };
-        var client = new TokenIssuancePermissionClient(httpClient, signer, NullLogger<TokenIssuancePermissionClient>.Instance);
+        var client = new TokenIssuancePermissionClient(
+            httpClient,
+            signer,
+            NullLogger<TokenIssuancePermissionClient>.Instance,
+            new FixedTimeProvider(ObservedAt));
 
         var response = await client.ResolvePermissionsAsync(PrincipalId, CancellationToken.None);
 
@@ -53,6 +62,8 @@ public sealed class TokenIssuancePermissionClientTests
         Assert.Equal(PrincipalId, response.PrincipalId);
         Assert.Equal(["customer.customers.read"], response.Permissions);
         Assert.Equal(["service.customer"], response.Roles);
+        Assert.Equal(ObservedAt.UtcDateTime, response.ResolvedAt);
+        Assert.Null(response.CacheUntil);
     }
 
     [Theory]
@@ -86,13 +97,17 @@ public sealed class TokenIssuancePermissionClientTests
     {
         var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = JsonContent.Create(new
-            {
-                principalId = Guid.NewGuid(),
-                permissions = Array.Empty<string>(),
-                roles = Array.Empty<string>(),
-                resolvedAt = DateTime.UtcNow
-            })
+            Content = new StringContent(
+                $$"""
+                {
+                  "principalId": "{{Guid.NewGuid():D}}",
+                  "permissions": [],
+                  "roles": [],
+                  "resourcePath": null,
+                  "cacheUntil": null,
+                  "fromCache": false
+                }
+                """)
         }));
 
         await Assert.ThrowsAsync<HttpRequestException>(() =>
@@ -120,7 +135,9 @@ public sealed class TokenIssuancePermissionClientTests
                   "principalId": "{{PrincipalId:D}}",
                   "permissions": {{permissions}},
                   "roles": {{roles}},
-                  "resolvedAt": "2026-07-16T04:00:00Z"
+                  "resourcePath": null,
+                  "cacheUntil": null,
+                  "fromCache": false
                 }
                 """)
         }));
@@ -131,38 +148,28 @@ public sealed class TokenIssuancePermissionClientTests
         Assert.Equal("IAM token-issuance permission resolution returned an invalid response.", exception.Message);
     }
 
-    [Fact]
-    public async Task ResolvePermissionsAsync_MissingResolvedTimestamp_ThrowsControlledClientFailure()
+    [Theory]
+    [InlineData("true", "null", "null")]
+    [InlineData("false", "\"projects/project-1\"", "null")]
+    [InlineData("false", "null", "\"2026-07-16T04:05:00Z\"")]
+    public async Task ResolvePermissionsAsync_NonAuthoritativeTokenIssuanceMetadata_ThrowsControlledClientFailure(
+        string fromCache,
+        string resourcePath,
+        string cacheUntil)
     {
         var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = JsonContent.Create(new
-            {
-                principalId = PrincipalId,
-                permissions = Array.Empty<string>(),
-                roles = Array.Empty<string>()
-            })
-        }));
-
-        var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
-            client.ResolvePermissionsAsync(PrincipalId, CancellationToken.None));
-
-        Assert.Equal("IAM token-issuance permission resolution returned an invalid response.", exception.Message);
-    }
-
-    [Fact]
-    public async Task ResolvePermissionsAsync_CacheExpiryBeforeResolution_ThrowsControlledClientFailure()
-    {
-        var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = JsonContent.Create(new
-            {
-                principalId = PrincipalId,
-                permissions = Array.Empty<string>(),
-                roles = Array.Empty<string>(),
-                resolvedAt = new DateTime(2026, 7, 16, 4, 0, 0, DateTimeKind.Utc),
-                cacheUntil = new DateTime(2026, 7, 16, 3, 59, 59, DateTimeKind.Utc)
-            })
+            Content = new StringContent(
+                $$"""
+                {
+                  "principalId": "{{PrincipalId:D}}",
+                  "permissions": [],
+                  "roles": [],
+                  "resourcePath": {{resourcePath}},
+                  "cacheUntil": {{cacheUntil}},
+                  "fromCache": {{fromCache}}
+                }
+                """)
         }));
 
         var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
@@ -198,7 +205,8 @@ public sealed class TokenIssuancePermissionClientTests
         var client = new TokenIssuancePermissionClient(
             httpClient,
             new RecordingSigner(),
-            NullLogger<TokenIssuancePermissionClient>.Instance);
+            NullLogger<TokenIssuancePermissionClient>.Instance,
+            TimeProvider.System);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             client.ResolvePermissionsAsync(PrincipalId, CancellationToken.None));
@@ -215,7 +223,8 @@ public sealed class TokenIssuancePermissionClientTests
         return new TokenIssuancePermissionClient(
             httpClient,
             new RecordingSigner(),
-            NullLogger<TokenIssuancePermissionClient>.Instance);
+            NullLogger<TokenIssuancePermissionClient>.Instance,
+            TimeProvider.System);
     }
 
     private sealed class RecordingSigner : ITokenIssuanceCapabilitySigner
@@ -227,6 +236,11 @@ public sealed class TokenIssuancePermissionClientTests
             TargetPrincipalId = targetPrincipalId;
             return "capability-token";
         }
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
     private sealed class DelegatingTestHandler(

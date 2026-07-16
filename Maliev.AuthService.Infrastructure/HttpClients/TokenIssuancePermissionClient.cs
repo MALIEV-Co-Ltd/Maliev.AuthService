@@ -22,19 +22,23 @@ public sealed class TokenIssuancePermissionClient : ITokenIssuancePermissionClie
     private readonly HttpClient _httpClient;
     private readonly ITokenIssuanceCapabilitySigner _signer;
     private readonly ILogger<TokenIssuancePermissionClient> _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>Initializes the isolated IAM client.</summary>
     /// <param name="httpClient">The dedicated HTTP transport.</param>
     /// <param name="signer">The Auth-only capability signer.</param>
     /// <param name="logger">The client logger.</param>
+    /// <param name="timeProvider">The clock used to record when Auth observed the IAM response.</param>
     public TokenIssuancePermissionClient(
         HttpClient httpClient,
         ITokenIssuanceCapabilitySigner signer,
-        ILogger<TokenIssuancePermissionClient> logger)
+        ILogger<TokenIssuancePermissionClient> logger,
+        TimeProvider timeProvider)
     {
         _httpClient = httpClient;
         _signer = signer;
         _logger = logger;
+        _timeProvider = timeProvider;
     }
 
     /// <inheritdoc/>
@@ -64,10 +68,10 @@ public sealed class TokenIssuancePermissionClient : ITokenIssuancePermissionClie
             response.EnsureSuccessStatusCode();
         }
 
-        PermissionResolutionResponse? result;
+        TokenIssuancePermissionResponse? result;
         try
         {
-            result = await response.Content.ReadFromJsonAsync<PermissionResolutionResponse>(
+            result = await response.Content.ReadFromJsonAsync<TokenIssuancePermissionResponse>(
                 JsonOptions,
                 cancellationToken);
         }
@@ -90,12 +94,35 @@ public sealed class TokenIssuancePermissionClient : ITokenIssuancePermissionClie
             result.Roles is null ||
             result.Permissions.Any(value => string.IsNullOrWhiteSpace(value)) ||
             result.Roles.Any(value => string.IsNullOrWhiteSpace(value)) ||
-            result.ResolvedAt == default ||
-            result.CacheUntil < result.ResolvedAt)
+            result.FromCache ||
+            !string.IsNullOrEmpty(result.ResourcePath) ||
+            result.CacheUntil is not null)
         {
             throw new HttpRequestException(InvalidResponseMessage);
         }
 
-        return result;
+        return new PermissionResolutionResponse
+        {
+            PrincipalId = result.PrincipalId,
+            Permissions = result.Permissions,
+            Roles = result.Roles,
+            ResolvedAt = _timeProvider.GetUtcNow().UtcDateTime,
+            CacheUntil = null
+        };
+    }
+
+    private sealed record TokenIssuancePermissionResponse
+    {
+        public required Guid PrincipalId { get; init; }
+
+        public required List<string> Permissions { get; init; }
+
+        public required List<string> Roles { get; init; }
+
+        public string? ResourcePath { get; init; }
+
+        public DateTime? CacheUntil { get; init; }
+
+        public required bool FromCache { get; init; }
     }
 }

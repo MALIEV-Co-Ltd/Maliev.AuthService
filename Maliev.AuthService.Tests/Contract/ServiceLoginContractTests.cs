@@ -463,6 +463,13 @@ public class ServiceLoginContractTests : IntegrationTestBase
     [InlineData("44444444-4444-4444-4444-444444444444", "null-roles")]
     [InlineData("55555555-5555-5555-5555-555555555555", "null-permission-element")]
     [InlineData("66666666-6666-6666-6666-666666666666", "null-role-element")]
+    [InlineData("77777777-7777-7777-7777-777777777777", "blank-permission-element")]
+    [InlineData("88888888-8888-8888-8888-888888888888", "blank-role-element")]
+    [InlineData("99999999-9999-9999-9999-999999999999", "mismatched-principal")]
+    [InlineData("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "cached-authority")]
+    [InlineData("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "scoped-authority")]
+    [InlineData("cccccccc-cccc-cccc-cccc-cccccccccccc", "expiring-authority")]
+    [InlineData("dddddddd-dddd-dddd-dddd-dddddddddddd", "malformed-json")]
     public async Task POST_V1_Auth_Service_Login_MalformedIamAuthority_ReturnsSanitized503WithoutToken(
         string principalId,
         string clientSuffix)

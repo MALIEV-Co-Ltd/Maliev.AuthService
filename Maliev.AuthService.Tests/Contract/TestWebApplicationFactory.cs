@@ -33,6 +33,20 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         Guid.Parse("55555555-5555-5555-5555-555555555555");
     public static readonly Guid NullRoleElementIamPrincipalId =
         Guid.Parse("66666666-6666-6666-6666-666666666666");
+    public static readonly Guid BlankPermissionElementIamPrincipalId =
+        Guid.Parse("77777777-7777-7777-7777-777777777777");
+    public static readonly Guid BlankRoleElementIamPrincipalId =
+        Guid.Parse("88888888-8888-8888-8888-888888888888");
+    public static readonly Guid MismatchedIamPrincipalId =
+        Guid.Parse("99999999-9999-9999-9999-999999999999");
+    public static readonly Guid CachedIamPrincipalId =
+        Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    public static readonly Guid ScopedIamPrincipalId =
+        Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    public static readonly Guid ExpiringIamPrincipalId =
+        Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    public static readonly Guid MalformedJsonIamPrincipalId =
+        Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
 
     public int IamResolutionCalls => Volatile.Read(ref _iamResolutionCalls);
     public int LegacyIamResolutionCalls => Volatile.Read(ref _legacyIamResolutionCalls);
@@ -362,13 +376,27 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                 var malformedAuthorityJson = principalId switch
                 {
                     var value when string.Equals(value, NullPermissionsIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
-                        $$"""{"principalId":"{{principalId}}","permissions":null,"roles":[],"resolvedAt":"2026-07-16T04:00:00Z"}""",
+                        $$"""{"principalId":"{{principalId}}","permissions":null,"roles":[],"resourcePath":null,"cacheUntil":null,"fromCache":false}""",
                     var value when string.Equals(value, NullRolesIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
-                        $$"""{"principalId":"{{principalId}}","permissions":[],"roles":null,"resolvedAt":"2026-07-16T04:00:00Z"}""",
+                        $$"""{"principalId":"{{principalId}}","permissions":[],"roles":null,"resourcePath":null,"cacheUntil":null,"fromCache":false}""",
                     var value when string.Equals(value, NullPermissionElementIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
-                        $$"""{"principalId":"{{principalId}}","permissions":[null],"roles":[],"resolvedAt":"2026-07-16T04:00:00Z"}""",
+                        $$"""{"principalId":"{{principalId}}","permissions":[null],"roles":[],"resourcePath":null,"cacheUntil":null,"fromCache":false}""",
                     var value when string.Equals(value, NullRoleElementIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
-                        $$"""{"principalId":"{{principalId}}","permissions":[],"roles":[null],"resolvedAt":"2026-07-16T04:00:00Z"}""",
+                        $$"""{"principalId":"{{principalId}}","permissions":[],"roles":[null],"resourcePath":null,"cacheUntil":null,"fromCache":false}""",
+                    var value when string.Equals(value, BlankPermissionElementIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
+                        $$"""{"principalId":"{{principalId}}","permissions":["   "],"roles":[],"resourcePath":null,"cacheUntil":null,"fromCache":false}""",
+                    var value when string.Equals(value, BlankRoleElementIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
+                        $$"""{"principalId":"{{principalId}}","permissions":[],"roles":[""],"resourcePath":null,"cacheUntil":null,"fromCache":false}""",
+                    var value when string.Equals(value, MismatchedIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
+                        """{"principalId":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","permissions":[],"roles":[],"resourcePath":null,"cacheUntil":null,"fromCache":false}""",
+                    var value when string.Equals(value, CachedIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
+                        $$"""{"principalId":"{{principalId}}","permissions":[],"roles":[],"resourcePath":null,"cacheUntil":null,"fromCache":true}""",
+                    var value when string.Equals(value, ScopedIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
+                        $$"""{"principalId":"{{principalId}}","permissions":[],"roles":[],"resourcePath":"projects/project-1","cacheUntil":null,"fromCache":false}""",
+                    var value when string.Equals(value, ExpiringIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
+                        $$"""{"principalId":"{{principalId}}","permissions":[],"roles":[],"resourcePath":null,"cacheUntil":"2026-07-16T04:05:00Z","fromCache":false}""",
+                    var value when string.Equals(value, MalformedJsonIamPrincipalId.ToString(), StringComparison.OrdinalIgnoreCase) =>
+                        "{not-json",
                     _ => null
                 };
                 if (malformedAuthorityJson is not null)
@@ -379,17 +407,19 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                     };
                 }
 
-                var response = new
-                {
-                    principalId = principalId ?? Guid.NewGuid().ToString(),
-                    permissions = new[] { "auth.api_keys.manage", "auth.users.read" },
-                    roles = new[] { "security_admin" },
-                    resolvedAt = DateTime.UtcNow
-                };
-
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = JsonContent.Create(response)
+                    Content = new StringContent(
+                        $$"""
+                        {
+                          "principalId": "{{principalId ?? Guid.NewGuid().ToString()}}",
+                          "permissions": ["auth.api_keys.manage", "auth.users.read"],
+                          "roles": ["security_admin"],
+                          "resourcePath": null,
+                          "cacheUntil": null,
+                          "fromCache": false
+                        }
+                        """)
                 };
             }
 
