@@ -18,19 +18,19 @@ public sealed class WorkloadIdentityIamClientTests
         var operationId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 
         var result = await client.ProvisionAsync(
-            "auth",
-            new ProvisionWorkloadPrincipalRequest { ProfileVersion = 2, OperationId = operationId },
+            "auth-service",
+            new ProvisionWorkloadPrincipalRequest { ProfileVersion = 1, OperationId = operationId },
             "employee-token");
 
-        Assert.Equal("/iam/v1/workload-principals/auth", handler.RequestUri?.AbsolutePath);
+        Assert.Equal("/iam/v1/workload-principals/auth-service", handler.RequestUri?.AbsolutePath);
         Assert.Equal("Bearer", handler.AuthorizationScheme);
         Assert.Equal("employee-token", handler.AuthorizationParameter);
         using var document = JsonDocument.Parse(Assert.IsType<string>(handler.Body));
-        Assert.Equal(2, document.RootElement.GetProperty("profile_version").GetInt32());
+        Assert.Equal(1, document.RootElement.GetProperty("profile_version").GetInt32());
         Assert.Equal(operationId, document.RootElement.GetProperty("operation_id").GetGuid());
         Assert.False(document.RootElement.TryGetProperty("ProfileVersion", out _));
-        Assert.Equal("auth", result.WorkloadId);
-        Assert.Equal("roles.workload.auth", result.RoleId);
+        Assert.Equal("auth-service", result.WorkloadId);
+        Assert.Equal("roles.workloads.auth-service.v1", result.RoleId);
     }
 
     private sealed class RecordingHandler : HttpMessageHandler
@@ -55,10 +55,10 @@ public sealed class WorkloadIdentityIamClientTests
             {
                 Content = JsonContent.Create(new
                 {
-                    workload_id = "auth",
+                    workload_id = "auth-service",
                     principal_id = "11111111-1111-1111-1111-111111111111",
-                    profile_version = 2,
-                    role_id = "roles.workload.auth"
+                    profile_version = 1,
+                    role_id = "roles.workloads.auth-service.v1"
                 })
             };
         }

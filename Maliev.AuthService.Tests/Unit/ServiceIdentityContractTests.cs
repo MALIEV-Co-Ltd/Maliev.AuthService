@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Net;
 using Maliev.Aspire.ServiceDefaults.Authorization;
 using Maliev.AuthService.Api.Authorization;
 using Maliev.AuthService.Api.Controllers;
@@ -8,6 +9,7 @@ using Maliev.AuthService.Application.Interfaces;
 using Maliev.AuthService.Domain.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Moq;
 using System.Security.Claims;
 using Xunit;
@@ -152,6 +154,48 @@ public sealed class ServiceIdentityContractTests
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, unavailable.StatusCode);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, StatusCodes.Status403Forbidden)]
+    [InlineData(HttpStatusCode.Conflict, StatusCodes.Status409Conflict)]
+    public async Task Provision_IamAuthorizationOrConflict_PreservesSafeStatus(
+        HttpStatusCode iamStatus,
+        int expectedStatus)
+    {
+        var actorId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var request = new ProvisionServiceIdentityRequest
+        {
+            ProfileVersion = 1,
+            OperationId = Guid.NewGuid(),
+            ServiceName = "Auth Service"
+        };
+        var manager = new Mock<IServiceIdentityManager>(MockBehavior.Strict);
+        manager.Setup(service => service.ProvisionAsync(
+                "auth",
+                request,
+                actorId,
+                "employee-token",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("untrusted upstream body", null, iamStatus));
+        var controller = CreateController(manager.Object,
+            new Claim("user_type", "employee"),
+            new Claim("sub", actorId.ToString("D")));
+        controller.Request.Headers.Authorization = "Bearer employee-token";
+
+        var result = await controller.Provision("auth", request, CancellationToken.None);
+
+        if (expectedStatus == StatusCodes.Status403Forbidden)
+        {
+            Assert.IsType<ForbidResult>(result);
+        }
+        else
+        {
+            var status = Assert.IsAssignableFrom<IStatusCodeActionResult>(result);
+            Assert.Equal(expectedStatus, status.StatusCode);
+        }
+
+        Assert.DoesNotContain("untrusted upstream body", result.ToString(), StringComparison.Ordinal);
+    }
+
     private static ServiceIdentitiesController CreateController(
         IServiceIdentityManager manager,
         params Claim[] claims) => new(manager)
@@ -171,7 +215,7 @@ public sealed class ServiceIdentityContractTests
         ClientId = "service-auth",
         PrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
         ProfileVersion = 1,
-        RoleId = "roles.workload.auth",
+        RoleId = "roles.workloads.auth.v1",
         IsActive = true,
         CredentialVersion = 1,
         ClientSecret = "one-time-secret",

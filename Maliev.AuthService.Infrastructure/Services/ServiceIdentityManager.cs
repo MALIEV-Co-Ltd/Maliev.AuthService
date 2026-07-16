@@ -25,7 +25,7 @@ public sealed class ServiceIdentityManager(
         string callerBearerToken,
         CancellationToken cancellationToken = default)
     {
-        workloadId = ValidateWorkloadId(workloadId);
+        workloadId = ServiceIdentityIamContract.ValidateWorkloadId(workloadId);
         ValidateActorAndOperation(actorId, request.OperationId);
         var requestHash = HashCanonicalRequest(
             $"provision|{workloadId}|{request.ProfileVersion}|{request.ServiceName}|{request.HardExpiryDays}");
@@ -137,7 +137,7 @@ public sealed class ServiceIdentityManager(
         string workloadId,
         CancellationToken cancellationToken = default)
     {
-        workloadId = ValidateWorkloadId(workloadId);
+        workloadId = ServiceIdentityIamContract.ValidateWorkloadId(workloadId);
         var credential = await dbContext.ServiceCredentials
             .AsNoTracking()
             .Include(entity => entity.Versions)
@@ -161,7 +161,7 @@ public sealed class ServiceIdentityManager(
         Guid actorId,
         CancellationToken cancellationToken = default)
     {
-        workloadId = ValidateWorkloadId(workloadId);
+        workloadId = ServiceIdentityIamContract.ValidateWorkloadId(workloadId);
         ValidateActorAndOperation(actorId, request.OperationId);
         var requestHash = HashCanonicalRequest(
             $"rotate|{workloadId}|{request.GracePeriodSeconds}|{request.HardExpiryDays}");
@@ -274,7 +274,7 @@ public sealed class ServiceIdentityManager(
         Guid actorId,
         CancellationToken cancellationToken = default)
     {
-        workloadId = ValidateWorkloadId(workloadId);
+        workloadId = ServiceIdentityIamContract.ValidateWorkloadId(workloadId);
         ValidateActorAndOperation(actorId, request.OperationId);
         var requestHash = HashCanonicalRequest($"revoke|{workloadId}");
 
@@ -419,8 +419,7 @@ public sealed class ServiceIdentityManager(
         if (response.WorkloadId != workloadId ||
             response.PrincipalId == Guid.Empty ||
             response.ProfileVersion != profileVersion ||
-            !IsCanonicalRole(response.RoleId) ||
-            response.RoleId.Contains("platform.owner", StringComparison.Ordinal))
+            response.RoleId != ServiceIdentityIamContract.ExpectedRoleId(workloadId, profileVersion))
         {
             throw new ServiceIdentityConflictException("IAM returned a mismatched or unsafe workload binding");
         }
@@ -484,33 +483,11 @@ public sealed class ServiceIdentityManager(
             HardExpiresAt = version.HardExpiresAt
         };
 
-    private static string ValidateWorkloadId(string workloadId)
-    {
-        if (workloadId is not { Length: > 0 and <= 80 } ||
-            workloadId != workloadId.Trim().ToLowerInvariant() ||
-            workloadId[0] is not (>= 'a' and <= 'z') ||
-            workloadId.Any(character => character is not (
-                >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '.')))
-        {
-            throw new ArgumentException("Workload identifier is not canonical", nameof(workloadId));
-        }
-
-        return workloadId;
-    }
-
     private static void ValidateActorAndOperation(Guid actorId, Guid operationId)
     {
         ArgumentOutOfRangeException.ThrowIfEqual(actorId, Guid.Empty);
         ArgumentOutOfRangeException.ThrowIfEqual(operationId, Guid.Empty);
     }
-
-    private static bool IsCanonicalRole(string value) =>
-        value is { Length: > 0 and <= 160 } &&
-        value == value.Trim().ToLowerInvariant() &&
-        value != "*" &&
-        !value.Contains('*') &&
-        value.All(character => character is
-            >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_' or '.' or '/');
 
     private static string GenerateSecret()
     {

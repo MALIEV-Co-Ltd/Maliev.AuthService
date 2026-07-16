@@ -51,6 +51,18 @@ public sealed class ServiceIdentitiesController(IServiceIdentityManager manager)
         {
             return BadRequest(new { error = exception.Message });
         }
+        catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            return Forbid();
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            return Conflict(new
+            {
+                error = "iam_conflict",
+                error_description = "IAM rejected the workload identity operation as conflicting"
+            });
+        }
         catch (HttpRequestException)
         {
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new

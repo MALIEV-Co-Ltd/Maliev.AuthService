@@ -77,7 +77,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             Content = JsonContent.Create(
                 new ServiceLoginRequest
                 {
-                    ClientId = "service-auth-managed",
+                    ClientId = "service-auth-service",
                     ClientSecret = secret
                 },
                 options: new JsonSerializerOptions
@@ -98,11 +98,11 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         var credential = new ServiceCredential
         {
             Id = Guid.NewGuid(),
-            ClientId = "service-auth-managed",
+            ClientId = "service-auth-service",
             PrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-            WorkloadId = "auth",
+            WorkloadId = "auth-service",
             ProfileVersion = 1,
-            RoleId = "roles.workload.auth",
+            RoleId = "roles.workloads.auth-service.v1",
             ClientSecretHash = Hash(versions[0].Secret),
             ServiceName = "Auth Service",
             IsActive = logicalActive,

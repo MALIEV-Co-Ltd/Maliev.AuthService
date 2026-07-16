@@ -116,12 +116,14 @@ try
     // Dedicated human-authorized client for IAM workload provisioning. It intentionally
     // has no service-account authentication handler because the controller forwards only
     // the already validated employee bearer token.
-    builder.Services.AddHttpClient<IWorkloadIdentityIamClient, WorkloadIdentityIamClient>(client =>
+    builder.Services.AddWorkloadIdentityIamEndpoint(
+        builder.Configuration.GetSection("Services:IAMService"),
+        builder.Environment);
+    builder.Services.AddHttpClient<IWorkloadIdentityIamClient, WorkloadIdentityIamClient>((services, client) =>
     {
-        var explicitUrl = builder.Configuration["Services:IAMService:BaseUrl"];
-        client.BaseAddress = !string.IsNullOrWhiteSpace(explicitUrl)
-            ? new Uri(explicitUrl)
-            : new Uri("https+http://IAMService");
+        var options = services.GetRequiredService<IOptions<WorkloadIdentityIamEndpointOptions>>().Value;
+        var resolver = services.GetRequiredService<IWorkloadIdentityIamEndpointResolver>();
+        client.BaseAddress = resolver.Resolve(options);
         client.Timeout = TimeSpan.FromSeconds(10);
     }).AddServiceDiscovery();
 
