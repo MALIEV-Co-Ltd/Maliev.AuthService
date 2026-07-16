@@ -49,6 +49,8 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
     public static readonly Guid EmptyResourcePathIamPrincipalId =
         Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
+    public static readonly Guid SearchServiceIamPrincipalId =
+        Guid.Parse("13131313-1313-1313-1313-131313131313");
 
     public int IamResolutionCalls => Volatile.Read(ref _iamResolutionCalls);
     public int LegacyIamResolutionCalls => Volatile.Read(ref _legacyIamResolutionCalls);
@@ -408,6 +410,27 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                     return new HttpResponseMessage(HttpStatusCode.OK)
                     {
                         Content = new StringContent(malformedAuthorityJson)
+                    };
+                }
+
+                if (string.Equals(
+                    principalId,
+                    SearchServiceIamPrincipalId.ToString(),
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            $$"""
+                            {
+                              "principalId": "{{principalId}}",
+                              "permissions": ["iam.auth.check-permission"],
+                              "roles": ["roles.workloads.search-service.v1"],
+                              "resourcePath": null,
+                              "cacheUntil": null,
+                              "fromCache": false
+                            }
+                            """)
                     };
                 }
 
