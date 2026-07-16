@@ -113,6 +113,21 @@ try
     .AddServiceDiscovery()
     .AddHttpMessageHandler<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>();
 
+    // Isolated Auth-only capability client used exclusively by service-login token issuance.
+    // Signing-key validation is deliberately deferred to each service-login call so a missing
+    // rotation secret cannot crash unrelated AuthService startup and user authentication flows.
+    builder.Services.AddOptions<TokenIssuanceCapabilityOptions>()
+        .Bind(builder.Configuration.GetSection(TokenIssuanceCapabilityOptions.ConfigurationSection));
+    builder.Services.AddSingleton<ITokenIssuanceCapabilitySigner, TokenIssuanceCapabilitySigner>();
+    builder.Services.AddHttpClient<ITokenIssuancePermissionClient, TokenIssuancePermissionClient>(client =>
+    {
+        var explicitUrl = builder.Configuration["Services:IAMService:BaseUrl"];
+        client.BaseAddress = !string.IsNullOrEmpty(explicitUrl)
+            ? new Uri(explicitUrl)
+            : new Uri("https+http://IAMService");
+        client.Timeout = TimeSpan.FromSeconds(10);
+    }).AddServiceDiscovery();
+
     // Dedicated human-authorized client for IAM workload provisioning. It intentionally
     // has no service-account authentication handler because the controller forwards only
     // the already validated employee bearer token.

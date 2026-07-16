@@ -47,6 +47,10 @@ public class ServiceLoginContractTests : IntegrationTestBase
         var content = await response.Content.ReadAsStringAsync();
         var json = JsonDocument.Parse(content);
 
+        Assert.Equal(
+            ["access_token", "expires_in", "token_type", "user"],
+            json.RootElement.EnumerateObject().Select(property => property.Name).Order());
+
         Assert.NotNull(json.RootElement.GetProperty("access_token").GetString());
         Assert.NotEmpty(json.RootElement.GetProperty("access_token").GetString()!);
         Assert.Equal("Bearer", json.RootElement.GetProperty("token_type").GetString());
@@ -54,6 +58,17 @@ public class ServiceLoginContractTests : IntegrationTestBase
 
         // Service tokens should not have refresh tokens
         Assert.False(json.RootElement.TryGetProperty("refresh_token", out _));
+        var user = json.RootElement.GetProperty("user");
+        Assert.Equal(
+            ["customer_id", "email", "name", "principal_id", "profile_image_url", "user_id", "user_type"],
+            user.EnumerateObject().Select(property => property.Name).Order());
+        Assert.Equal("service-dev-customer-api", user.GetProperty("user_id").GetString());
+        Assert.Equal("11111111-1111-1111-1111-111111111111", user.GetProperty("principal_id").GetString());
+        Assert.Equal("service", user.GetProperty("user_type").GetString());
+        Assert.Equal("Customer API Service", user.GetProperty("name").GetString());
+        Assert.Equal(JsonValueKind.Null, user.GetProperty("customer_id").ValueKind);
+        Assert.Equal(JsonValueKind.Null, user.GetProperty("email").ValueKind);
+        Assert.Equal(JsonValueKind.Null, user.GetProperty("profile_image_url").ValueKind);
 
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(
             json.RootElement.GetProperty("access_token").GetString());
@@ -68,6 +83,31 @@ public class ServiceLoginContractTests : IntegrationTestBase
         Assert.Equal("Customer API Service", jwt.Claims.Single(c => c.Type == "service_name").Value);
         Assert.DoesNotContain(jwt.Claims, claim =>
             claim.Type == "permissions" && claim.Value == "*");
+        Assert.Equal(1, Factory.TokenIssuanceResolutionCalls);
+        Assert.Equal(0, Factory.LegacyIamResolutionCalls);
+
+        using var permissionRequest = JsonDocument.Parse(Factory.LastTokenIssuanceRequestBody!);
+        Assert.Equal(
+            ["principalId"],
+            permissionRequest.RootElement.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(
+            "11111111-1111-1111-1111-111111111111",
+            permissionRequest.RootElement.GetProperty("principalId").GetString());
+
+        var capability = new JwtSecurityTokenHandler().ReadJwtToken(Factory.LastTokenIssuanceAuthorization);
+        Assert.Equal("auth-capability-test-key", capability.Header.Kid);
+        Assert.Equal([TokenIssuanceCapabilityOptions.Audience], capability.Audiences);
+        Assert.Equal(
+            "iam.permission-resolution",
+            capability.Claims.Single(claim => claim.Type == "purpose").Value);
+        Assert.Equal(
+            "11111111-1111-1111-1111-111111111111",
+            capability.Claims.Single(claim => claim.Type == "target_principal_id").Value);
+        Assert.Equal(
+            ["iam.auth.resolve-permissions"],
+            capability.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        Assert.DoesNotContain(capability.Claims, claim => claim.Type is "role" or "roles");
+        Assert.DoesNotContain(capability.Claims, claim => claim.Value == "*");
     }
 
     [Fact]
@@ -326,8 +366,19 @@ public class ServiceLoginContractTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(
+            ["details", "error", "error_description", "errors", "locked_until"],
+            json.RootElement.EnumerateObject().Select(property => property.Name).Order());
         Assert.Equal("service_unavailable", json.RootElement.GetProperty("error").GetString());
+        Assert.Equal(
+            "Service authentication is temporarily unavailable",
+            json.RootElement.GetProperty("error_description").GetString());
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("details").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("errors").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("locked_until").ValueKind);
         Assert.False(json.RootElement.TryGetProperty("access_token", out _));
+        Assert.Equal(0, Factory.TokenIssuanceResolutionCalls);
+        Assert.Equal(0, Factory.LegacyIamResolutionCalls);
     }
 
     [Fact]
@@ -361,7 +412,59 @@ public class ServiceLoginContractTests : IntegrationTestBase
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(
+            ["details", "error", "error_description", "errors", "locked_until"],
+            json.RootElement.EnumerateObject().Select(property => property.Name).Order());
         Assert.Equal("service_unavailable", json.RootElement.GetProperty("error").GetString());
+        Assert.Equal(
+            "Service authentication is temporarily unavailable",
+            json.RootElement.GetProperty("error_description").GetString());
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("details").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("errors").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("locked_until").ValueKind);
         Assert.False(json.RootElement.TryGetProperty("access_token", out _));
+        Assert.Equal(1, Factory.TokenIssuanceResolutionCalls);
+        Assert.Equal(0, Factory.LegacyIamResolutionCalls);
+    }
+
+    [Fact]
+    public async Task POST_V1_Auth_Service_Login_MissingCapabilityKey_ReturnsSanitized503WithoutToken()
+    {
+        await CleanDatabaseAsync();
+        using var scope = Factory.Services.CreateScope();
+        var options = scope.ServiceProvider
+            .GetRequiredService<IOptions<TokenIssuanceCapabilityOptions>>()
+            .Value;
+        var originalPrivateKey = options.PrivateKey;
+        try
+        {
+            options.PrivateKey = null;
+
+            var response = await Client.PostAsJsonAsync("/auth/v1/service/login", new
+            {
+                client_id = "service-dev-customer-api",
+                client_secret = TestConstants.DummyValidServiceSecret
+            });
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal(
+                ["details", "error", "error_description", "errors", "locked_until"],
+                json.RootElement.EnumerateObject().Select(property => property.Name).Order());
+            Assert.Equal("service_unavailable", json.RootElement.GetProperty("error").GetString());
+            Assert.Equal(
+                "Service authentication is temporarily unavailable",
+                json.RootElement.GetProperty("error_description").GetString());
+            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("details").ValueKind);
+            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("errors").ValueKind);
+            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("locked_until").ValueKind);
+            Assert.False(json.RootElement.TryGetProperty("access_token", out _));
+            Assert.Equal(0, Factory.TokenIssuanceResolutionCalls);
+            Assert.Equal(0, Factory.LegacyIamResolutionCalls);
+        }
+        finally
+        {
+            options.PrivateKey = originalPrivateKey;
+        }
     }
 }

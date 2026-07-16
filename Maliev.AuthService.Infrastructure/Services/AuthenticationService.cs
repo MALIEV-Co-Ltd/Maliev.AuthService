@@ -35,6 +35,7 @@ public class AuthenticationService : IAuthenticationService
     private readonly IAccountLockoutService _accountLockoutService;
     private readonly IRateLimitService _rateLimitService;
     private readonly IIAMServiceClient _iamServiceClient;
+    private readonly ITokenIssuancePermissionClient _tokenIssuancePermissionClient;
     private readonly ILogger<AuthenticationService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
@@ -54,6 +55,7 @@ public class AuthenticationService : IAuthenticationService
         IAccountLockoutService accountLockoutService,
         IRateLimitService rateLimitService,
         IIAMServiceClient iamServiceClient,
+        ITokenIssuancePermissionClient tokenIssuancePermissionClient,
         ILogger<AuthenticationService> logger,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
@@ -69,6 +71,7 @@ public class AuthenticationService : IAuthenticationService
         _accountLockoutService = accountLockoutService;
         _rateLimitService = rateLimitService;
         _iamServiceClient = iamServiceClient;
+        _tokenIssuancePermissionClient = tokenIssuancePermissionClient;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
@@ -445,7 +448,7 @@ public class AuthenticationService : IAuthenticationService
         PermissionResolutionResponse iamResponse;
         try
         {
-            iamResponse = await _iamServiceClient.ResolvePermissionsRequiredAsync(
+            iamResponse = await _tokenIssuancePermissionClient.ResolvePermissionsAsync(
                 serviceCredential.PrincipalId.Value,
                 cancellationToken);
         }
