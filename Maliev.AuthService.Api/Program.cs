@@ -113,6 +113,18 @@ try
     .AddServiceDiscovery()
     .AddHttpMessageHandler<Maliev.Aspire.ServiceDefaults.IAM.ServiceAccountAuthenticationHandler>();
 
+    // Dedicated human-authorized client for IAM workload provisioning. It intentionally
+    // has no service-account authentication handler because the controller forwards only
+    // the already validated employee bearer token.
+    builder.Services.AddHttpClient<IWorkloadIdentityIamClient, WorkloadIdentityIamClient>(client =>
+    {
+        var explicitUrl = builder.Configuration["Services:IAMService:BaseUrl"];
+        client.BaseAddress = !string.IsNullOrWhiteSpace(explicitUrl)
+            ? new Uri(explicitUrl)
+            : new Uri("https+http://IAMService");
+        client.Timeout = TimeSpan.FromSeconds(10);
+    }).AddServiceDiscovery();
+
 
     // IAM Integration
     builder.Services.AddIAMRegistration<AuthIAMRegistrationService>("auth");
@@ -127,6 +139,7 @@ try
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddScoped<IGoogleIdentityNonceService, GoogleIdentityNonceService>();
     builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
+    builder.Services.AddScoped<IServiceIdentityManager, ServiceIdentityManager>();
     builder.Services.AddScoped<IEmailVerificationService, EmailVerificationService>();
     builder.Services.AddOptions<ServiceLoginRateLimitOptions>()
         .Bind(builder.Configuration.GetSection("RateLimiting:ServiceLogin"))
