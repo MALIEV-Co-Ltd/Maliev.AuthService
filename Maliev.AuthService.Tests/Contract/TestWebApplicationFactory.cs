@@ -63,6 +63,8 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
         Guid.Parse("18181818-1818-1818-1818-181818181818");
     public static readonly Guid MaterialServiceIamPrincipalId =
         Guid.Parse("19191919-1919-1919-1919-191919191919");
+    public static readonly Guid LifecycleServiceIamPrincipalId =
+        Guid.Parse("20202020-2020-2020-2020-202020202020");
 
     public int IamResolutionCalls => Volatile.Read(ref _iamResolutionCalls);
     public int LegacyIamResolutionCalls => Volatile.Read(ref _legacyIamResolutionCalls);
@@ -564,6 +566,27 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                               "principalId": "{{principalId}}",
                               "permissions": ["iam.auth.check-permission", "supplier.suppliers.read"],
                               "roles": ["roles.workloads.material-service.v1"],
+                              "resourcePath": null,
+                              "cacheUntil": null,
+                              "fromCache": false
+                            }
+                            """)
+                    };
+                }
+
+                if (string.Equals(
+                    principalId,
+                    LifecycleServiceIamPrincipalId.ToString(),
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            $$"""
+                            {
+                              "principalId": "{{principalId}}",
+                              "permissions": ["iam.auth.check-permission"],
+                              "roles": ["roles.workloads.lifecycle-service.v1"],
                               "resourcePath": null,
                               "cacheUntil": null,
                               "fromCache": false

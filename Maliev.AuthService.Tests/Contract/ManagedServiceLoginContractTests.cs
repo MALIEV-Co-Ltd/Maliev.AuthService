@@ -22,6 +22,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
     private const string AccountingSecret = "accounting-service-secret-with-at-least-32-random-looking-bytes";
     private const string PricingSecret = "pricing-service-secret-with-at-least-32-random-looking-bytes";
     private const string MaterialSecret = "material-service-secret-with-at-least-32-random-looking-bytes";
+    private const string LifecycleSecret = "lifecycle-service-secret-with-at-least-32-random-looking-bytes";
     private static readonly (string ClientId, string Secret)[] CanonicalManagedCredentials =
     [
         ("service-auth-service", AuthSecret),
@@ -32,7 +33,8 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         ("service-currency-service", CurrencySecret),
         ("service-accounting-service", AccountingSecret),
         ("service-pricing-service", PricingSecret),
-        ("service-material-service", MaterialSecret)
+        ("service-material-service", MaterialSecret),
+        ("service-lifecycle-service", LifecycleSecret)
     ];
 
     public Task InitializeAsync() => factory.CleanDatabaseAsync();
@@ -105,6 +107,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         var accounting = await LoginAsync(client, "service-accounting-service", AccountingSecret, "127.0.13.7");
         var pricing = await LoginAsync(client, "service-pricing-service", PricingSecret, "127.0.13.8");
         var material = await LoginAsync(client, "service-material-service", MaterialSecret, "127.0.13.9");
+        var lifecycle = await LoginAsync(client, "service-lifecycle-service", LifecycleSecret, "127.0.13.10");
 
         Assert.Equal(HttpStatusCode.OK, auth.StatusCode);
         Assert.Equal(HttpStatusCode.OK, contact.StatusCode);
@@ -115,6 +118,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         Assert.Equal(HttpStatusCode.OK, accounting.StatusCode);
         Assert.Equal(HttpStatusCode.OK, pricing.StatusCode);
         Assert.Equal(HttpStatusCode.OK, material.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, lifecycle.StatusCode);
 
         await AssertCanonicalServiceTokenAsync(
             search,
@@ -168,6 +172,12 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
                 "iam.auth.check-permission",
                 "supplier.suppliers.read"
             ]);
+        await AssertCanonicalServiceTokenAsync(
+            lifecycle,
+            TestWebApplicationFactory.LifecycleServiceIamPrincipalId,
+            "service-lifecycle-service",
+            "LifecycleService",
+            "roles.workloads.lifecycle-service.v1");
     }
 
     [Fact]
@@ -185,10 +195,10 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
                 .Select(peer => (client.ClientId, peer.Secret)))
             .ToArray();
 
-        Assert.Equal(27, rows.Length);
+        Assert.Equal(30, rows.Length);
         Assert.All(rows, row => Assert.InRange(row.WrongSecrets.Length, 2, 3));
-        Assert.Equal(72, actualPairs.Length);
-        Assert.Equal(72, actualPairs.Distinct().Count());
+        Assert.Equal(90, actualPairs.Length);
+        Assert.Equal(90, actualPairs.Distinct().Count());
         Assert.Equal(
             expectedPairs.OrderBy(pair => pair.ClientId).ThenBy(pair => pair.Secret),
             actualPairs.OrderBy(pair => pair.ClientId).ThenBy(pair => pair.Secret));
@@ -301,6 +311,14 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             "MaterialService",
             true,
             (MaterialSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-lifecycle-service",
+            "lifecycle-service",
+            "roles.workloads.lifecycle-service.v1",
+            TestWebApplicationFactory.LifecycleServiceIamPrincipalId,
+            "LifecycleService",
+            true,
+            (LifecycleSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
     }
 
     private static async Task AssertCanonicalServiceTokenAsync(
