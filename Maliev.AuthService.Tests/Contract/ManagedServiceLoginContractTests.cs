@@ -21,6 +21,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
     private const string CurrencySecret = "currency-service-secret-with-at-least-32-random-looking-bytes";
     private const string AccountingSecret = "accounting-service-secret-with-at-least-32-random-looking-bytes";
     private const string PricingSecret = "pricing-service-secret-with-at-least-32-random-looking-bytes";
+    private const string MaterialSecret = "material-service-secret-with-at-least-32-random-looking-bytes";
     private static readonly (string ClientId, string Secret)[] CanonicalManagedCredentials =
     [
         ("service-auth-service", AuthSecret),
@@ -30,7 +31,8 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         ("service-country-service", CountrySecret),
         ("service-currency-service", CurrencySecret),
         ("service-accounting-service", AccountingSecret),
-        ("service-pricing-service", PricingSecret)
+        ("service-pricing-service", PricingSecret),
+        ("service-material-service", MaterialSecret)
     ];
 
     public Task InitializeAsync() => factory.CleanDatabaseAsync();
@@ -102,6 +104,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         var currency = await LoginAsync(client, "service-currency-service", CurrencySecret, "127.0.13.6");
         var accounting = await LoginAsync(client, "service-accounting-service", AccountingSecret, "127.0.13.7");
         var pricing = await LoginAsync(client, "service-pricing-service", PricingSecret, "127.0.13.8");
+        var material = await LoginAsync(client, "service-material-service", MaterialSecret, "127.0.13.9");
 
         Assert.Equal(HttpStatusCode.OK, auth.StatusCode);
         Assert.Equal(HttpStatusCode.OK, contact.StatusCode);
@@ -111,6 +114,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         Assert.Equal(HttpStatusCode.OK, currency.StatusCode);
         Assert.Equal(HttpStatusCode.OK, accounting.StatusCode);
         Assert.Equal(HttpStatusCode.OK, pricing.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, material.StatusCode);
 
         await AssertCanonicalServiceTokenAsync(
             search,
@@ -154,6 +158,16 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
                 "job.jobs.read",
                 "currency.rates.read"
             ]);
+        await AssertCanonicalServiceTokenAsync(
+            material,
+            TestWebApplicationFactory.MaterialServiceIamPrincipalId,
+            "service-material-service",
+            "MaterialService",
+            "roles.workloads.material-service.v1",
+            [
+                "iam.auth.check-permission",
+                "supplier.suppliers.read"
+            ]);
     }
 
     [Fact]
@@ -171,10 +185,10 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
                 .Select(peer => (client.ClientId, peer.Secret)))
             .ToArray();
 
-        Assert.Equal(24, rows.Length);
+        Assert.Equal(27, rows.Length);
         Assert.All(rows, row => Assert.InRange(row.WrongSecrets.Length, 2, 3));
-        Assert.Equal(56, actualPairs.Length);
-        Assert.Equal(56, actualPairs.Distinct().Count());
+        Assert.Equal(72, actualPairs.Length);
+        Assert.Equal(72, actualPairs.Distinct().Count());
         Assert.Equal(
             expectedPairs.OrderBy(pair => pair.ClientId).ThenBy(pair => pair.Secret),
             actualPairs.OrderBy(pair => pair.ClientId).ThenBy(pair => pair.Secret));
@@ -189,9 +203,11 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
                 .Select(peer => peer.Secret)
                 .ToArray();
 
-            yield return [client.ClientId, wrongSecrets[..3]];
-            yield return [client.ClientId, wrongSecrets[3..5]];
-            yield return [client.ClientId, wrongSecrets[5..7]];
+            for (var offset = 0; offset < wrongSecrets.Length; offset += 3)
+            {
+                var end = Math.Min(offset + 3, wrongSecrets.Length);
+                yield return [client.ClientId, wrongSecrets[offset..end]];
+            }
         }
     }
 
@@ -277,6 +293,14 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             "PricingService",
             true,
             (PricingSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-material-service",
+            "material-service",
+            "roles.workloads.material-service.v1",
+            TestWebApplicationFactory.MaterialServiceIamPrincipalId,
+            "MaterialService",
+            true,
+            (MaterialSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
     }
 
     private static async Task AssertCanonicalServiceTokenAsync(
