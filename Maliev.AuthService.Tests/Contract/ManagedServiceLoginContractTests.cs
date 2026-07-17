@@ -20,6 +20,18 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
     private const string CountrySecret = "country-service-secret-with-at-least-32-random-looking-bytes";
     private const string CurrencySecret = "currency-service-secret-with-at-least-32-random-looking-bytes";
     private const string AccountingSecret = "accounting-service-secret-with-at-least-32-random-looking-bytes";
+    private const string PricingSecret = "pricing-service-secret-with-at-least-32-random-looking-bytes";
+    private static readonly (string ClientId, string Secret)[] CanonicalManagedCredentials =
+    [
+        ("service-auth-service", AuthSecret),
+        ("service-contact-service", ContactSecret),
+        ("service-search-service", SearchSecret),
+        ("service-registry-service", RegistrySecret),
+        ("service-country-service", CountrySecret),
+        ("service-currency-service", CurrencySecret),
+        ("service-accounting-service", AccountingSecret),
+        ("service-pricing-service", PricingSecret)
+    ];
 
     public Task InitializeAsync() => factory.CleanDatabaseAsync();
 
@@ -89,6 +101,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         var country = await LoginAsync(client, "service-country-service", CountrySecret, "127.0.13.5");
         var currency = await LoginAsync(client, "service-currency-service", CurrencySecret, "127.0.13.6");
         var accounting = await LoginAsync(client, "service-accounting-service", AccountingSecret, "127.0.13.7");
+        var pricing = await LoginAsync(client, "service-pricing-service", PricingSecret, "127.0.13.8");
 
         Assert.Equal(HttpStatusCode.OK, auth.StatusCode);
         Assert.Equal(HttpStatusCode.OK, contact.StatusCode);
@@ -97,6 +110,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         Assert.Equal(HttpStatusCode.OK, country.StatusCode);
         Assert.Equal(HttpStatusCode.OK, currency.StatusCode);
         Assert.Equal(HttpStatusCode.OK, accounting.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, pricing.StatusCode);
 
         await AssertCanonicalServiceTokenAsync(
             search,
@@ -128,39 +142,73 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             "service-accounting-service",
             "AccountingService",
             "roles.workloads.accounting-service.v1");
+        await AssertCanonicalServiceTokenAsync(
+            pricing,
+            TestWebApplicationFactory.PricingServiceIamPrincipalId,
+            "service-pricing-service",
+            "PricingService",
+            "roles.workloads.pricing-service.v1",
+            [
+                "iam.auth.check-permission",
+                "material.materials.read",
+                "job.jobs.read",
+                "currency.rates.read"
+            ]);
+    }
+
+    [Fact]
+    public void CrossedManagedServiceCredentialCases_CoverEveryOrderedPairExactlyOnce()
+    {
+        var rows = CrossedManagedServiceCredentialCases()
+            .Select(row => (ClientId: Assert.IsType<string>(row[0]), WrongSecrets: Assert.IsType<string[]>(row[1])))
+            .ToArray();
+        var actualPairs = rows
+            .SelectMany(row => row.WrongSecrets.Select(secret => (row.ClientId, Secret: secret)))
+            .ToArray();
+        var expectedPairs = CanonicalManagedCredentials
+            .SelectMany(client => CanonicalManagedCredentials
+                .Where(peer => peer.ClientId != client.ClientId)
+                .Select(peer => (client.ClientId, peer.Secret)))
+            .ToArray();
+
+        Assert.Equal(24, rows.Length);
+        Assert.All(rows, row => Assert.InRange(row.WrongSecrets.Length, 2, 3));
+        Assert.Equal(56, actualPairs.Length);
+        Assert.Equal(56, actualPairs.Distinct().Count());
+        Assert.Equal(
+            expectedPairs.OrderBy(pair => pair.ClientId).ThenBy(pair => pair.Secret),
+            actualPairs.OrderBy(pair => pair.ClientId).ThenBy(pair => pair.Secret));
+    }
+
+    public static IEnumerable<object[]> CrossedManagedServiceCredentialCases()
+    {
+        foreach (var client in CanonicalManagedCredentials)
+        {
+            var wrongSecrets = CanonicalManagedCredentials
+                .Where(peer => peer.ClientId != client.ClientId)
+                .Select(peer => peer.Secret)
+                .ToArray();
+
+            yield return [client.ClientId, wrongSecrets[..3]];
+            yield return [client.ClientId, wrongSecrets[3..5]];
+            yield return [client.ClientId, wrongSecrets[5..7]];
+        }
     }
 
     [Theory]
-    [InlineData("service-auth-service", ContactSecret, SearchSecret, RegistrySecret)]
-    [InlineData("service-auth-service", CountrySecret, CurrencySecret, AccountingSecret)]
-    [InlineData("service-contact-service", AuthSecret, SearchSecret, RegistrySecret)]
-    [InlineData("service-contact-service", CountrySecret, CurrencySecret, AccountingSecret)]
-    [InlineData("service-search-service", AuthSecret, ContactSecret, RegistrySecret)]
-    [InlineData("service-search-service", CountrySecret, CurrencySecret, AccountingSecret)]
-    [InlineData("service-registry-service", AuthSecret, ContactSecret, SearchSecret)]
-    [InlineData("service-registry-service", CountrySecret, CurrencySecret, AccountingSecret)]
-    [InlineData("service-country-service", AuthSecret, ContactSecret, SearchSecret)]
-    [InlineData("service-country-service", RegistrySecret, CurrencySecret, AccountingSecret)]
-    [InlineData("service-currency-service", AuthSecret, ContactSecret, SearchSecret)]
-    [InlineData("service-currency-service", RegistrySecret, CountrySecret, AccountingSecret)]
-    [InlineData("service-accounting-service", AuthSecret, ContactSecret, SearchSecret)]
-    [InlineData("service-accounting-service", RegistrySecret, CountrySecret, CurrencySecret)]
+    [MemberData(nameof(CrossedManagedServiceCredentialCases))]
     public async Task ServiceLogin_CrossedManagedServiceCredentials_AreUnauthorized(
         string clientId,
-        string firstWrongSecret,
-        string secondWrongSecret,
-        string thirdWrongSecret)
+        string[] wrongSecrets)
     {
         await SeedCanonicalManagedCredentialsAsync();
         using var client = factory.CreateClient();
 
-        var first = await LoginAsync(client, clientId, firstWrongSecret, "127.0.14.1");
-        var second = await LoginAsync(client, clientId, secondWrongSecret, "127.0.14.2");
-        var third = await LoginAsync(client, clientId, thirdWrongSecret, "127.0.14.3");
-
-        Assert.Equal(HttpStatusCode.Unauthorized, first.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, second.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, third.StatusCode);
+        foreach (var wrongSecret in wrongSecrets)
+        {
+            var response = await LoginAsync(client, clientId, wrongSecret, "127.0.14.1");
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
     }
 
     private async Task SeedCanonicalManagedCredentialsAsync()
@@ -221,6 +269,14 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             "AccountingService",
             true,
             (AccountingSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-pricing-service",
+            "pricing-service",
+            "roles.workloads.pricing-service.v1",
+            TestWebApplicationFactory.PricingServiceIamPrincipalId,
+            "PricingService",
+            true,
+            (PricingSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
     }
 
     private static async Task AssertCanonicalServiceTokenAsync(
@@ -228,7 +284,8 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         Guid principalId,
         string clientId,
         string serviceName,
-        string roleId)
+        string roleId,
+        string[]? expectedPermissions = null)
     {
         var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var token = new JwtSecurityTokenHandler().ReadJwtToken(
@@ -237,7 +294,7 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         Assert.Equal(clientId, token.Claims.Single(claim => claim.Type == "client_id").Value);
         Assert.Equal(serviceName, token.Claims.Single(claim => claim.Type == "service_name").Value);
         Assert.Equal(
-            ["iam.auth.check-permission"],
+            expectedPermissions ?? ["iam.auth.check-permission"],
             token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
         Assert.Equal(
             [roleId],
