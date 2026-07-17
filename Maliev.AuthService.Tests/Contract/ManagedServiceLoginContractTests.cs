@@ -170,8 +170,9 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
             "roles.workloads.material-service.v1",
             [
                 "iam.auth.check-permission",
-                "supplier.suppliers.read"
-            ]);
+                "supplier.supplier-references.read"
+            ],
+            ["supplier.suppliers.read"]);
         await AssertCanonicalServiceTokenAsync(
             lifecycle,
             TestWebApplicationFactory.LifecycleServiceIamPrincipalId,
@@ -327,7 +328,8 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         string clientId,
         string serviceName,
         string roleId,
-        string[]? expectedPermissions = null)
+        string[]? expectedPermissions = null,
+        string[]? forbiddenPermissions = null)
     {
         var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var token = new JwtSecurityTokenHandler().ReadJwtToken(
@@ -338,6 +340,12 @@ public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory f
         Assert.Equal(
             expectedPermissions ?? ["iam.auth.check-permission"],
             token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        foreach (var forbiddenPermission in forbiddenPermissions ?? [])
+        {
+            Assert.DoesNotContain(
+                forbiddenPermission,
+                token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        }
         Assert.Equal(
             [roleId],
             token.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));

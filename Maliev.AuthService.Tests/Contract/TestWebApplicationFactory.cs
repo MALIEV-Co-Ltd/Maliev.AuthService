@@ -564,7 +564,7 @@ public class TestWebApplicationFactory : BaseIntegrationTestFactory<Program, Aut
                             $$"""
                             {
                               "principalId": "{{principalId}}",
-                              "permissions": ["iam.auth.check-permission", "supplier.suppliers.read"],
+                              "permissions": ["iam.auth.check-permission", "supplier.supplier-references.read"],
                               "roles": ["roles.workloads.material-service.v1"],
                               "resourcePath": null,
                               "cacheUntil": null,
