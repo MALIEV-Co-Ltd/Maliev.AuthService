@@ -33,6 +33,17 @@ cd Maliev.AuthService.Tests
 dotnet test
 ```
 
+## Validation and Release Boundary
+
+GitHub Actions validates pull requests, `main`, `develop`, and `release/v*`
+tags by restoring and auditing dependencies, building the solution, and running
+the complete test suite.
+
+No workflow in this repository publishes container images, authenticates to
+Google Cloud, modifies GitOps, or deploys to Kubernetes. Release promotion is
+separate and remains pending Aspire owner review. This validation boundary does
+not authorize or perform a production cutover.
+
 ## Key Features
 
 - **Authentication:** Provides endpoints for validating user credentials and generating JWT tokens.
