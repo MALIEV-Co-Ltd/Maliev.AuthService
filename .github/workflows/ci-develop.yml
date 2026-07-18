@@ -2,44 +2,15 @@ name: CI - Develop
 
 on:
   push:
-    branches:
-      - develop
+    branches: [develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auth-service-develop-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Set up .NET
-      uses: actions/setup-dotnet@v3
-      with:
-        dotnet-version: '9.0.x'
-
-    - name: Restore dependencies
-      run: dotnet restore Maliev.AuthService.sln
-      working-directory: ${{ github.workspace }}
-
-    - name: Build
-      run: dotnet build Maliev.AuthService.sln --no-restore
-
-    - name: Test
-      run: dotnet test Maliev.AuthService.sln --no-build --verbosity normal
-
-    - name: Authenticate to Google Cloud
-      uses: google-github-actions/auth@v1
-      with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-    - name: Set up Google Cloud SDK
-      uses: google-github-actions/setup-gcloud@v1
-      with:
-        project_id: maliev-website
-
-    - name: Build and push Docker image
-      run: |
-        gcloud auth configure-docker asia-southeast1-docker.pkg.dev
-        docker build -t asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-dev/maliev-authservice:${{ github.sha }} -f Maliev.AuthService.Api/Dockerfile .
-        docker push asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-dev/maliev-authservice:${{ github.sha }}
+  validate:
+    uses: ./.github/workflows/_validate.yml
