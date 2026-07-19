@@ -1,0 +1,70 @@
+openapi: 3.0.3
+info:
+  title: IAM Permission Resolution API
+  version: 1.0.0
+  description: API for resolving permissions and roles for a given principal.
+paths:
+  /api/v1/auth/resolve-permissions:
+    post:
+      summary: Resolve permissions and roles
+      operationId: resolvePermissions
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PermissionResolutionRequest'
+      responses:
+        '200':
+          description: Successfully resolved permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PermissionResolutionResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '500':
+          description: Internal Server Error
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    PermissionResolutionRequest:
+      type: object
+      required:
+        - principalId
+      properties:
+        principalId:
+          type: string
+          format: uuid
+        includeResourceScoped:
+          type: boolean
+          default: false
+    PermissionResolutionResponse:
+      type: object
+      properties:
+        principalId:
+          type: string
+          format: uuid
+        permissions:
+          type: array
+          items:
+            type: string
+        roles:
+          type: array
+          items:
+            type: string
+        resolvedAt:
+          type: string
+          format: date-time
+        cacheUntil:
+          type: string
+          format: date-time
+          nullable: true

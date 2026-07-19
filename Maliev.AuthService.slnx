@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="Maliev.AuthService.Api/Maliev.AuthService.Api.csproj" />
+  <Project Path="Maliev.AuthService.Application/Maliev.AuthService.Application.csproj" />
+  <Project Path="Maliev.AuthService.Domain/Maliev.AuthService.Domain.csproj" />
+  <Project Path="Maliev.AuthService.Infrastructure/Maliev.AuthService.Infrastructure.csproj" />
+  <Project Path="Maliev.AuthService.Tests/Maliev.AuthService.Tests.csproj" />
+</Solution>
