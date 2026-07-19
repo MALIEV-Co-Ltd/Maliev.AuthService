@@ -4,14 +4,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Update="MassTransit" Version="[8.5.8, 9.0.0)" />
-    <PackageReference Update="MassTransit.RabbitMQ" Version="[8.5.8, 9.0.0)" />
+    <PackageReference Update="MassTransit" Version="[8.5.10, 9.0.0)" />
+    <PackageReference Update="MassTransit.EntityFrameworkCore" Version="[8.5.10, 9.0.0)" />
+    <PackageReference Update="MassTransit.RabbitMQ" Version="[8.5.10, 9.0.0)" />
     <PackageReference Update="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
-    <PackageReference Update="Microsoft.EntityFrameworkCore" Version="10.0.3" />
-    <PackageReference Update="Microsoft.EntityFrameworkCore.Design" Version="10.0.3" />
-    <PackageReference Update="Microsoft.EntityFrameworkCore.Relational" Version="10.0.3" />
-    <PackageReference Update="Microsoft.EntityFrameworkCore.Abstractions" Version="10.0.3" />
-    <PackageReference Update="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.3" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore" Version="10.0.10" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore.Design" Version="10.0.10" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
+    <PackageReference Update="Microsoft.EntityFrameworkCore.Abstractions" Version="10.0.10" />
+    <PackageReference Update="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.10" />
     <PackageReference Update="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.3" />
     <PackageReference Update="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.3" />
     <PackageReference Update="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.3" />

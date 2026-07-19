@@ -1,0 +1,56 @@
+name: Reusable Validation
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  SharedLibraryVersion: 1.0.0-auth-ci
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact MessagingContracts source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: MALIEV-Co-Ltd/Maliev.MessagingContracts
+          ref: 9c41d6524a485bf03ba022b8170f47366ab1a77a
+          path: .ci-sources/Maliev.MessagingContracts
+          persist-credentials: false
+
+      - name: Checkout exact ServiceDefaults source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: MALIEV-Co-Ltd/Maliev.Aspire
+          ref: 979e1bcb3c3ed9c414f652c94b56297543c031b2
+          path: .ci-sources/Maliev.Aspire
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: |
+          bash scripts/prepare-auth-ci-packages.sh
+          dotnet restore Maliev.AuthService.slnx --configfile nuget.validation.config /p:GITHUB_ACTIONS=true /p:SharedLibraryVersion=${{ env.SharedLibraryVersion }}
+
+      - name: Audit NuGet dependencies
+        run: dotnet list Maliev.AuthService.slnx package --vulnerable --include-transitive --no-restore --configfile nuget.validation.config
+
+      - name: Build
+        run: dotnet build Maliev.AuthService.slnx --configuration Release --no-restore /p:GITHUB_ACTIONS=true /p:SharedLibraryVersion=${{ env.SharedLibraryVersion }}
+
+      - name: Test
+        run: dotnet test Maliev.AuthService.slnx --configuration Release --no-restore --no-build --verbosity normal /p:GITHUB_ACTIONS=true /p:SharedLibraryVersion=${{ env.SharedLibraryVersion }}

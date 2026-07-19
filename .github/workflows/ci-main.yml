@@ -2,111 +2,15 @@ name: CI - Main
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
 
+concurrency:
+  group: auth-service-main-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-and-test:
-    uses: ./.github/workflows/_build-and-test.yml
-    with:
-      solution_file: Maliev.AuthService.slnx
-    secrets:
-      gitops_pat: ${{ secrets.GITOPS_PAT }}
-
-  build-and-deploy:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v3
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v3
-        with:
-          project_id: maliev-website
-
-      - name: Build and push Docker image
-        run: |
-          gcloud auth configure-docker asia-southeast1-docker.pkg.dev
-          NUGET_USERNAME=${{ github.actor }} \
-          NUGET_PASSWORD=${{ secrets.GITOPS_PAT }} \
-            docker build \
-            --secret id=nuget_username,env=NUGET_USERNAME \
-            --secret id=nuget_password,env=NUGET_PASSWORD \
-            -t asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-prod/maliev-auth-service:${{ github.sha }} \
-            -f Maliev.AuthService.Api/Dockerfile .
-          docker push asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-prod/maliev-auth-service:${{ github.sha }}
-
-      - name: Install Kustomize
-        uses: imranismail/setup-kustomize@v2
-
-      - name: Checkout maliev-gitops repository
-        uses: actions/checkout@v5
-        with:
-          repository: MALIEV-Co-Ltd/maliev-gitops
-          token: ${{ secrets.GITOPS_PAT }}
-          ref: main
-          path: maliev-gitops
-
-      - name: Update image tag in maliev-gitops using Kustomize
-        run: |
-          cd maliev-gitops/3-apps/maliev-auth-service/overlays/production
-          kustomize edit set image \
-            asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact/maliev-auth-service=\
-          asia-southeast1-docker.pkg.dev/maliev-website/maliev-website-artifact-prod/maliev-auth-service:${{ github.sha }}
-
-      - name: Create Pull Request
-        env:
-          GH_TOKEN: ${{ secrets.GITOPS_PAT }}
-          PR_BODY: |
-            Automated GitOps Update - **PRODUCTION**
-
-            - **Service**: AuthService
-            - **Environment**: Production
-            - **Image Tag**: ${{ github.sha }}
-            - **Source Branch**: ${{ github.ref_name }}
-            - **Commit**: ${{ github.sha }}
-
-            Updates maliev-auth-service image in production overlay.
-            **WARNING**: This is a production deployment and should be reviewed before merging.
-            This PR was automatically created by GitHub Actions.
-            Once merged, ArgoCD will automatically sync the changes to the maliev-prod namespace.
-
-            Triggered by: ${{ github.actor }}
-            Workflow: ${{ github.workflow }}
-            Run: [${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-        run: |
-          cd maliev-gitops
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-
-          # Create a new branch for this update
-          BRANCH_NAME="auth-service/prod-${{ github.sha }}"
-          git checkout -b $BRANCH_NAME
-
-          # Commit and push changes to the new branch
-          git add .
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-
-          git commit -m "chore(prod): Update AuthService image to ${{ github.sha }}"
-          git push origin $BRANCH_NAME
-
-          # Create pull request using GitHub CLI
-          gh pr create \
-            --title "chore(prod): Update auth-service" \
-            --body "$PR_BODY" \
-            --base main \
-            --head $BRANCH_NAME \
-            --repo MALIEV-Co-Ltd/maliev-gitops
+  validate:
+    uses: ./.github/workflows/_validate.yml
