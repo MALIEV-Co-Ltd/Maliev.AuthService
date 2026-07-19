@@ -3,41 +3,29 @@ using Xunit;
 namespace Maliev.AuthService.Tests.Unit;
 
 /// <summary>
-/// Verifies cross-repository GitOps checkouts are deterministic and do not depend on default-branch discovery.
+/// Verifies branch validation cannot mutate the GitOps repository.
 /// </summary>
 public sealed class GitOpsWorkflowCheckoutTests
 {
     /// <summary>
-    /// Every deployment workflow must explicitly check out the GitOps main branch.
+    /// Branch workflows must delegate to the reusable validation workflow without deployment credentials.
     /// </summary>
-    /// <param name="workflowFile">The deployment workflow file name.</param>
+    /// <param name="workflowFile">The branch validation workflow file name.</param>
     [Theory]
     [InlineData("ci-develop.yml")]
     [InlineData("ci-staging.yml")]
     [InlineData("ci-main.yml")]
-    public void GitOpsCheckout_PinsMainBranch(string workflowFile)
+    public void BranchWorkflow_IsValidationOnly(string workflowFile)
     {
         var source = ReadRepositoryFile(".github", "workflows", workflowFile);
         const string leastPrivilegePermissions = "permissions:\n  contents: read";
-        const string kustomizeAction = "uses: imranismail/setup-kustomize@v2";
-        const string repositoryLine = "repository: MALIEV-Co-Ltd/maliev-gitops";
-        var repositoryIndex = source.IndexOf(repositoryLine, StringComparison.Ordinal);
-        var kustomizeIndex = source.IndexOf(kustomizeAction, StringComparison.Ordinal);
 
         Assert.Contains(leastPrivilegePermissions, source, StringComparison.Ordinal);
-        Assert.True(kustomizeIndex >= 0, $"{workflowFile} must install the pinned Kustomize action.");
-        Assert.True(repositoryIndex >= 0, $"{workflowFile} must check out the GitOps repository.");
-        Assert.True(
-            kustomizeIndex < repositoryIndex,
-            $"{workflowFile} must execute third-party setup before introducing GitOps credentials.");
-
-        var checkoutBlockEnd = source.IndexOf("\n      - name:", repositoryIndex, StringComparison.Ordinal);
-        var checkoutBlock = checkoutBlockEnd >= 0
-            ? source[repositoryIndex..checkoutBlockEnd]
-            : source[repositoryIndex..];
-
-        Assert.Contains("ref: main", checkoutBlock, StringComparison.Ordinal);
-        Assert.Contains("path: maliev-gitops", checkoutBlock, StringComparison.Ordinal);
+        Assert.Contains("uses: ./.github/workflows/_validate.yml", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("MALIEV-Co-Ltd/maliev-gitops", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("GITOPS_PAT", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("kustomize", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("docker push", source, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ReadRepositoryFile(params string[] segments)
