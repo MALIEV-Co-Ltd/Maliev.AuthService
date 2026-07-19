@@ -1,0 +1,449 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Net;
+using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Maliev.AuthService.Application.DTOs.Request;
+using Maliev.AuthService.Domain.Entities;
+using Xunit;
+
+namespace Maliev.AuthService.Tests.Contract;
+
+[Collection("AuthService Collection")]
+public sealed class ManagedServiceLoginContractTests(TestWebApplicationFactory factory) : IAsyncLifetime
+{
+    private const string AuthSecret = "auth-service-secret-with-at-least-32-random-looking-bytes";
+    private const string ContactSecret = "contact-service-secret-with-at-least-32-random-looking-bytes";
+    private const string SearchSecret = "search-service-secret-with-at-least-32-random-looking-bytes";
+    private const string RegistrySecret = "registry-service-secret-with-at-least-32-random-looking-bytes";
+    private const string CountrySecret = "country-service-secret-with-at-least-32-random-looking-bytes";
+    private const string CurrencySecret = "currency-service-secret-with-at-least-32-random-looking-bytes";
+    private const string AccountingSecret = "accounting-service-secret-with-at-least-32-random-looking-bytes";
+    private const string PricingSecret = "pricing-service-secret-with-at-least-32-random-looking-bytes";
+    private const string MaterialSecret = "material-service-secret-with-at-least-32-random-looking-bytes";
+    private const string LifecycleSecret = "lifecycle-service-secret-with-at-least-32-random-looking-bytes";
+    private static readonly (string ClientId, string Secret)[] CanonicalManagedCredentials =
+    [
+        ("service-auth-service", AuthSecret),
+        ("service-contact-service", ContactSecret),
+        ("service-search-service", SearchSecret),
+        ("service-registry-service", RegistrySecret),
+        ("service-country-service", CountrySecret),
+        ("service-currency-service", CurrencySecret),
+        ("service-accounting-service", AccountingSecret),
+        ("service-pricing-service", PricingSecret),
+        ("service-material-service", MaterialSecret),
+        ("service-lifecycle-service", LifecycleSecret)
+    ];
+
+    public Task InitializeAsync() => factory.CleanDatabaseAsync();
+
+    public Task DisposeAsync() => Task.CompletedTask;
+
+    [Fact]
+    public async Task ServiceLogin_ActiveAndUnexpiredGraceVersions_BothAuthenticate()
+    {
+        const string activeSecret = "active-secret-with-at-least-32-random-looking-bytes";
+        const string graceSecret = "grace-secret-with-at-least-32-random-looking-bytes";
+        await SeedManagedCredentialAsync(
+            true,
+            (activeSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null),
+            (graceSecret, ServiceCredentialVersionStatus.Grace, DateTimeOffset.UtcNow.AddHours(1), DateTimeOffset.UtcNow.AddMinutes(5)));
+        using var client = factory.CreateClient();
+
+        var active = await LoginAsync(client, activeSecret, "127.0.10.1");
+        var grace = await LoginAsync(client, graceSecret, "127.0.10.2");
+
+        Assert.Equal(HttpStatusCode.OK, active.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, grace.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(ServiceCredentialVersionStatus.Pending, true)]
+    [InlineData(ServiceCredentialVersionStatus.Revoked, true)]
+    [InlineData(ServiceCredentialVersionStatus.Active, false)]
+    public async Task ServiceLogin_IneligibleVersionOrLogicalRevoke_IsUnauthorized(
+        ServiceCredentialVersionStatus status,
+        bool logicalActive)
+    {
+        const string secret = "ineligible-secret-with-at-least-32-random-looking-bytes";
+        await SeedManagedCredentialAsync(
+            logicalActive,
+            (secret, status, DateTimeOffset.UtcNow.AddHours(1), null));
+        using var client = factory.CreateClient();
+
+        var response = await LoginAsync(client, secret, "127.0.11.1");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ServiceLogin_ExpiredActiveVersion_IsUnauthorized()
+    {
+        const string secret = "expired-secret-with-at-least-32-random-looking-bytes";
+        await SeedManagedCredentialAsync(
+            true,
+            (secret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddSeconds(-1), null));
+        using var client = factory.CreateClient();
+
+        var response = await LoginAsync(client, secret, "127.0.12.1");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ServiceLogin_ManagedServiceCredentials_AuthenticateWithCanonicalClaims()
+    {
+        await SeedCanonicalManagedCredentialsAsync();
+        using var client = factory.CreateClient();
+
+        var auth = await LoginAsync(client, "service-auth-service", AuthSecret, "127.0.13.1");
+        var contact = await LoginAsync(client, "service-contact-service", ContactSecret, "127.0.13.2");
+        var search = await LoginAsync(client, "service-search-service", SearchSecret, "127.0.13.3");
+        var registry = await LoginAsync(client, "service-registry-service", RegistrySecret, "127.0.13.4");
+        var country = await LoginAsync(client, "service-country-service", CountrySecret, "127.0.13.5");
+        var currency = await LoginAsync(client, "service-currency-service", CurrencySecret, "127.0.13.6");
+        var accounting = await LoginAsync(client, "service-accounting-service", AccountingSecret, "127.0.13.7");
+        var pricing = await LoginAsync(client, "service-pricing-service", PricingSecret, "127.0.13.8");
+        var material = await LoginAsync(client, "service-material-service", MaterialSecret, "127.0.13.9");
+        var lifecycle = await LoginAsync(client, "service-lifecycle-service", LifecycleSecret, "127.0.13.10");
+
+        Assert.Equal(HttpStatusCode.OK, auth.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, contact.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, search.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, registry.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, country.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, currency.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, accounting.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, pricing.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, material.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, lifecycle.StatusCode);
+
+        await AssertCanonicalServiceTokenAsync(
+            search,
+            TestWebApplicationFactory.SearchServiceIamPrincipalId,
+            "service-search-service",
+            "SearchService",
+            "roles.workloads.search-service.v1");
+        await AssertCanonicalServiceTokenAsync(
+            registry,
+            TestWebApplicationFactory.RegistryServiceIamPrincipalId,
+            "service-registry-service",
+            "RegistryService",
+            "roles.workloads.registry-service.v1");
+        await AssertCanonicalServiceTokenAsync(
+            country,
+            TestWebApplicationFactory.CountryServiceIamPrincipalId,
+            "service-country-service",
+            "CountryService",
+            "roles.workloads.country-service.v1");
+        await AssertCanonicalServiceTokenAsync(
+            currency,
+            TestWebApplicationFactory.CurrencyServiceIamPrincipalId,
+            "service-currency-service",
+            "CurrencyService",
+            "roles.workloads.currency-service.v1");
+        await AssertCanonicalServiceTokenAsync(
+            accounting,
+            TestWebApplicationFactory.AccountingServiceIamPrincipalId,
+            "service-accounting-service",
+            "AccountingService",
+            "roles.workloads.accounting-service.v1");
+        await AssertCanonicalServiceTokenAsync(
+            pricing,
+            TestWebApplicationFactory.PricingServiceIamPrincipalId,
+            "service-pricing-service",
+            "PricingService",
+            "roles.workloads.pricing-service.v1",
+            [
+                "iam.auth.check-permission",
+                "material.materials.read",
+                "job.jobs.read",
+                "currency.rates.read"
+            ]);
+        await AssertCanonicalServiceTokenAsync(
+            material,
+            TestWebApplicationFactory.MaterialServiceIamPrincipalId,
+            "service-material-service",
+            "MaterialService",
+            "roles.workloads.material-service.v1",
+            [
+                "iam.auth.check-permission",
+                "supplier.supplier-references.read"
+            ],
+            ["supplier.suppliers.read"]);
+        await AssertCanonicalServiceTokenAsync(
+            lifecycle,
+            TestWebApplicationFactory.LifecycleServiceIamPrincipalId,
+            "service-lifecycle-service",
+            "LifecycleService",
+            "roles.workloads.lifecycle-service.v1");
+    }
+
+    [Fact]
+    public void CrossedManagedServiceCredentialCases_CoverEveryOrderedPairExactlyOnce()
+    {
+        var rows = CrossedManagedServiceCredentialCases()
+            .Select(row => (ClientId: Assert.IsType<string>(row[0]), WrongSecrets: Assert.IsType<string[]>(row[1])))
+            .ToArray();
+        var actualPairs = rows
+            .SelectMany(row => row.WrongSecrets.Select(secret => (row.ClientId, Secret: secret)))
+            .ToArray();
+        var expectedPairs = CanonicalManagedCredentials
+            .SelectMany(client => CanonicalManagedCredentials
+                .Where(peer => peer.ClientId != client.ClientId)
+                .Select(peer => (client.ClientId, peer.Secret)))
+            .ToArray();
+
+        Assert.Equal(30, rows.Length);
+        Assert.All(rows, row => Assert.InRange(row.WrongSecrets.Length, 2, 3));
+        Assert.Equal(90, actualPairs.Length);
+        Assert.Equal(90, actualPairs.Distinct().Count());
+        Assert.Equal(
+            expectedPairs.OrderBy(pair => pair.ClientId).ThenBy(pair => pair.Secret),
+            actualPairs.OrderBy(pair => pair.ClientId).ThenBy(pair => pair.Secret));
+    }
+
+    public static IEnumerable<object[]> CrossedManagedServiceCredentialCases()
+    {
+        foreach (var client in CanonicalManagedCredentials)
+        {
+            var wrongSecrets = CanonicalManagedCredentials
+                .Where(peer => peer.ClientId != client.ClientId)
+                .Select(peer => peer.Secret)
+                .ToArray();
+
+            for (var offset = 0; offset < wrongSecrets.Length; offset += 3)
+            {
+                var end = Math.Min(offset + 3, wrongSecrets.Length);
+                yield return [client.ClientId, wrongSecrets[offset..end]];
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(CrossedManagedServiceCredentialCases))]
+    public async Task ServiceLogin_CrossedManagedServiceCredentials_AreUnauthorized(
+        string clientId,
+        string[] wrongSecrets)
+    {
+        await SeedCanonicalManagedCredentialsAsync();
+        using var client = factory.CreateClient();
+
+        foreach (var wrongSecret in wrongSecrets)
+        {
+            var response = await LoginAsync(client, clientId, wrongSecret, "127.0.14.1");
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+    }
+
+    private async Task SeedCanonicalManagedCredentialsAsync()
+    {
+        await SeedManagedCredentialAsync(
+            "service-auth-service",
+            "auth-service",
+            "roles.workloads.auth-service.v1",
+            Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            "AuthService",
+            true,
+            (AuthSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-contact-service",
+            "contact-service",
+            "roles.workloads.contact-service.v1",
+            Guid.Parse("12121212-1212-1212-1212-121212121212"),
+            "ContactService",
+            true,
+            (ContactSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-search-service",
+            "search-service",
+            "roles.workloads.search-service.v1",
+            TestWebApplicationFactory.SearchServiceIamPrincipalId,
+            "SearchService",
+            true,
+            (SearchSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-registry-service",
+            "registry-service",
+            "roles.workloads.registry-service.v1",
+            TestWebApplicationFactory.RegistryServiceIamPrincipalId,
+            "RegistryService",
+            true,
+            (RegistrySecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-country-service",
+            "country-service",
+            "roles.workloads.country-service.v1",
+            TestWebApplicationFactory.CountryServiceIamPrincipalId,
+            "CountryService",
+            true,
+            (CountrySecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-currency-service",
+            "currency-service",
+            "roles.workloads.currency-service.v1",
+            TestWebApplicationFactory.CurrencyServiceIamPrincipalId,
+            "CurrencyService",
+            true,
+            (CurrencySecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-accounting-service",
+            "accounting-service",
+            "roles.workloads.accounting-service.v1",
+            TestWebApplicationFactory.AccountingServiceIamPrincipalId,
+            "AccountingService",
+            true,
+            (AccountingSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-pricing-service",
+            "pricing-service",
+            "roles.workloads.pricing-service.v1",
+            TestWebApplicationFactory.PricingServiceIamPrincipalId,
+            "PricingService",
+            true,
+            (PricingSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-material-service",
+            "material-service",
+            "roles.workloads.material-service.v1",
+            TestWebApplicationFactory.MaterialServiceIamPrincipalId,
+            "MaterialService",
+            true,
+            (MaterialSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+        await SeedManagedCredentialAsync(
+            "service-lifecycle-service",
+            "lifecycle-service",
+            "roles.workloads.lifecycle-service.v1",
+            TestWebApplicationFactory.LifecycleServiceIamPrincipalId,
+            "LifecycleService",
+            true,
+            (LifecycleSecret, ServiceCredentialVersionStatus.Active, DateTimeOffset.UtcNow.AddHours(1), null));
+    }
+
+    private static async Task AssertCanonicalServiceTokenAsync(
+        HttpResponseMessage response,
+        Guid principalId,
+        string clientId,
+        string serviceName,
+        string roleId,
+        string[]? expectedPermissions = null,
+        string[]? forbiddenPermissions = null)
+    {
+        var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(
+            payload.RootElement.GetProperty("access_token").GetString());
+        Assert.Equal(principalId.ToString(), token.Subject);
+        Assert.Equal(clientId, token.Claims.Single(claim => claim.Type == "client_id").Value);
+        Assert.Equal(serviceName, token.Claims.Single(claim => claim.Type == "service_name").Value);
+        Assert.Equal(
+            expectedPermissions ?? ["iam.auth.check-permission"],
+            token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        foreach (var forbiddenPermission in forbiddenPermissions ?? [])
+        {
+            Assert.DoesNotContain(
+                forbiddenPermission,
+                token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        }
+        Assert.Equal(
+            [roleId],
+            token.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));
+    }
+
+    private static async Task<HttpResponseMessage> LoginAsync(
+        HttpClient client,
+        string secret,
+        string ipAddress) =>
+        await LoginAsync(client, "service-auth-service", secret, ipAddress);
+
+    private static async Task<HttpResponseMessage> LoginAsync(
+        HttpClient client,
+        string clientId,
+        string secret,
+        string ipAddress)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/auth/v1/service/login")
+        {
+            Content = JsonContent.Create(
+                new ServiceLoginRequest
+                {
+                    ClientId = clientId,
+                    ClientSecret = secret
+                },
+                options: new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+                })
+        };
+        request.Headers.Add("X-Test-Client-IP", ipAddress);
+        return await client.SendAsync(request);
+    }
+
+    private async Task SeedManagedCredentialAsync(
+        bool logicalActive,
+        params (string Secret, ServiceCredentialVersionStatus Status, DateTimeOffset HardExpiry, DateTimeOffset? GraceExpiry)[] versions) =>
+        await SeedManagedCredentialAsync(
+            "service-auth-service",
+            "auth-service",
+            "roles.workloads.auth-service.v1",
+            Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            "AuthService",
+            logicalActive,
+            versions);
+
+    private async Task SeedManagedCredentialAsync(
+        string clientId,
+        string workloadId,
+        string roleId,
+        Guid principalId,
+        string serviceName,
+        bool logicalActive,
+        params (string Secret, ServiceCredentialVersionStatus Status, DateTimeOffset HardExpiry, DateTimeOffset? GraceExpiry)[] versions)
+    {
+        await using var context = factory.CreateDbContext();
+        var now = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var credential = new ServiceCredential
+        {
+            Id = Guid.NewGuid(),
+            ClientId = clientId,
+            PrincipalId = principalId,
+            WorkloadId = workloadId,
+            ProfileVersion = 1,
+            RoleId = roleId,
+            ClientSecretHash = Hash(versions[0].Secret),
+            ServiceName = serviceName,
+            IsActive = logicalActive,
+            RevokedAt = logicalActive ? null : DateTimeOffset.UtcNow,
+            CreatedAt = now.UtcDateTime,
+            UpdatedAt = now.UtcDateTime
+        };
+        context.ServiceCredentials.Add(credential);
+        for (var index = 0; index < versions.Length; index++)
+        {
+            var version = versions[index];
+            context.ServiceCredentialVersions.Add(new ServiceCredentialVersion
+            {
+                Id = Guid.NewGuid(),
+                ServiceCredentialId = credential.Id,
+                Version = index + 1,
+                SecretHash = Hash(version.Secret),
+                Status = version.Status,
+                CreatedAt = now,
+                ActivatedAt = version.Status is ServiceCredentialVersionStatus.Active or ServiceCredentialVersionStatus.Grace
+                    ? now
+                    : null,
+                GraceExpiresAt = version.GraceExpiry,
+                HardExpiresAt = version.HardExpiry,
+                RevokedAt = version.Status == ServiceCredentialVersionStatus.Revoked
+                    ? DateTimeOffset.UtcNow
+                    : null
+            });
+        }
+
+        await context.SaveChangesAsync();
+    }
+
+    private static string Hash(string secret) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(secret)));
+}

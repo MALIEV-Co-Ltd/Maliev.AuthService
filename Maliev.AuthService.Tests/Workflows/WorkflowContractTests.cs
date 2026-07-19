@@ -41,6 +41,17 @@ public sealed class WorkflowContractTests
         Assert.Contains("persist-credentials: false", text);
         Assert.Contains("actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0", text);
         Assert.Contains("actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68", text);
+        Assert.Contains("dotnet-version: '10.0.x'", text);
+        Assert.Contains("repository: MALIEV-Co-Ltd/Maliev.MessagingContracts", text);
+        Assert.Contains("ref: 9c41d6524a485bf03ba022b8170f47366ab1a77a", text);
+        Assert.Contains("repository: MALIEV-Co-Ltd/Maliev.Aspire", text);
+        Assert.Contains("ref: 979e1bcb3c3ed9c414f652c94b56297543c031b2", text);
+        Assert.Contains("bash scripts/prepare-auth-ci-packages.sh", text);
+        Assert.Contains("--configfile nuget.validation.config", text);
+        Assert.Contains("SharedLibraryVersion: 1.0.0-auth-ci", text);
+        Assert.Contains("/p:SharedLibraryVersion=${{ env.SharedLibraryVersion }}", text);
+        Assert.Contains("dotnet restore Maliev.AuthService.slnx", text);
+        Assert.DoesNotContain("Maliev.AuthService.sln ", text, StringComparison.Ordinal);
         AssertSafe(text);
     }
 
@@ -82,7 +93,11 @@ public sealed class WorkflowContractTests
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "Maliev.AuthService.sln"))) return directory.FullName;
+            if (File.Exists(Path.Combine(directory.FullName, "Maliev.AuthService.slnx")) ||
+                File.Exists(Path.Combine(directory.FullName, "Maliev.AuthService.sln")))
+            {
+                return directory.FullName;
+            }
         }
 
         throw new DirectoryNotFoundException("Could not locate AuthService repository root.");

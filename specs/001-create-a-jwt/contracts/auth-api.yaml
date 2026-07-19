@@ -1,0 +1,646 @@
+openapi: 3.0.3
+info:
+  title: Maliev Authentication Service API
+  version: 1.0.0
+  description: |
+    JWT token-based authentication microservice supporting multi-user types (customer and employee)
+    with advanced security features including refresh token rotation, distributed token revocation,
+    circuit breaker resilience, and comprehensive observability.
+
+    **Technology**: .NET 10.0, Entity Framework Core 10.0, PostgreSQL 15+, Redis, RabbitMQ/MassTransit
+
+    **Security Features**:
+    - RSA-2048 (RS256) JWT signing
+    - OAuth 2.0 RFC 9700 compliance with refresh token rotation
+    - Automatic token reuse detection
+    - Multi-layer rate limiting (account, IP, progressive delays)
+    - Distributed token revocation (<2s propagation)
+    - Circuit breaker for external service resilience
+
+  contact:
+    name: Maliev Engineering Team
+    url: https://www.maliev.com
+
+servers:
+  - url: https://api.maliev.com/auth
+    description: Production
+  - url: https://staging-api.maliev.com/auth
+    description: Staging
+  - url: https://dev-api.maliev.com/auth
+    description: Development
+  - url: http://localhost:5000/auth
+    description: Local development
+
+tags:
+  - name: Authentication
+    description: User and service authentication operations
+  - name: Token Management
+    description: Token refresh and revocation operations
+  - name: Token Validation
+    description: Token validation for service integration
+  - name: Health
+    description: Service health and readiness checks
+
+paths:
+  /v1/auth/login:
+    post:
+      operationId: login
+      tags: [Authentication]
+      summary: Authenticate user and issue tokens
+      description: |
+        Validates user credentials against external customer or employee service
+        and issues access and refresh tokens on success.
+
+        **Rate Limits**:
+        - Account: 5 failed attempts → 15min lockout
+        - IP: 20 failed attempts → 15min block
+        - Progressive delays: 1s (3 attempts) → 2s (4) → 4s (5)
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              customerLogin:
+                summary: Customer login
+                value:
+                  username: customer@example.com
+                  password: <password>
+                  user_type: customer
+              employeeLogin:
+                summary: Employee login
+                value:
+                  username: employee@example.com
+                  password: <password>
+                  user_type: employee
+
+      responses:
+        '200':
+          description: Authentication successful
+          headers:
+            X-RateLimit-Limit:
+              schema:
+                type: integer
+              description: Total requests allowed per window
+            X-RateLimit-Remaining:
+              schema:
+                type: integer
+              description: Remaining requests in current window
+            X-RateLimit-Reset:
+              schema:
+                type: integer
+              description: Unix timestamp when rate limit resets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+        '400':
+          description: Invalid request (missing fields, invalid user_type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+        '423':
+          description: Account locked due to failed attempts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LockoutErrorResponse'
+
+        '429':
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until retry is allowed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitErrorResponse'
+
+        '503':
+          description: External validation service unavailable (circuit breaker open)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/auth/service/login:
+    post:
+      operationId: serviceLogin
+      tags: [Authentication]
+      summary: Service-to-service authentication
+      description: |
+        Authenticates microservices using client credentials (client_id and client_secret)
+        and issues service access tokens.
+
+        **Rate Limits**: 100 requests per minute per service
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceLoginRequest'
+
+      responses:
+        '200':
+          description: Service authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceLoginResponse'
+
+        '401':
+          description: Invalid client credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitErrorResponse'
+
+  /v1/auth/refresh:
+    post:
+      operationId: refreshToken
+      tags: [Token Management]
+      summary: Refresh access token using refresh token
+      description: |
+        Issues new access and refresh tokens when valid refresh token is provided.
+
+        **OAuth 2.0 RFC 9700 Token Rotation**:
+        - Issues new refresh token with each use
+        - Immediately invalidates old refresh token
+        - Detects token reuse and invalidates entire token family
+
+        **Rate Limits**: 10 requests per minute per user
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+
+      responses:
+        '200':
+          description: Token refresh successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshTokenResponse'
+
+        '400':
+          description: Invalid refresh token format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+        '401':
+          description: Refresh token invalid, expired, or revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+        '403':
+          description: Token reuse detected - entire token family invalidated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenReuseErrorResponse'
+
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitErrorResponse'
+
+  /v1/auth/validate:
+    post:
+      operationId: validateToken
+      tags: [Token Validation]
+      summary: Validate access token and return user identity
+      description: |
+        Validates access token signature, expiration, and revocation status.
+        Returns complete user identity information for authorization decisions.
+
+        **Validation Checks**:
+        - Signature verification (RSA-2048, RS256 algorithm)
+        - Algorithm allowlist (only RS256 accepted, reject 'none' algorithm)
+        - Standard claims (iss, aud, exp, nbf, jti)
+        - Revocation status (local cache + database fallback)
+        - Clock skew tolerance (30-60 seconds)
+
+        **Rate Limits**: 1000 requests per minute per service
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidateTokenRequest'
+
+      responses:
+        '200':
+          description: Token is valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateTokenResponse'
+
+        '400':
+          description: Invalid token format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+        '401':
+          description: Token invalid, expired, or revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenValidationErrorResponse'
+
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitErrorResponse'
+
+  /v1/auth/revoke:
+    post:
+      operationId: revokeToken
+      tags: [Token Management]
+      summary: Revoke access token before expiration
+      description: |
+        Manually revokes an active access token and publishes revocation event
+        to distributed event system (Redis pub/sub) for <2s propagation.
+
+        **Automatic Revocation Triggers**:
+        - User logout
+        - Password change
+        - Account disabled/suspended
+        - Admin-initiated forced logout
+        - Refresh token reuse detection
+
+      security:
+        - BearerAuth: []
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeTokenRequest'
+
+      responses:
+        '204':
+          description: Token revoked successfully (idempotent)
+
+        '400':
+          description: Invalid token format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+        '401':
+          description: Unauthorized (invalid bearer token)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      tags: [Authentication]
+      summary: Logout user and revoke all tokens
+      description: |
+        Revokes all refresh tokens for the user and publishes revocation events
+        for all active access tokens.
+
+      security:
+        - BearerAuth: []
+
+      responses:
+        '204':
+          description: Logout successful
+
+        '401':
+          description: Unauthorized (invalid bearer token)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /liveness:
+    get:
+      operationId: livenessCheck
+      tags: [Health]
+      summary: Liveness probe for Kubernetes
+      description: Simple health check indicating service is running
+
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Healthy
+
+  /readiness:
+    get:
+      operationId: readinessCheck
+      tags: [Health]
+      summary: Readiness probe for Kubernetes
+      description: |
+        Comprehensive health check including:
+        - Database connectivity (PostgreSQL)
+        - External service circuit breaker status
+        - Redis availability (if configured)
+
+      responses:
+        '200':
+          description: Service is ready to accept traffic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+
+        '503':
+          description: Service not ready (database down, circuit breaker open, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token obtained from /v1/auth/login or /v1/auth/refresh
+
+  schemas:
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+        - user_type
+      properties:
+        username:
+          type: string
+          format: email
+          description: User email address
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          description: User password (validated by external service)
+          example: <password>
+        user_type:
+          type: string
+          enum: [customer, employee]
+          description: Type of user account
+          example: customer
+
+    LoginResponse:
+      type: object
+      required:
+        - access_token
+        - refresh_token
+        - token_type
+        - user
+      properties:
+        valid:
+          type: boolean
+          description: Whether token is valid
+          example: true
+        user:
+          $ref: '#/components/schemas/UserIdentity'
+
+    RevokeTokenRequest:
+      type: object
+      required:
+        - jti
+        - reason
+      properties:
+        jti:
+          type: string
+          description: JWT ID claim from token to revoke
+          example: 550e8400-e29b-41d4-a716-446655440000
+        reason:
+          type: string
+          enum: [logout, password_change, account_disabled, admin_action, reuse_detected]
+          description: Revocation reason
+          example: logout
+
+    UserIdentity:
+      type: object
+      required:
+        - user_id
+        - user_type
+        - username
+        - email
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Unique user identifier
+          example: 123e4567-e89b-12d3-a456-426614174000
+        user_type:
+          type: string
+          enum: [customer, employee]
+          description: User type
+          example: customer
+        username:
+          type: string
+          description: Username
+          example: john.doe
+        email:
+          type: string
+          format: email
+          description: User email address
+          example: john.doe@example.com
+        roles:
+          type: array
+          items:
+            type: string
+          description: User roles
+          example: [Customer, PremiumMember]
+        permissions:
+          type: array
+          items:
+            type: string
+          description: User permissions (optional)
+          example: [orders.read, orders.create]
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code
+          example: invalid_credentials
+        message:
+          type: string
+          description: Human-readable error message
+          example: Invalid username or password
+        correlation_id:
+          type: string
+          description: Request correlation ID for tracing
+          example: 550e8400-e29b-41d4-a716-446655440000
+
+    LockoutErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - locked_until
+        - retry_after
+      properties:
+        error:
+          type: string
+          enum: [account_locked]
+          example: account_locked
+        message:
+          type: string
+          example: Account locked due to failed login attempts
+        locked_until:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp when lockout expires
+          example: "2025-10-06T15:30:00Z"
+        retry_after:
+          type: integer
+          description: Seconds until lockout expires
+          example: 900
+
+    RateLimitErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - retry_after
+      properties:
+        error:
+          type: string
+          enum: [rate_limit_exceeded]
+          example: rate_limit_exceeded
+        message:
+          type: string
+          example: Too many requests, please retry after indicated time
+        retry_after:
+          type: integer
+          description: Seconds until rate limit resets
+          example: 60
+        limit:
+          type: integer
+          description: Total requests allowed in window
+          example: 100
+        remaining:
+          type: integer
+          description: Remaining requests in current window
+          example: 0
+
+    TokenReuseErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - action_required
+      properties:
+        error:
+          type: string
+          enum: [token_reuse_detected]
+          example: token_reuse_detected
+        message:
+          type: string
+          example: Refresh token reuse detected. All tokens have been invalidated for security.
+        action_required:
+          type: string
+          enum: [re_authenticate]
+          example: re_authenticate
+
+    TokenValidationErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - validation_failure
+      properties:
+        error:
+          type: string
+          enum: [invalid_token]
+          example: invalid_token
+        message:
+          type: string
+          example: Token validation failed
+        validation_failure:
+          type: string
+          enum: [invalid_signature, expired, revoked, invalid_algorithm, invalid_claims]
+          description: Specific validation failure reason
+          example: expired
+
+    HealthCheckResponse:
+      type: object
+      required:
+        - status
+        - checks
+      properties:
+        status:
+          type: string
+          enum: [Healthy, Degraded, Unhealthy]
+          description: Overall health status
+          example: Healthy
+        checks:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [Healthy, Degraded, Unhealthy]
+                example: Healthy
+              description:
+                type: string
+                example: PostgreSQL connection successful
+          example:
+            database:
+              status: Healthy
+              description: PostgreSQL connection successful
+            customer_service_circuit:
+              status: Healthy
+              description: Circuit closed
+            employee_service_circuit:
+              status: Healthy
+              description: Circuit closed

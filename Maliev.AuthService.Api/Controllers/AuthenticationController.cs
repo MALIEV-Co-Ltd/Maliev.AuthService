@@ -1,291 +1,819 @@
-using Maliev.AuthService.Api.Data;
-using Maliev.AuthService.Api.Models;
-using Maliev.AuthService.Api.Services;
-using Maliev.AuthService.JwtToken;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Net;
-using System.Text;
-using System.Text.Json;
 using Asp.Versioning;
+using Maliev.Aspire.ServiceDefaults.Authorization;
+using Maliev.AuthService.Api.Authorization;
+using Maliev.AuthService.Application.DTOs.Request;
+using Maliev.AuthService.Application.DTOs.Response;
+using Maliev.AuthService.Application.Identity;
+using Maliev.AuthService.Application.Interfaces;
+using Microsoft.AspNetCore.Mvc;
 
-namespace Maliev.AuthService.Api.Controllers
+namespace Maliev.AuthService.Api.Controllers;
+
+/// <summary>
+/// Handles user authentication, token management (login, refresh, validate, revoke, logout),
+/// and service-to-service authentication.
+/// </summary>
+[ApiController]
+[ApiVersion("1")]
+[Route("auth/v{version:apiVersion}")]
+public class AuthenticationController : ControllerBase
 {
-    [ApiController]
-    [Route("auth/v{version:apiVersion}")]
-    [ApiVersion("1.0")]
-    public class AuthenticationController : ControllerBase
+    private readonly IAuthenticationService _authenticationService;
+    private readonly IEmailVerificationService _emailVerificationService;
+    private readonly IGoogleIdentityNonceService _googleIdentityNonceService;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<AuthenticationController> _logger;
+    private readonly IServiceLoginRateLimiter _serviceLoginRateLimiter;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AuthenticationController"/> class.
+    /// </summary>
+    /// <param name="authenticationService">The service responsible for authentication logic.</param>
+    /// <param name="emailVerificationService">The service responsible for email verification.</param>
+    /// <param name="googleIdentityNonceService">The one-time Google identity nonce service.</param>
+    /// <param name="configuration">The application configuration.</param>
+    /// <param name="logger">The logger for this controller.</param>
+    /// <param name="serviceLoginRateLimiter">The distributed service credential exchange limiter.</param>
+    public AuthenticationController(
+        IAuthenticationService authenticationService,
+        IEmailVerificationService emailVerificationService,
+        IGoogleIdentityNonceService googleIdentityNonceService,
+        IConfiguration configuration,
+        ILogger<AuthenticationController> logger,
+        IServiceLoginRateLimiter serviceLoginRateLimiter)
     {
-        private readonly ITokenGenerator _tokenGenerator;
-        private readonly ExternalAuthServiceHttpClient _externalAuthServiceHttpClient;
-        private readonly RefreshTokenDbContext _dbContext;
-        private readonly ILogger<AuthenticationController> _logger;
-        private readonly CustomerServiceOptions _customerServiceOptions;
-        private readonly EmployeeServiceOptions _employeeServiceOptions;
-
-        public AuthenticationController(
-            ITokenGenerator tokenGenerator,
-            ExternalAuthServiceHttpClient externalAuthServiceHttpClient,
-            RefreshTokenDbContext dbContext,
-            ILogger<AuthenticationController> logger,
-            IOptions<CustomerServiceOptions> customerServiceOptions,
-            IOptions<EmployeeServiceOptions> employeeServiceOptions)
-        {
-            _tokenGenerator = tokenGenerator;
-            _externalAuthServiceHttpClient = externalAuthServiceHttpClient;
-            _dbContext = dbContext;
-            _logger = logger;
-            _customerServiceOptions = customerServiceOptions.Value;
-            _employeeServiceOptions = employeeServiceOptions.Value;
-        }
-
-        [HttpPost("token")]
-        public async Task<IActionResult> Token()
-        {
-            _logger.LogInformation("Token endpoint called.");
-            var header = Request.Headers["Authorization"].ToString();
-                        _logger.LogDebug("Authorization Header: {Header}", header);
-
-            if (header != null && header.StartsWith("Basic "))
-            {
-                var rawCredentialBase64 = header.Substring("Basic ".Length).Trim();
-                var rawCredentialString = Encoding.UTF8.GetString(Convert.FromBase64String(rawCredentialBase64));
-                var credential = rawCredentialString.Split(":", 2);
-
-                var username = credential[0];
-                var password = credential[1];
-                _logger.LogDebug("Extracted Username: {Username}", username);
-                // Do not log password for security reasons
-
-                var credentials = new { username = username, password = password };
-
-                ValidationResult customerValidationResult = new ValidationResult { Exists = false };
-                ValidationResult employeeValidationResult = new ValidationResult { Exists = false };
-
-                // Try validating with CustomerService
-                if (!string.IsNullOrEmpty(_customerServiceOptions.ValidationEndpoint))
-                {
-                    _logger.LogDebug("Attempting to validate with CustomerService at {Endpoint}", _customerServiceOptions.ValidationEndpoint);
-                    customerValidationResult = await ValidateCredentials(
-                        _customerServiceOptions.ValidationEndpoint,
-                        credentials,
-                        "Customer");
-                    _logger.LogDebug("CustomerService validation result: Exists={Exists}, Type={Type}, Error={Error}", customerValidationResult.Exists, customerValidationResult.UserType, customerValidationResult.Error);
-                }
-
-                // If not found in CustomerService, try EmployeeService
-                if (!customerValidationResult.Exists && !string.IsNullOrEmpty(_employeeServiceOptions.ValidationEndpoint))
-                {
-                    _logger.LogDebug("Attempting to validate with EmployeeService at {Endpoint}", _employeeServiceOptions.ValidationEndpoint);
-                    employeeValidationResult = await ValidateCredentials(
-                        _employeeServiceOptions.ValidationEndpoint,
-                        credentials,
-                        "Employee");
-                    _logger.LogDebug("EmployeeService validation result: Exists={Exists}, Type={Type}, Error={Error}", employeeValidationResult.Exists, employeeValidationResult.UserType, employeeValidationResult.Error);
-                }
-
-                ValidationResult finalValidationResult = customerValidationResult.Exists ? customerValidationResult : employeeValidationResult;
-
-                if (finalValidationResult.Exists)
-                {
-                    _logger.LogInformation("User exists. Generating tokens.");
-                    // Generate access token and refresh token string
-                    var accessToken = _tokenGenerator.GenerateJwtToken(username, finalValidationResult.Roles);
-                    var refreshTokenString = _tokenGenerator.GenerateRefreshTokenString();
-
-                    // Save refresh token to database
-                    var refreshToken = new RefreshToken
-                    {
-                        Token = refreshTokenString,
-                        Expires = DateTime.UtcNow.AddDays(7),
-                        Created = DateTime.UtcNow,
-                        Username = username,
-                        CreatedByIp = HttpContext.Connection.RemoteIpAddress?.ToString()
-                    };
-                    _dbContext.RefreshTokens.Add(refreshToken);
-                    await _dbContext.SaveChangesAsync();
-                    _logger.LogInformation("Tokens generated and refresh token saved.");
-
-                    return Ok(new { AccessToken = accessToken, RefreshToken = refreshTokenString });
-                }
-                else
-                {
-                    _logger.LogWarning("User does not exist or validation failed. Returning Unauthorized. Error: {Error}", finalValidationResult.Error);
-                    return Unauthorized(finalValidationResult.Error ?? "User does not exist or validation failed.");
-                }
-            }
-            else
-            {
-                _logger.LogWarning("Authorization header is missing or not in Basic format. Returning BadRequest.");
-                return BadRequest();
-            }
-        }
-
-        [HttpPost("token/refresh")]
-        public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
-        {
-            _logger.LogInformation("RefreshToken endpoint called.");
-            _logger.LogInformation("Request - AccessToken: {AccessToken}", request.AccessToken.Length > 8 ? request.AccessToken.Substring(0, 8) + "..." : request.AccessToken);
-            _logger.LogInformation("Request - RefreshToken: {RefreshToken}", request.RefreshToken.Length > 8 ? request.RefreshToken.Substring(0, 8) + "..." : request.RefreshToken);
-
-            // Clean up expired and revoked refresh tokens
-            await _dbContext.CleanExpiredAndRevokedTokensAsync();
-
-            if (request == null || string.IsNullOrEmpty(request.AccessToken) || string.IsNullOrEmpty(request.RefreshToken))
-            {
-                _logger.LogWarning("Invalid client request: AccessToken or RefreshToken is null or empty.");
-                return BadRequest("Invalid client request");
-            }
-
-            try
-            {
-                var savedRefreshToken = await _dbContext.RefreshTokens.SingleOrDefaultAsync(rt => rt.Token == request.RefreshToken);
-                _logger.LogInformation("Saved RefreshToken from DB - Token: {Token}", savedRefreshToken?.Token != null && savedRefreshToken.Token.Length > 8 ? savedRefreshToken.Token.Substring(0, 8) + "..." : savedRefreshToken?.Token);
-                _logger.LogInformation("Saved RefreshToken from DB - Username: {Username}", savedRefreshToken?.Username);
-                _logger.LogInformation("Saved RefreshToken from DB - IsActive: {IsActive}", savedRefreshToken?.IsActive);
-
-                if (savedRefreshToken == null)
-                {
-                    _logger.LogWarning("Invalid refresh token: Not found in DB.");
-                    return Unauthorized("Invalid refresh token");
-                }
-
-                if (savedRefreshToken.IsActive == false)
-                {
-                    _logger.LogWarning("Invalid refresh token: Not active.");
-                    return Unauthorized("Invalid refresh token");
-                }
-
-                var principal = _tokenGenerator.GetPrincipalFromExpiredToken(request.AccessToken);
-                var username = principal.Identity?.Name;
-
-                if (savedRefreshToken.Username != username)
-                {
-                    _logger.LogWarning("Invalid refresh token: Username mismatch. Saved: {SavedUsername}, From Token/Request: {UsernameFromToken}", savedRefreshToken.Username, username);
-                    return Unauthorized("Invalid refresh token");
-                }
-
-                var (newAccessToken, newRefreshTokenString) = _tokenGenerator.RefreshToken(request.AccessToken, request.RefreshToken);
-                _logger.LogInformation("New AccessToken generated.");
-                _logger.LogInformation("New RefreshToken generated.");
-
-                // Revoke old refresh token
-                savedRefreshToken.Revoked = DateTime.UtcNow;
-                _dbContext.RefreshTokens.Update(savedRefreshToken);
-                await _dbContext.SaveChangesAsync();
-                _logger.LogInformation("Old RefreshToken revoked and saved to DB.");
-
-                // Save new refresh token to database
-                var newRefreshToken = new RefreshToken
-                {
-                    Token = newRefreshTokenString,
-                    Expires = DateTime.UtcNow.AddDays(7),
-                    Created = DateTime.UtcNow,
-                    Username = username,
-                    CreatedByIp = HttpContext.Connection.RemoteIpAddress?.ToString(),
-                    ReplacedByToken = request.RefreshToken
-                };
-                _dbContext.RefreshTokens.Add(newRefreshToken);
-                await _dbContext.SaveChangesAsync();
-                _logger.LogInformation("New RefreshToken saved to DB.");
-
-                return Ok(new { AccessToken = newAccessToken, RefreshToken = newRefreshToken.Token });
-            }
-            catch (SecurityTokenException ex)
-            {
-                _logger.LogError(ex, "SecurityTokenException: {Message}", ex.Message);
-                return Unauthorized(ex.Message);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "General Exception: {Message}", ex.Message);
-                return StatusCode((int)HttpStatusCode.InternalServerError, $"An error occurred during token refresh: {ex.Message}");
-            }
-        }
-
-        [ApiExplorerSettings(IgnoreApi = true)]
-        public async Task<ValidationResult> ValidateCredentials(
-            string validationEndpoint,
-            object credentials,
-            string userType)
-        {
-            var jsonContent = new StringContent(JsonSerializer.Serialize(credentials), Encoding.UTF8, "application/json");
-            try
-            {
-                var request = new HttpRequestMessage(HttpMethod.Post, validationEndpoint) { Content = jsonContent };
-                var response = await _externalAuthServiceHttpClient.Client.SendAsync(request);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    var responseBody = await response.Content.ReadAsStringAsync();
-                    List<string> roles = new List<string>();
-                    try
-                    {
-                        // Assuming the external service returns a JSON object with a 'roles' array
-                        using (JsonDocument doc = JsonDocument.Parse(responseBody))
-                        {
-                            if (doc.RootElement.TryGetProperty("roles", out JsonElement rolesElement) && rolesElement.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (JsonElement role in rolesElement.EnumerateArray())
-                                {
-                                    roles.Add(role.GetString() ?? string.Empty);
-                                }
-                            }
-                        }
-                    }
-                    catch (JsonException ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to parse roles from external service response for {UserType}. Using default role.", userType);
-                    }
-
-                    if (!roles.Any())
-                    {
-                        roles.Add(userType); // Default role if none found or parsing failed
-                    }
-
-                    return new ValidationResult { Exists = true, UserType = userType, Roles = roles };
-                }
-                else
-                {
-                    string errorMessage = $"External authentication service returned {response.StatusCode} for {userType} validation.";
-                    _logger.LogWarning(errorMessage);
-                    return new ValidationResult { Exists = false, UserType = userType, Error = errorMessage, StatusCode = (int)response.StatusCode };
-                }
-            }
-            catch (HttpRequestException ex)
-            {
-                string errorMessage = $"HttpRequestException during {userType} validation: {ex.Message}";
-                _logger.LogError(ex, errorMessage);
-                return new ValidationResult { Exists = false, UserType = userType, Error = errorMessage };
-            }
-            catch (Exception ex)
-            {
-                string errorMessage = $"An unexpected error occurred during {userType} validation: {ex.Message}";
-                _logger.LogError(ex, errorMessage);
-                return new ValidationResult { Exists = false, UserType = userType, Error = errorMessage };
-            }
-        }
-
-        
-    private string? GetUsernameFromToken(string token)
-        {
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var jwtToken = tokenHandler.ReadToken(token) as JwtSecurityToken;
-            if (jwtToken == null)
-            {
-                _logger.LogWarning("GetUsernameFromToken: Failed to read JWT token. Token is null after ReadToken.");
-                return null;
-            }
-            return jwtToken?.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.Name)?.Value;
-        }
+        _authenticationService = authenticationService;
+        _emailVerificationService = emailVerificationService;
+        _googleIdentityNonceService = googleIdentityNonceService;
+        _configuration = configuration;
+        _logger = logger;
+        _serviceLoginRateLimiter = serviceLoginRateLimiter;
     }
 
-    public class RefreshTokenRequest
+    /// <summary>
+    /// Authenticates a user with email and password.
+    /// </summary>
+    /// <remarks>
+    /// Primary entry point for users to log into the MALIEV platform.
+    /// **Process:**
+    /// 1. Verifies credentials against the database.
+    /// 2. Resolves principal roles and permissions via the IAM Service.
+    /// 3. Issues a JWT access token containing these permissions.
+    /// 4. Issues a secure refresh token for session persistence.
+    /// **Security:**
+    /// - Subject to rate limiting (IP-based).
+    /// - Implements account lockout after multiple failed attempts.
+    /// </remarks>
+    /// <param name="request">The login request containing user credentials.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Authentication response with JWT and refresh tokens.</returns>
+    /// <response code="200">Successful login. Returns access and refresh tokens.</response>
+    /// <response code="401">Invalid credentials.</response>
+    /// <response code="423">Account is locked due to too many failed attempts.</response>
+    /// <response code="429">Too many requests from this IP address.</response>
+    [HttpPost("login")]
+    public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
     {
-        public required string AccessToken { get; set; }
-        public required string RefreshToken { get; set; }
+
+        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        _logger.LogInformation("AuthenticateAsync called with IP: {IpAddress}", ipAddress ?? "null");
+        var result = await _authenticationService.AuthenticateAsync(request, ipAddress);
+
+        if (!result.Success)
+        {
+            if (result.ErrorCode == "account_locked")
+            {
+                return StatusCode(423, new
+                {
+                    error = result.ErrorCode,
+                    error_description = result.ErrorDescription,
+                    locked_until = result.LockedUntil?.ToString("o")
+                });
+            }
+
+            if (result.ErrorCode == "rate_limit_exceeded")
+            {
+                if (result.RetryAfter.HasValue)
+                {
+                    var retryAfterSeconds = (int)(result.RetryAfter.Value - DateTime.UtcNow).TotalSeconds;
+                    Response.Headers["Retry-After"] = retryAfterSeconds.ToString();
+                }
+
+                return StatusCode(429, new ErrorResponse
+                {
+                    Error = result.ErrorCode ?? "rate_limit_exceeded",
+                    ErrorDescription = result.ErrorDescription ?? "Too many requests"
+                });
+            }
+
+            return Unauthorized(new ErrorResponse
+            {
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
+            });
+        }
+
+        return Ok(result.Response);
+    }
+
+    /// <summary>
+    /// Refreshes an authentication token.
+    /// </summary>
+    /// <remarks>
+    /// Used when an access token (JWT) has expired. Exchange a valid refresh token for a new access token and a new refresh token (rotation).
+    /// </remarks>
+    /// <param name="request">The refresh request containing the refresh token.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>A new set of JWT and refresh tokens.</returns>
+    /// <response code="200">Tokens refreshed successfully.</response>
+    /// <response code="401">If the refresh token is invalid, expired, or has already been used.</response>
+    [HttpPost("refresh")]
+    public async Task<IActionResult> Refresh([FromBody] RefreshRequest request, CancellationToken cancellationToken)
+    {
+
+        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var result = await _authenticationService.RefreshTokenAsync(request, ipAddress);
+
+        if (result == null)
+        {
+            return Unauthorized(new ErrorResponse
+            {
+                Error = "invalid_token",
+                ErrorDescription = "Invalid or expired refresh token"
+            });
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Validates a JWT access token.
+    /// </summary>
+    /// <remarks>
+    /// Internal endpoint used by other microservices to verify that a token is valid, hasn't been revoked, and to see its associated claims.
+    /// </remarks>
+    /// <param name="request">The validate request containing the access token.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>The validation result.</returns>
+    /// <response code="200">Returns token validity status and payload.</response>
+    [HttpPost("validate")]
+    public async Task<IActionResult> Validate([FromBody] ValidateRequest request, CancellationToken cancellationToken)
+    {
+
+        var result = await _authenticationService.ValidateTokenAsync(request);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Revokes a refresh token.
+    /// </summary>
+    /// <remarks>
+    /// Manually invalidates a refresh token. Useful for administrative session termination.
+    /// </remarks>
+    /// <param name="request">The revoke request containing the refresh token.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Success status.</returns>
+    /// <response code="204">Token successfully revoked.</response>
+    /// <response code="400">If the token is invalid or cannot be revoked.</response>
+    [HttpPost("revoke")]
+    public async Task<IActionResult> Revoke([FromBody] RevokeRequest request, CancellationToken cancellationToken)
+    {
+
+        var result = await _authenticationService.RevokeTokenAsync(request);
+
+        if (!result)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = "revocation_failed",
+                ErrorDescription = "Failed to revoke token"
+            });
+        }
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Logs a user out.
+    /// </summary>
+    /// <remarks>
+    /// The recommended way to end a user session. Invalidates the provided refresh token.
+    /// </remarks>
+    /// <param name="request">The logout request containing the refresh token.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Success status.</returns>
+    /// <response code="204">Logged out successfully.</response>
+    /// <response code="401">If the token was already invalid.</response>
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout([FromBody] LogoutRequest request, CancellationToken cancellationToken)
+    {
+
+        var result = await _authenticationService.LogoutAsync(request);
+
+        if (!result)
+        {
+            return Unauthorized(new ErrorResponse
+            {
+                Error = "invalid_token",
+                ErrorDescription = "Invalid refresh token"
+            });
+        }
+
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Authenticates a service using client credentials.
+    /// </summary>
+    /// <remarks>
+    /// Machine-to-machine authentication using a `client_id` and `client_secret` (API Key).
+    /// </remarks>
+    /// <param name="request">The service login request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Service authentication response with a JWT.</returns>
+    /// <response code="200">Successful authentication.</response>
+    /// <response code="401">Invalid client credentials.</response>
+    [HttpPost("service/login")]
+    [RequestSizeLimit(4096)]
+    public async Task<IActionResult> ServiceLogin([FromBody] ServiceLoginRequest request, CancellationToken cancellationToken)
+    {
+        var remoteIpAddress = HttpContext.Connection.RemoteIpAddress;
+        var rateLimit = await _serviceLoginRateLimiter.TryAcquireAsync(
+            request.ClientId,
+            remoteIpAddress,
+            cancellationToken);
+        if (!rateLimit.IsAvailable)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ErrorResponse
+            {
+                Error = "service_unavailable",
+                ErrorDescription = "Service authentication is temporarily unavailable"
+            });
+        }
+
+        if (!rateLimit.IsAllowed)
+        {
+            Response.Headers.RetryAfter = rateLimit.RetryAfterSeconds.ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+            return StatusCode(StatusCodes.Status429TooManyRequests, new ErrorResponse
+            {
+                Error = "rate_limit_exceeded",
+                ErrorDescription = "Too many service authentication attempts"
+            });
+        }
+
+        var ipAddress = remoteIpAddress?.ToString();
+        var result = await _authenticationService.AuthenticateServiceAsync(
+            request,
+            ipAddress,
+            cancellationToken);
+
+        if (!result.Success)
+        {
+            if (result.ErrorCode == "service_unavailable")
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
+            return Unauthorized(new ErrorResponse
+            {
+                Error = "invalid_credentials",
+                ErrorDescription = "Invalid client credentials"
+            });
+        }
+
+        return Ok(result.Response);
+    }
+
+    /// <summary>
+    /// Exchanges a Google Identity Services credential for an employee platform JWT.
+    /// </summary>
+    /// <remarks>
+    /// Used by an authenticated Intranet BFF after it receives a raw GIS credential.
+    /// AuthService validates the credential signature, issuer, expiry, configured audience,
+    /// verified email, and hosted domain before using any identity claims.
+    ///
+    /// **Process:**
+    /// 1. Validates email is @maliev.com domain.
+    /// 2. Looks up employee by email in EmployeeService.
+    /// 3. Resolves permissions from IAM Service.
+    /// 4. Issues JWT with embedded permissions.
+    /// 5. Issues refresh token for session persistence.
+    ///
+    /// **Auto-Provisioning:**
+    /// If employee doesn't exist, triggers auto-provisioning with minimal permissions.
+    /// </remarks>
+    /// <param name="request">The Google exchange request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Authentication response with JWT and refresh tokens.</returns>
+    /// <response code="200">Successful exchange. Returns access and refresh tokens.</response>
+    /// <response code="403">Non-@maliev.com email or inactive employee account.</response>
+    /// <response code="503">EmployeeService unavailable.</response>
+    [HttpPost("exchange/google")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ExchangeGoogleToken([FromBody] GoogleExchangeRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetBoundGoogleExchangeCaller(
+                GoogleIdentityExchangeType.Employee,
+                request.Application,
+                out var serviceName))
+        {
+            return Forbid();
+        }
+
+        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        var result = await _authenticationService.ExchangeGoogleTokenAsync(
+            request,
+            ipAddress,
+            serviceName,
+            cancellationToken);
+
+        if (!result.Success)
+        {
+            if (result.ErrorCode == "employee_not_found" || result.ErrorCode == "inactive_account")
+            {
+                return StatusCode(403, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
+            if (result.ErrorCode == "invalid_domain")
+            {
+                return StatusCode(403, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
+            if (result.ErrorCode == "service_unavailable")
+            {
+                return StatusCode(503, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
+            if (result.ErrorCode == "provision_failed")
+            {
+                return StatusCode(403, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
+            return Unauthorized(new ErrorResponse
+            {
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
+            });
+        }
+
+        return Ok(result.Response);
+    }
+
+    /// <summary>
+    /// Exchanges a Google Identity Services credential for a customer JWT.
+    /// </summary>
+    /// <remarks>
+    /// Used by an authenticated customer-facing BFF after it receives a raw GIS credential.
+    /// Customer Google accounts are not restricted to the MALIEV Workspace domain.
+    /// </remarks>
+    /// <param name="request">The customer Google exchange request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Authentication response with JWT and refresh tokens.</returns>
+    /// <response code="200">Successful exchange. Returns access and refresh tokens.</response>
+    /// <response code="401">Google identity is invalid or unverified.</response>
+    /// <response code="503">CustomerService or IAM is unavailable.</response>
+    [HttpPost("exchange/google/customer")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ExchangeCustomerGoogleToken([FromBody] CustomerGoogleExchangeRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetBoundGoogleExchangeCaller(
+                GoogleIdentityExchangeType.Customer,
+                request.Application,
+                out var serviceName))
+        {
+            return Forbid();
+        }
+
+        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var result = await _authenticationService.ExchangeCustomerGoogleTokenAsync(
+            request,
+            ipAddress,
+            serviceName,
+            cancellationToken);
+
+        if (!result.Success)
+        {
+            if (result.ErrorCode == "service_unavailable")
+            {
+                return StatusCode(503, new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
+            if (result.ErrorCode == "account_verification_required")
+            {
+                return Conflict(new ErrorResponse
+                {
+                    Error = result.ErrorCode,
+                    ErrorDescription = result.ErrorDescription!
+                });
+            }
+
+            return Unauthorized(new ErrorResponse
+            {
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
+            });
+        }
+
+        return Ok(result.Response);
+    }
+
+    /// <summary>Issues a one-time nonce for the employee Google exchange.</summary>
+    [HttpPost("exchange/google/nonce")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(GoogleIdentityNonceResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> IssueEmployeeGoogleNonce(
+        [FromBody] GoogleIdentityNonceRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await IssueGoogleNonceAsync(
+            request,
+            GoogleIdentityExchangeType.Employee,
+            cancellationToken);
+    }
+
+    /// <summary>Issues a one-time nonce for the customer Google exchange.</summary>
+    [HttpPost("exchange/google/customer/nonce")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(GoogleIdentityNonceResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> IssueCustomerGoogleNonce(
+        [FromBody] GoogleIdentityNonceRequest request,
+        CancellationToken cancellationToken)
+    {
+        return await IssueGoogleNonceAsync(
+            request,
+            GoogleIdentityExchangeType.Customer,
+            cancellationToken);
+    }
+
+    private async Task<IActionResult> IssueGoogleNonceAsync(
+        GoogleIdentityNonceRequest request,
+        GoogleIdentityExchangeType exchangeType,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetBoundGoogleExchangeCaller(exchangeType, request.Application, out var serviceName))
+        {
+            return Forbid();
+        }
+
+        var issued = await _googleIdentityNonceService.IssueAsync(
+            serviceName,
+            request.Application,
+            exchangeType,
+            cancellationToken);
+        return Ok(new GoogleIdentityNonceResponse
+        {
+            Nonce = issued.Nonce,
+            ExpiresAtUtc = issued.ExpiresAtUtc
+        });
+    }
+
+    private bool TryGetBoundGoogleExchangeCaller(
+        GoogleIdentityExchangeType exchangeType,
+        string application,
+        out string serviceName)
+    {
+        var userType = User.FindFirst("user_type")?.Value;
+        serviceName = User.FindFirst("service_name")?.Value ?? string.Empty;
+        var applicationSelector = application.Trim().ToLowerInvariant();
+        var configuredServiceName = _configuration[
+            $"GoogleIdentity:Bindings:{exchangeType}:{applicationSelector}"];
+        var allowed = string.Equals(userType, "service", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(serviceName) &&
+            !string.IsNullOrWhiteSpace(configuredServiceName) &&
+            string.Equals(serviceName, configuredServiceName, StringComparison.OrdinalIgnoreCase);
+        if (!allowed)
+        {
+            _logger.LogWarning(
+                "Rejected {ExchangeType} Google identity exchange for application {Application} from service caller {ServiceName}",
+                exchangeType,
+                applicationSelector,
+                string.IsNullOrWhiteSpace(serviceName) ? "missing" : serviceName);
+        }
+
+        return allowed;
+    }
+
+    /// <summary>
+    /// Starts a customer password reset through CustomerService.
+    /// </summary>
+    /// <param name="request">The password reset request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Reset request status.</returns>
+    /// <response code="200">Reset request accepted.</response>
+    /// <response code="503">CustomerService is unavailable.</response>
+    [HttpPost("password-reset/request")]
+    [ProducesResponseType(typeof(PasswordResetResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> RequestPasswordReset([FromBody] PasswordResetRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _authenticationService.RequestPasswordResetAsync(request);
+        if (result == null)
+        {
+            return StatusCode(503, new ErrorResponse
+            {
+                Error = "service_unavailable",
+                ErrorDescription = "Customer account service is currently unavailable"
+            });
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Confirms a customer password reset through CustomerService.
+    /// </summary>
+    /// <param name="request">The password reset confirmation request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Password reset status.</returns>
+    /// <response code="200">Password reset completed.</response>
+    /// <response code="400">Reset token is invalid.</response>
+    [HttpPost("password-reset/confirm")]
+    [ProducesResponseType(typeof(ConfirmPasswordResetResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ConfirmPasswordReset([FromBody] ConfirmPasswordResetRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _authenticationService.ConfirmPasswordResetAsync(request);
+        if (result == null || !result.Reset)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = "invalid_reset_token",
+                ErrorDescription = "Invalid or expired password reset token"
+            });
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Initiates email verification for a user principal.
+    /// </summary>
+    /// <remarks>
+    /// Sends a verification email with a unique token to the specified email address.
+    /// Subsequent requests for the same principal within the cooldown period will return
+    /// a 400 with a cooldown_until timestamp.
+    /// </remarks>
+    /// <param name="request">The verification initiation request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Verification initiation result.</returns>
+    /// <response code="200">Verification email sent successfully.</response>
+    /// <response code="400">Verification already initiated within cooldown period.</response>
+    [HttpPost("initiate-email-verification")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> InitiateEmailVerification([FromBody] InitiateVerificationRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _emailVerificationService.InitiateVerificationAsync(
+            request.PrincipalId, request.Email, request.FirstName, cancellationToken);
+
+        if (!result.Success)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
+            });
+        }
+
+        return Ok(new { message = "Verification email sent" });
+    }
+
+    /// <summary>
+    /// Verifies an email address using a verification token.
+    /// </summary>
+    /// <remarks>
+    /// Validates the provided token and, if valid, marks the associated email as verified.
+    /// Tokens are one-time use and expire after a configured duration.
+    /// </remarks>
+    /// <param name="request">The verify email request containing the token.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Verification result.</returns>
+    /// <response code="200">Email verified successfully.</response>
+    /// <response code="400">Token is invalid or expired.</response>
+    [HttpPost("verify-email")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _emailVerificationService.VerifyEmailAsync(request.Token, cancellationToken);
+
+        if (!result.Success)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
+            });
+        }
+
+        return Ok(new { message = "Email verified successfully" });
+    }
+
+    /// <summary>
+    /// Resends a verification email for a user principal.
+    /// </summary>
+    /// <remarks>
+    /// Generates a new verification token and sends a new email to the principal's
+    /// email address. Subject to the same cooldown rules as initial verification.
+    /// </remarks>
+    /// <param name="request">The resend verification request.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>Resend initiation result.</returns>
+    /// <response code="200">Verification email resent successfully.</response>
+    /// <response code="400">Resend not allowed (cooldown active or email already verified).</response>
+    [HttpPost("resend-verification-email")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResendVerificationEmail([FromBody] ResendVerificationRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _emailVerificationService.ResendVerificationAsync(request.PrincipalId, cancellationToken);
+
+        if (!result.Success)
+        {
+            return BadRequest(new ErrorResponse
+            {
+                Error = result.ErrorCode!,
+                ErrorDescription = result.ErrorDescription!
+            });
+        }
+
+        return Ok(new { message = "Verification email resent" });
+    }
+
+    /// <summary>
+    /// Checks if a user principal's email is verified.
+    /// </summary>
+    /// <param name="principalId">The principal identifier.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>The email verification status.</returns>
+    /// <response code="200">Returns the principal ID and verification status.</response>
+    [HttpGet("me")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPrincipalVerificationStatus([FromQuery] Guid principalId, CancellationToken cancellationToken)
+    {
+        var isVerified = await _emailVerificationService.IsEmailVerifiedAsync(principalId, cancellationToken);
+
+        return Ok(new { principalId, emailVerified = isVerified });
+    }
+
+    /// <summary>
+    /// Reports that passkey registration is unavailable until complete WebAuthn verification is enabled.
+    /// </summary>
+    /// <remarks>
+    /// Registration is temporarily disabled because the current implementation does not provide the
+    /// complete WebAuthn attestation and ownership verification required for safe credential enrollment.
+    /// </remarks>
+    /// <param name="request">The registration begin request containing the principal ID.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Passkey registration is unavailable.</response>
+    [HttpPost("passkey/register/begin")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public Task<IActionResult> BeginPasskeyRegistration([FromBody] PasskeyRegistrationBeginRequest request, CancellationToken cancellationToken)
+    {
+        return Task.FromResult<IActionResult>(PasskeyRegistrationUnavailable());
+    }
+
+    /// <summary>
+    /// Reports that passkey registration is unavailable until complete WebAuthn verification is enabled.
+    /// </summary>
+    /// <remarks>
+    /// Registration is temporarily disabled because the current implementation does not provide the
+    /// complete WebAuthn attestation and ownership verification required for safe credential enrollment.
+    /// </remarks>
+    /// <param name="request">The registration completion request with authenticator response.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Passkey registration is unavailable.</response>
+    [HttpPost("passkey/register/complete")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public Task<IActionResult> CompletePasskeyRegistration([FromBody] PasskeyRegistrationCompleteRequest request, CancellationToken cancellationToken)
+    {
+        return Task.FromResult<IActionResult>(PasskeyRegistrationUnavailable());
+    }
+
+    /// <summary>
+    /// Reports that the legacy v1 passkey authentication flow is unavailable.
+    /// </summary>
+    /// <remarks>
+    /// The original v1 contract accepted caller-authored identity context and cannot be safely upgraded
+    /// in place. Trusted BFF callers must migrate to the additive v2 ceremony endpoints.
+    /// </remarks>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Legacy passkey authentication is unavailable.</response>
+    [HttpPost("passkey/auth/begin")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public IActionResult BeginPasskeyAuthentication(CancellationToken cancellationToken)
+    {
+        return PasskeyAuthenticationUnavailable();
+    }
+
+    /// <summary>
+    /// Reports that the legacy v1 passkey authentication completion flow is unavailable.
+    /// </summary>
+    /// <remarks>
+    /// The additive v2 contract binds the assertion to a service caller, application audience,
+    /// exact relying-party origin, and one-time server-owned ceremony.
+    /// </remarks>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Legacy passkey authentication is unavailable.</response>
+    [HttpPost("passkey/auth/complete")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public IActionResult CompletePasskeyAuthentication(CancellationToken cancellationToken)
+    {
+        return PasskeyAuthenticationUnavailable();
+    }
+
+    /// <summary>
+    /// Reports that passkey credential management is unavailable until complete WebAuthn verification is enabled.
+    /// </summary>
+    /// <param name="principalId">The principal identifier.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Passkey credential management is unavailable.</response>
+    [HttpGet("passkey/credentials")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public Task<IActionResult> ListPasskeyCredentials([FromQuery] Guid principalId, CancellationToken cancellationToken)
+    {
+        return Task.FromResult<IActionResult>(PasskeyRegistrationUnavailable());
+    }
+
+    /// <summary>
+    /// Reports that passkey credential management is unavailable until complete WebAuthn verification is enabled.
+    /// </summary>
+    /// <param name="credentialId">The credential identifier.</param>
+    /// <param name="principalId">The principal who owns the credential.</param>
+    /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
+    /// <returns>A stable service-unavailable response.</returns>
+    /// <response code="503">Passkey credential management is unavailable.</response>
+    [HttpDelete("passkey/credentials/{credentialId}")]
+    [RequirePermission(AuthPermissions.ExchangeIdentities)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public Task<IActionResult> DeletePasskeyCredential(Guid credentialId, [FromQuery] Guid principalId, CancellationToken cancellationToken)
+    {
+        return Task.FromResult<IActionResult>(PasskeyRegistrationUnavailable());
+    }
+
+    private static ObjectResult PasskeyRegistrationUnavailable()
+    {
+        return new ObjectResult(new ErrorResponse
+        {
+            Error = "passkey_registration_unavailable",
+            ErrorDescription = "Passkey registration and credential management are temporarily unavailable"
+        })
+        {
+            StatusCode = StatusCodes.Status503ServiceUnavailable
+        };
+    }
+
+    private static ObjectResult PasskeyAuthenticationUnavailable()
+    {
+        return new ObjectResult(new ErrorResponse
+        {
+            Error = "passkey_authentication_unavailable",
+            ErrorDescription = "The legacy passkey authentication contract is unavailable; use the v2 ceremony flow"
+        })
+        {
+            StatusCode = StatusCodes.Status503ServiceUnavailable
+        };
     }
 }
