@@ -41,6 +41,9 @@ public sealed class WorkflowContractTests
         Assert.Contains("persist-credentials: false", text);
         Assert.Contains("actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0", text);
         Assert.Contains("actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68", text);
+        Assert.Contains("dotnet-version: '10.0.x'", text);
+        Assert.Contains("dotnet restore Maliev.AuthService.slnx", text);
+        Assert.DoesNotContain("Maliev.AuthService.sln ", text, StringComparison.Ordinal);
         AssertSafe(text);
     }
 
