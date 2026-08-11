@@ -16,12 +16,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Checkout exact MessagingContracts source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: MALIEV-Co-Ltd/Maliev.MessagingContracts
           ref: 9c41d6524a485bf03ba022b8170f47366ab1a77a
@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout exact ServiceDefaults source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: MALIEV-Co-Ltd/Maliev.Aspire
           ref: 979e1bcb3c3ed9c414f652c94b56297543c031b2
